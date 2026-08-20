@@ -51,6 +51,24 @@ function addInterval(dateValue: string, frequency: string, interval = 1) {
   return date.toISOString().slice(0, 10);
 }
 
+function balanceStatements(userId: string, transaction: Record<string, unknown>, direction: 1 | -1, guard?: { id: string; status: string }) {
+  const amount = Number(transaction.amount_cents) * direction;
+  const type = String(transaction.type);
+  const guarded = (sql: string, ...values: unknown[]) => guard
+    ? env.DB.prepare(`${sql} AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)` ).bind(...values, guard.id, userId, guard.status)
+    : env.DB.prepare(sql).bind(...values);
+  if (type === "income") {
+    return [guarded("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
+  }
+  if (["transfer", "saving", "investment"].includes(type)) {
+    return [
+      guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId),
+      guarded("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?", amount, transaction.destination_account_id, userId),
+    ];
+  }
+  return [guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
+}
+
 async function processAutomaticPlans(userId: string) {
   const today = new Date().toISOString().slice(0, 10);
   const plans = await env.DB.prepare(
@@ -242,6 +260,48 @@ export async function POST(request: Request) {
       await env.DB.batch(statements);
     } else if (action === "updateTransaction") {
       await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, new Date().toISOString().slice(0, 10)), payload.categoryId || null, payload.transactionId, user.userId).run();
+    } else if (action === "correctTransaction") {
+      const original = await env.DB.prepare("SELECT * FROM transactions WHERE id = ? AND user_id = ? AND status = 'posted'").bind(payload.transactionId, user.userId).first<Record<string, unknown>>();
+      if (!original) return Response.json({ error: "That transaction is no longer available to correct." }, { status: 404 });
+      const type = String(original.type);
+      if (["installment_payment", "installment_purchase"].includes(type)) return Response.json({ error: "Correct installment entries from their pay-later plan." }, { status: 409 });
+      if (type === "investment" && String(original.description) === "Spare change sweep") return Response.json({ error: "A completed spare-change sweep needs a separate balancing transaction." }, { status: 409 });
+      const oldSpare = await env.DB.prepare("SELECT status FROM spare_events WHERE transaction_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1").bind(original.id, user.userId).first<{status:string}>();
+      if (oldSpare?.status === "swept") return Response.json({ error: "This transaction’s spare change has already been swept. Add a balancing transaction instead." }, { status: 409 });
+
+      const amount = cents(payload.amount);
+      const accountId = text(payload.accountId);
+      const destinationAccountId = text(payload.destinationAccountId);
+      const moving = ["transfer", "saving", "investment"].includes(type);
+      if (!amount || !accountId || (moving && (!destinationAccountId || destinationAccountId === accountId))) return Response.json({ error: "Enter a valid amount and account selection." }, { status: 400 });
+      const matchingAccounts = await env.DB.prepare("SELECT COUNT(*) AS total FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, accountId, moving ? destinationAccountId : accountId).first<{total:number}>();
+      if (Number(matchingAccounts?.total || 0) !== (moving ? 2 : 1)) return Response.json({ error: "One of those accounts is not available." }, { status: 400 });
+      const committed = type === "expense" && bool(payload.committed);
+      const countsBudget = ["expense", "saving", "investment"].includes(type);
+      const profile = await env.DB.prepare("SELECT spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<{spare_multiplier:number; spare_destination_id:string | null}>();
+      let spare = 0;
+      if (type === "expense" && bool(payload.useSpare) && profile?.spare_destination_id) {
+        spare = ((100 - (amount % 100)) % 100) * Math.max(1, profile.spare_multiplier);
+      }
+      const replacementId = crypto.randomUUID();
+      const replacement = {
+        type,
+        amount_cents: amount,
+        account_id: accountId,
+        destination_account_id: moving ? destinationAccountId : null,
+      };
+      const correctionMarker = `correcting:${replacementId}`;
+      const statements = [
+        env.DB.prepare("UPDATE transactions SET status = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(correctionMarker, original.id, user.userId),
+        ...balanceStatements(user.userId, original, -1, { id: String(original.id), status: correctionMarker }),
+        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, recurring_plan_id, spare_change_cents, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, payload.categoryId || null, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, new Date().toISOString().slice(0, 10)), committed ? 1 : 0, countsBudget && !committed && !moving ? 1 : 0, countsBudget && !committed && !moving ? 1 : 0, countsBudget ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, original.id, original.id, user.userId, correctionMarker),
+        ...balanceStatements(user.userId, replacement, 1, { id: replacementId, status: "posted" }),
+      ];
+      if (oldSpare?.status === "pending") statements.push(env.DB.prepare("UPDATE spare_events SET status = 'cancelled' WHERE transaction_id = ? AND user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(original.id, user.userId, original.id, user.userId, correctionMarker));
+      if (spare && profile?.spare_destination_id) statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare, original.id, user.userId, correctionMarker));
+      statements.push(env.DB.prepare("UPDATE transactions SET status = 'corrected' WHERE id = ? AND user_id = ? AND status = ?").bind(original.id, user.userId, correctionMarker));
+      const results = await env.DB.batch(statements);
+      if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction was already corrected." }, { status: 409 });
     } else if (action === "addRecurring") {
       await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, end_date, auto_post, committed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), text(payload.type, "expense"), cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, text(payload.nextDate), payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0).run();
     } else if (action === "updateRecurring") {
@@ -268,10 +328,35 @@ export async function POST(request: Request) {
       }
       await env.DB.batch(statements);
     } else if (action === "updateInstallmentPlan") {
-      await env.DB.batch([
-        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, payment_account_id = ?, linked_credit_account_id = ?, include_daily_weekly = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
-        env.DB.prepare("UPDATE transactions SET description = ? WHERE user_id = ? AND installment_plan_id = ? AND type = 'installment_purchase'").bind(text(payload.title, "Pay-later plan"), user.userId, payload.planId),
-      ]);
+      const plan = await env.DB.prepare("SELECT * FROM installment_plans WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId).first<Record<string, unknown>>();
+      if (!plan) return Response.json({ error: "That pay-later plan is no longer active." }, { status: 404 });
+      const paid = await env.DB.prepare("SELECT COUNT(*) AS paid_count, COALESCE(SUM(amount_cents), 0) AS paid_cents FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'").bind(payload.planId, user.userId).first<{paid_count:number; paid_cents:number}>();
+      const paidCount = Number(paid?.paid_count || 0);
+      const paidCents = Number(paid?.paid_cents || 0);
+      if (paidCount >= 120) return Response.json({ error: "This plan has reached the 120-payment limit and cannot add another payment." }, { status: 409 });
+      const total = cents(payload.total);
+      const nextDueDate = text(payload.nextDueDate);
+      const frequency = text(payload.frequency, "monthly") === "weekly" ? "weekly" : "monthly";
+      const remainingCount = Math.max(1, Math.min(120 - paidCount, Math.round(Number(payload.remainingCount) || 1)));
+      if (!total || total <= paidCents || !nextDueDate || !payload.paymentAccountId) return Response.json({ error: paidCount ? "The corrected total must be greater than the amount already paid." : "Enter a valid total, schedule, and repayment account." }, { status: 400 });
+      const repaymentAccount = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND user_id = ? AND archived = 0").bind(payload.paymentAccountId, user.userId).first();
+      if (!repaymentAccount) return Response.json({ error: "Choose an active repayment account." }, { status: 400 });
+      if (payload.linkedCreditAccountId) {
+        const creditAccount = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND user_id = ? AND archived = 0 AND type = 'credit'").bind(payload.linkedCreditAccountId, user.userId).first();
+        if (!creditAccount) return Response.json({ error: "Choose an active credit account or leave the plan standalone." }, { status: 400 });
+      }
+      const remainingTotal = total - paidCents;
+      const base = Math.floor(remainingTotal / remainingCount);
+      const statements = [
+        env.DB.prepare("DELETE FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
+        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, total_cents = ?, paid_cents = ?, installment_count = ?, first_due_date = ?, frequency = ?, payment_account_id = ?, linked_credit_account_id = ?, include_daily_weekly = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, total, paidCents, paidCount + remainingCount, paidCount ? plan.first_due_date : nextDueDate, frequency, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
+        env.DB.prepare("UPDATE transactions SET description = ?, amount_cents = CASE WHEN type = 'installment_purchase' THEN ? ELSE amount_cents END WHERE user_id = ? AND installment_plan_id = ? AND status = 'posted'").bind(text(payload.title, "Pay-later plan"), total, user.userId, payload.planId),
+      ];
+      for (let index = 0; index < remainingCount; index += 1) {
+        const amount = index === remainingCount - 1 ? remainingTotal - base * (remainingCount - 1) : base;
+        statements.push(env.DB.prepare("INSERT INTO installment_payments (id, user_id, plan_id, sequence, due_date, amount_cents) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, payload.planId, paidCount + index + 1, addInterval(nextDueDate, frequency, index), amount));
+      }
+      await env.DB.batch(statements);
     } else if (action === "archiveInstallmentPlan") {
       await env.DB.batch([
         env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),

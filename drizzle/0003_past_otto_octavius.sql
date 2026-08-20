@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `replaces_transaction_id` text;

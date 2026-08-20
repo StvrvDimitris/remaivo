@@ -358,6 +358,11 @@ button { color: inherit; }
 .locked-summary { min-height: 66px; padding: 13px 15px; border: 1px solid #dfe3da; border-radius: 12px; display: grid; gap: 5px; align-content: center; background: #f3f6ef; }
 .locked-summary span { color: var(--ink); font-size: 14px; font-weight: 900; }
 .locked-summary small { color: #788680; font-size: 8px; line-height: 1.45; }
+.correction-note { padding: 13px 15px; border-radius: 12px; display: flex; gap: 11px; background: #e7efe4; }
+.correction-note > span { color: var(--green); font-size: 18px; }
+.correction-note p { margin: 0; display: grid; gap: 4px; }
+.correction-note strong { font-size: 9px; }
+.correction-note small { color: #687a74; font-size: 8px; line-height: 1.5; }
 .archive-zone { margin-top: 20px; padding-top: 18px; border-top: 1px solid #e6e7df; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .archive-zone > span { display: grid; gap: 4px; }
 .archive-zone strong { font-size: 9px; }
