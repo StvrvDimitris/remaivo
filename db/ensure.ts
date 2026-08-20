@@ -52,9 +52,11 @@ export function ensureFinanceSchema() {
           if (!(error instanceof Error) || !error.message.toLowerCase().includes("duplicate column")) throw error;
         }
       }
-      await env.DB.prepare("UPDATE budget_rules SET parent_period = CASE period WHEN 'daily' THEN 'weekly' WHEN 'weekly' THEN 'monthly' WHEN 'monthly' THEN 'general' ELSE NULL END WHERE parent_period IS NULL").run();
+      await env.DB.prepare("UPDATE budget_rules SET parent_period = CASE period WHEN 'daily' THEN 'weekly' WHEN 'weekly' THEN 'monthly' ELSE NULL END WHERE parent_period IS NULL").run();
+      await env.DB.prepare("UPDATE budget_rules SET source_type = 'manual', parent_period = NULL WHERE period = 'monthly'").run();
+      await env.DB.prepare("UPDATE budget_rules SET active = 0 WHERE period = 'general'").run();
       if (budgetColumnsAdded) {
-        await env.DB.prepare("UPDATE budget_rules SET include_committed = 1, include_savings = 1, include_investments = 1 WHERE period IN ('monthly', 'general')").run();
+        await env.DB.prepare("UPDATE budget_rules SET include_committed = 1, include_savings = 1, include_investments = 1 WHERE period = 'monthly'").run();
       }
       await env.DB.prepare("PRAGMA optimize").run();
     })();

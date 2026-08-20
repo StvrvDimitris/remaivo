@@ -99,7 +99,7 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? AND archived = 0 ORDER BY kind, name").bind(user.userId),
     env.DB.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, created_at DESC LIMIT 250").bind(user.userId),
-    env.DB.prepare("SELECT * FROM budget_rules WHERE user_id = ? ORDER BY CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END").bind(user.userId),
+    env.DB.prepare("SELECT * FROM budget_rules WHERE user_id = ? AND period IN ('daily', 'weekly', 'monthly') ORDER BY CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 ELSE 3 END").bind(user.userId),
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? ORDER BY due_date").bind(user.userId),
@@ -164,11 +164,11 @@ export async function POST(request: Request) {
       }
       const budgetInput = (payload.budgets ?? {}) as JsonObject;
       const carryInput = (payload.carryModes ?? {}) as JsonObject;
-      for (const period of ["daily", "weekly", "monthly", "general"]) {
+      for (const period of ["daily", "weekly", "monthly"]) {
         const derived = period === "daily" || period === "weekly";
-        const parent = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : period === "monthly" ? "general" : null;
-        const reset = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : period === "monthly" ? "yearly" : "none";
-        const broadPool = period === "monthly" || period === "general";
+        const parent = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : null;
+        const reset = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : "yearly";
+        const broadPool = period === "monthly";
         statements.push(env.DB.prepare("INSERT OR REPLACE INTO budget_rules (id, user_id, period, base_cents, carry_mode, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'adaptive', 10000, ?, 1, ?, ?, ?, 1)").bind(crypto.randomUUID(), user.userId, period, cents(budgetInput[period]), derived ? "reset" : text(carryInput[period], "reset"), today, derived ? "derived" : "manual", parent, reset, broadPool ? 1 : 0, broadPool ? 1 : 0, broadPool ? 1 : 0));
       }
       await env.DB.batch(statements);
@@ -235,12 +235,16 @@ export async function POST(request: Request) {
       ]);
     } else if (action === "updateBudget") {
       const period = text(payload.period, "daily");
-      const sourceType = text(payload.sourceType, "manual") === "derived" && period !== "general" ? "derived" : "manual";
+      if (!["daily", "weekly", "monthly"].includes(period)) return Response.json({ error: "Unknown budget window." }, { status: 400 });
+      const sourceType = text(payload.sourceType, "manual") === "derived" && period !== "monthly" ? "derived" : "manual";
       const calculationMode = ["adaptive", "fixed_split", "percentage"].includes(text(payload.calculationMode)) ? text(payload.calculationMode) : "adaptive";
       const percentageBasisPoints = Math.max(1, Math.min(10000, Math.round((Number(payload.percentage) || 100) * 100)));
-      const parentDefaults: Record<string, string | null> = { daily: "weekly", weekly: "monthly", monthly: "general", general: null };
-      const hardResetDefaults: Record<string, string> = { daily: "weekly", weekly: "monthly", monthly: "yearly", general: "none" };
+      const parentDefaults: Record<string, string | null> = { daily: "weekly", weekly: "monthly", monthly: null };
+      const hardResetDefaults: Record<string, string> = { daily: "weekly", weekly: "monthly", monthly: "yearly" };
       await env.DB.prepare("INSERT INTO budget_rules (id, user_id, period, base_cents, carry_mode, carry_cap_cents, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, period) DO UPDATE SET base_cents = excluded.base_cents, carry_mode = excluded.carry_mode, carry_cap_cents = excluded.carry_cap_cents, anchor_date = excluded.anchor_date, source_type = excluded.source_type, parent_period = excluded.parent_period, calculation_mode = excluded.calculation_mode, percentage_basis_points = excluded.percentage_basis_points, hard_reset = excluded.hard_reset, include_everyday = excluded.include_everyday, include_committed = excluded.include_committed, include_savings = excluded.include_savings, include_investments = excluded.include_investments, active = excluded.active").bind(crypto.randomUUID(), user.userId, period, cents(payload.base), text(payload.carryMode, "reset"), cents(payload.carryCap) || null, text(payload.anchorDate, new Date().toISOString().slice(0, 10)), sourceType, sourceType === "derived" ? text(payload.parentPeriod, parentDefaults[period] ?? "") || parentDefaults[period] : parentDefaults[period], calculationMode, percentageBasisPoints, text(payload.hardReset, hardResetDefaults[period] ?? "none"), bool(payload.includeEveryday, true) ? 1 : 0, bool(payload.includeCommitted) ? 1 : 0, bool(payload.includeSavings) ? 1 : 0, bool(payload.includeInvestments) ? 1 : 0, bool(payload.enabled, true) ? 1 : 0).run();
+    } else if (action === "updateWeekStart") {
+      const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
+      await env.DB.prepare("UPDATE profiles SET week_start = ? WHERE user_id = ?").bind(weekStart, user.userId).run();
     } else if (action === "updateSpare") {
       await env.DB.prepare("UPDATE profiles SET spare_multiplier = ?, spare_destination_id = ?, spare_sweep_mode = ?, spare_threshold_cents = ? WHERE user_id = ?").bind(Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), payload.destinationAccountId || null, text(payload.sweepMode, "threshold"), cents(payload.threshold), user.userId).run();
     } else if (action === "sweepSpare") {

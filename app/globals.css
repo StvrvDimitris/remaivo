@@ -212,7 +212,7 @@ button { color: inherit; }
 .budget-explainer > div { max-width: 620px; }
 .budget-explainer h2 { margin: 6px 0 10px; font-size: 30px; letter-spacing: -.045em; }
 .budget-explainer > div > p:last-child { margin: 0; color: #687a74; font-size: 11px; line-height: 1.6; }
-.budget-rule-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.budget-rule-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .budget-rule-grid > article { min-width: 0; padding: 22px; border-radius: 17px; background: var(--paper); box-shadow: 0 12px 36px rgba(28,49,43,.04); }
 .budget-rule-grid > article.budget-rule-disabled { opacity: .62; box-shadow: none; }
 .budget-rule-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -383,7 +383,7 @@ button { color: inherit; }
 .setup-accounts article > label input { width: 100%; border: 0; }
 .setup-accounts article > button { border: 0; background: transparent; color: #9b6a5b; cursor: pointer; }
 .add-account-line { min-height: 40px; border: 1px dashed #c8cec4; border-radius: 10px; background: transparent; color: var(--green); font-size: 9px; font-weight: 900; cursor: pointer; }
-.setup-budget-grid { margin-top: 24px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.setup-budget-grid { margin-top: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .setup-budget-grid article { padding: 17px; border-radius: 14px; background: var(--paper); box-shadow: 0 8px 26px rgba(28,49,43,.04); }
 .setup-budget-grid article > span { width: 31px; height: 31px; border-radius: 9px; display: grid; place-items: center; background: #e9efe5; font-size: 9px; font-weight: 900; }
 .setup-budget-grid article > strong { display: block; margin: 10px 0 16px; font-size: 10px; text-transform: capitalize; }
