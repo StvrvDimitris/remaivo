@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
-interface PaceEnvironment {
+interface RemaivoEnvironment {
   DB: D1Database;
   ASSETS: Fetcher;
   IMAGES: {
@@ -12,9 +12,9 @@ interface PaceEnvironment {
 }
 
 declare global {
-  interface Env extends PaceEnvironment {}
+  interface Env extends RemaivoEnvironment {}
   namespace Cloudflare {
-    interface Env extends PaceEnvironment {}
+    interface Env extends RemaivoEnvironment {}
   }
 }
 

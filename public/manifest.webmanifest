@@ -1,6 +1,7 @@
 {
-  "name": "Pace Personal Finance",
-  "short_name": "Pace",
+  "id": "/",
+  "name": "Remaivo Personal Finance",
+  "short_name": "Remaivo",
   "description": "Know what you can spend across budgets, accounts, plans, savings, and investments.",
   "start_url": "/",
   "scope": "/",
@@ -11,19 +12,19 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/pace-icon-192.png",
+      "src": "/remaivo-v1-icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pace-icon-512.png",
+      "src": "/remaivo-v1-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pace-icon-maskable-512.png",
+      "src": "/remaivo-v1-icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

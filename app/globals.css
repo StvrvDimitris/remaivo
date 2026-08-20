@@ -41,9 +41,9 @@ button { color: inherit; }
 }
 
 .brand-mark { display: flex; align-items: center; gap: 12px; padding: 0 8px 34px; font-size: 20px; letter-spacing: -.03em; }
-.brand-mark > .pace-logo-mark { width: 34px; height: 34px; border-radius: 11px; flex: 0 0 34px; }
+.brand-mark > .remaivo-logo-mark { width: 34px; height: 34px; border-radius: 11px; flex: 0 0 34px; }
 .brand-mark strong { font-size: 22px; }
-.pace-logo-mark { display: block; background: var(--ink) url("/pace-icon-512.png") center / 118% no-repeat; }
+.remaivo-logo-mark { display: block; background: var(--ink) url("/remaivo-v1-icon-512.png") center / 118% no-repeat; }
 
 .sidebar nav { display: grid; gap: 5px; }
 .nav-item { min-height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 12px; color: #b9cbc5; text-decoration: none; border-radius: 10px; font-size: 14px; font-weight: 700; }
@@ -449,7 +449,7 @@ button { color: inherit; }
   .sidebar { width: 82px; padding-inline: 14px; }
   .brand-mark strong, .nav-item:not(.active)::after, .nav-item { font-size: 0; }
   .brand-mark { padding-inline: 10px; }
-  .brand-mark > .pace-logo-mark { flex: 0 0 34px; }
+  .brand-mark > .remaivo-logo-mark { flex: 0 0 34px; }
   .nav-item { justify-content: center; }
   .nav-item span { font-size: 18px; }
   .mini-goal, .profile > span:nth-child(2), .profile b { display: none; }

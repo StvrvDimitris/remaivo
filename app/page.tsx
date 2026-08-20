@@ -11,9 +11,9 @@ export default async function Home() {
     return (
       <main className="signin-screen">
         <section className="signin-card">
-          <span className="signin-logo pace-logo-mark" aria-hidden="true" />
-          <p className="eyebrow">PACE PERSONAL FINANCE</p>
-          <h1>Your money, at your pace.</h1>
+          <span className="signin-logo remaivo-logo-mark" aria-hidden="true" />
+          <p className="eyebrow">REMAIVO PERSONAL FINANCE</p>
+          <h1>Know what’s left.</h1>
           <p>Sign in securely to see your private accounts, budgets, plans, and progress on every device.</p>
           <a className="primary-button signin-button" href={chatGPTSignInPath("/")}>Sign in with ChatGPT <span>→</span></a>
           <small>Your finance data stays connected to this Site and your signed-in account.</small>
