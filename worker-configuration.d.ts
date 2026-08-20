@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-object-type */
 interface PaceEnvironment {
   DB: D1Database;
   ASSETS: Fetcher;
