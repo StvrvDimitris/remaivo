@@ -257,6 +257,8 @@ button { color: inherit; }
 .installment-top small, .installment-bottom { color: #84908c; font-size: 8px; }
 .installment-top > b { font-size: 11px; }
 .installment-bottom { margin-bottom: 12px; }
+.plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.danger-link { color: #a35b51 !important; }
 
 .spare-hero { min-height: 250px; padding: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; overflow: hidden; position: relative; background: var(--green); color: #fff; }
 .spare-hero > div:first-child { max-width: 530px; position: relative; z-index: 1; }

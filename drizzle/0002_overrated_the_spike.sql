@@ -1,0 +1,1 @@
+ALTER TABLE `installment_plans` ADD `auto_post` integer DEFAULT false NOT NULL;

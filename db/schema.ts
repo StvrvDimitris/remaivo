@@ -122,6 +122,7 @@ export const installmentPlans = sqliteTable("installment_plans", {
   paymentAccountId: text("payment_account_id").notNull(),
   linkedCreditAccountId: text("linked_credit_account_id"),
   includeDailyWeekly: integer("include_daily_weekly", { mode: "boolean" }).notNull().default(false),
+  autoPost: integer("auto_post", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_installment_plans_user_status").on(table.userId, table.status)]);

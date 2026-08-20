@@ -87,6 +87,35 @@ async function processAutomaticPlans(userId: string) {
   }
 }
 
+async function recordInstallmentPayment(userId: string, paymentId: string, date: string) {
+  const payment = await env.DB.prepare(
+    "SELECT ip.*, p.title, p.payment_account_id, p.include_daily_weekly FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.id = ? AND ip.user_id = ? AND ip.status != 'paid'",
+  ).bind(paymentId, userId).first<Record<string, unknown>>();
+  if (!payment) return false;
+
+  const transactionId = crypto.randomUUID();
+  const amount = Number(payment.amount_cents);
+  const planId = String(payment.plan_id);
+  const includeDailyWeekly = Number(payment.include_daily_weekly) === 1 ? 1 : 0;
+  const results = await env.DB.batch([
+    env.DB.prepare("UPDATE installment_payments SET status = 'paid', paid_transaction_id = ? WHERE id = ? AND user_id = ? AND status != 'paid'").bind(transactionId, paymentId, userId),
+    env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) SELECT ?, ?, ?, 'installment_payment', ?, ?, ?, 1, ?, ?, 1, 1, ? WHERE EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(transactionId, userId, payment.payment_account_id, payment.title, amount, date, includeDailyWeekly, includeDailyWeekly, planId, paymentId, userId, transactionId),
+    env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(amount, payment.payment_account_id, userId, paymentId, userId, transactionId),
+    env.DB.prepare("UPDATE installment_plans SET paid_cents = COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0), status = CASE WHEN COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0) >= total_cents THEN 'complete' ELSE 'active' END WHERE id = ? AND user_id = ?").bind(planId, userId, planId, userId, planId, userId),
+  ]);
+  return Number(results[0].meta.changes) > 0;
+}
+
+async function processAutomaticInstallments(userId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const due = await env.DB.prepare(
+    "SELECT ip.id, ip.due_date FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.user_id = ? AND ip.status != 'paid' AND ip.due_date <= ? AND p.status = 'active' AND p.auto_post = 1 ORDER BY ip.due_date LIMIT 120",
+  ).bind(userId, today).all<Record<string, unknown>>();
+  for (const payment of due.results) {
+    await recordInstallmentPayment(userId, String(payment.id), String(payment.due_date));
+  }
+}
+
 async function snapshot(user: FinanceUser) {
   await ensureFinanceSchema();
   const profile = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
@@ -95,6 +124,7 @@ async function snapshot(user: FinanceUser) {
   }
 
   await processAutomaticPlans(user.userId);
+  await processAutomaticInstallments(user.userId);
   const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? AND archived = 0 ORDER BY kind, name").bind(user.userId),
@@ -214,7 +244,7 @@ export async function POST(request: Request) {
       const base = Math.floor(total / count);
       const custom = Array.isArray(payload.customAmounts) ? payload.customAmounts.map(cents) : [];
       const statements = [
-        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, include_daily_weekly) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, payload.categoryId || null, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0),
+        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, include_daily_weekly, auto_post) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, payload.categoryId || null, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0),
         env.DB.prepare("INSERT INTO transactions (id, user_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) VALUES (?, ?, ?, 'installment_purchase', ?, ?, ?, 1, 0, 0, 0, 0, ?)").bind(crypto.randomUUID(), user.userId, payload.categoryId || null, text(payload.title), total, text(payload.purchaseDate, new Date().toISOString().slice(0, 10)), planId),
       ];
       for (let index = 0; index < count; index += 1) {
@@ -223,15 +253,16 @@ export async function POST(request: Request) {
       }
       await env.DB.batch(statements);
     } else if (action === "payInstallment") {
-      const payment = await env.DB.prepare("SELECT ip.*, p.title, p.payment_account_id, p.include_daily_weekly, p.total_cents FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.id = ? AND ip.user_id = ? AND ip.status != 'paid'").bind(payload.paymentId, user.userId).first<Record<string, unknown>>();
-      if (!payment) return Response.json({ error: "Installment not found or already paid." }, { status: 404 });
-      const transactionId = crypto.randomUUID();
-      const amount = Number(payment.amount_cents);
+      const recorded = await recordInstallmentPayment(user.userId, text(payload.paymentId), text(payload.date, new Date().toISOString().slice(0, 10)));
+      if (!recorded) return Response.json({ error: "Installment not found or already paid." }, { status: 404 });
+    } else if (action === "deleteInstallmentPlan") {
+      const planId = text(payload.planId);
+      if (!planId) return Response.json({ error: "Plan is required." }, { status: 400 });
       await env.DB.batch([
-        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) VALUES (?, ?, ?, 'installment_payment', ?, ?, ?, 1, ?, ?, 1, 1, ?)").bind(transactionId, user.userId, payment.payment_account_id, payment.title, amount, text(payload.date, new Date().toISOString().slice(0, 10)), payment.include_daily_weekly, payment.include_daily_weekly, payment.plan_id),
-        env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payment.payment_account_id, user.userId),
-        env.DB.prepare("UPDATE installment_payments SET status = 'paid', paid_transaction_id = ? WHERE id = ? AND user_id = ?").bind(transactionId, payload.paymentId, user.userId),
-        env.DB.prepare("UPDATE installment_plans SET paid_cents = paid_cents + ?, status = CASE WHEN paid_cents + ? >= total_cents THEN 'complete' ELSE status END WHERE id = ? AND user_id = ?").bind(amount, amount, payment.plan_id, user.userId),
+        env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions WHERE user_id = ? AND account_id = accounts.id AND type = 'installment_payment' AND installment_plan_id = ?), 0) WHERE user_id = ? AND EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND account_id = accounts.id AND type = 'installment_payment' AND installment_plan_id = ?)").bind(user.userId, planId, user.userId, user.userId, planId),
+        env.DB.prepare("DELETE FROM transactions WHERE user_id = ? AND installment_plan_id = ?").bind(user.userId, planId),
+        env.DB.prepare("DELETE FROM installment_payments WHERE user_id = ? AND plan_id = ?").bind(user.userId, planId),
+        env.DB.prepare("DELETE FROM installment_plans WHERE user_id = ? AND id = ?").bind(user.userId, planId),
       ]);
     } else if (action === "updateBudget") {
       const period = text(payload.period, "daily");
