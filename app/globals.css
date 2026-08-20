@@ -120,6 +120,7 @@ button { color: inherit; }
 .budget-window.sand { background: #f3ebdd; }
 .budget-window > span { color: #687a74; font-size: 10px; font-weight: 800; }
 .budget-window strong { margin: 8px 0 3px; font-size: 23px; letter-spacing: -.04em; }
+.budget-window .budget-secondary { margin: 0 0 3px; color: #4f6961; font-size: 8px; letter-spacing: 0; }
 .budget-window small { color: #81908b; font-size: 9px; }
 .progress-track { margin-top: auto; height: 5px; overflow: hidden; border-radius: 20px; background: rgba(21,43,39,.09); }
 .progress-track i { display: block; width: 72%; height: 100%; background: var(--green); border-radius: inherit; }
@@ -221,6 +222,7 @@ button { color: inherit; }
 .budget-period-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: #e9efe5; font-size: 11px; font-weight: 900; }
 .budget-rule-grid article > p { margin: 20px 0 6px; color: #81908b; font-size: 9px; font-weight: 900; letter-spacing: .11em; }
 .budget-rule-grid h3 { margin: 0 0 3px; font-size: 26px; letter-spacing: -.045em; }
+.budget-rule-grid .rule-secondary { display: block; margin: 0 0 4px; color: var(--green); font-size: 9px; }
 .budget-rule-grid article > small { color: #84908c; font-size: 9px; }
 .wide-progress { height: 6px; margin: 16px 0; overflow: hidden; border-radius: 20px; background: #ebeee7; }
 .wide-progress i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
@@ -341,6 +343,9 @@ button { color: inherit; }
 .budget-inclusions span { display: grid; gap: 3px; }
 .budget-inclusions strong { color: var(--ink); font-size: 9px; }
 .budget-inclusions small { color: #84908c; font-size: 7px; line-height: 1.35; }
+.budget-inclusions.inherited { background: #f4f6f0; }
+.budget-inclusions.inherited label { cursor: default; opacity: .78; }
+.budget-inclusions .inherited-note { margin: 2px 0 0; color: #687a74; font-size: 7px; line-height: 1.45; }
 .modal-submit { width: 100%; min-height: 45px; margin-top: 5px; }
 .modal-submit span { float: right; color: var(--lime); }
 .installment-preview { padding: 13px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 15px; background: #edf2e8; }
