@@ -208,7 +208,7 @@ export async function POST(request: Request) {
     } else if (action === "addInstallment") {
       const planId = crypto.randomUUID();
       const total = cents(payload.total);
-      const count = Math.max(2, Math.min(120, Number(payload.installmentCount) || 2));
+      const count = Math.max(1, Math.min(120, Number(payload.installmentCount) || 1));
       const firstDue = text(payload.firstDueDate);
       if (!total || !firstDue || !payload.paymentAccountId) return Response.json({ error: "Amount, installment count, first date, and payment account are required." }, { status: 400 });
       const base = Math.floor(total / count);
