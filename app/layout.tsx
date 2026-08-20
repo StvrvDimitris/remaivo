@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
@@ -13,6 +13,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#15372f",
+};
+
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "pace.local";
@@ -24,9 +28,24 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: baseUrl,
+    applicationName: "Pace",
     title,
     description,
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+    manifest: "/manifest.webmanifest",
+    icons: {
+      icon: [
+        { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/pace-icon-192.png", sizes: "192x192", type: "image/png" },
+      ],
+      shortcut: "/favicon-32.png",
+      apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    },
+    appleWebApp: {
+      capable: true,
+      title: "Pace",
+      statusBarStyle: "black-translucent",
+    },
+    other: { "mobile-web-app-capable": "yes" },
     openGraph: { title, description, type: "website", images: [{ url: socialImage, width: 1200, height: 630, alt: "Pace — Know what you can spend" }] },
     twitter: { card: "summary_large_image", title, description, images: [socialImage] },
   };

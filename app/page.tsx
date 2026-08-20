@@ -11,7 +11,7 @@ export default async function Home() {
     return (
       <main className="signin-screen">
         <section className="signin-card">
-          <span className="signin-logo">P</span>
+          <span className="signin-logo pace-logo-mark" aria-hidden="true" />
           <p className="eyebrow">PACE PERSONAL FINANCE</p>
           <h1>Your money, at your pace.</h1>
           <p>Sign in securely to see your private accounts, budgets, plans, and progress on every device.</p>

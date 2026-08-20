@@ -41,8 +41,9 @@ button { color: inherit; }
 }
 
 .brand-mark { display: flex; align-items: center; gap: 12px; padding: 0 8px 34px; font-size: 20px; letter-spacing: -.03em; }
-.brand-mark > span { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; color: #173a34; background: var(--lime); font-weight: 900; }
+.brand-mark > .pace-logo-mark { width: 34px; height: 34px; border-radius: 11px; flex: 0 0 34px; }
 .brand-mark strong { font-size: 22px; }
+.pace-logo-mark { display: block; background: var(--ink) url("/pace-icon-512.png") center / 118% no-repeat; }
 
 .sidebar nav { display: grid; gap: 5px; }
 .nav-item { min-height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 12px; color: #b9cbc5; text-decoration: none; border-radius: 10px; font-size: 14px; font-weight: 700; }
@@ -159,7 +160,7 @@ button { color: inherit; }
 .primary-button:disabled, .ghost-button:disabled { opacity: .45; cursor: not-allowed; }
 
 .loading-screen, .signin-screen { min-height: 100vh; display: grid; place-content: center; text-align: center; background: var(--cream); }
-.loading-logo, .signin-logo { width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 16px; display: grid; place-items: center; background: var(--lime); color: var(--ink); font-size: 24px; font-weight: 900; box-shadow: 0 14px 30px rgba(31,91,78,.15); }
+.loading-logo, .signin-logo { width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 16px; box-shadow: 0 14px 30px rgba(31,91,78,.15); }
 .loading-screen p { color: var(--muted); font-size: 13px; }
 .loading-screen small { color: #a25745; }
 .signin-card { width: min(460px, calc(100vw - 32px)); padding: 48px; border-radius: 24px; background: var(--paper); box-shadow: 0 25px 70px rgba(21,43,39,.1); }
@@ -448,7 +449,7 @@ button { color: inherit; }
   .sidebar { width: 82px; padding-inline: 14px; }
   .brand-mark strong, .nav-item:not(.active)::after, .nav-item { font-size: 0; }
   .brand-mark { padding-inline: 10px; }
-  .brand-mark > span { flex: 0 0 34px; }
+  .brand-mark > .pace-logo-mark { flex: 0 0 34px; }
   .nav-item { justify-content: center; }
   .nav-item span { font-size: 18px; }
   .mini-goal, .profile > span:nth-child(2), .profile b { display: none; }
