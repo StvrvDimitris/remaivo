@@ -257,8 +257,13 @@ button { color: inherit; }
 .installment-top small, .installment-bottom { color: #84908c; font-size: 8px; }
 .installment-top > b { font-size: 11px; }
 .installment-bottom { margin-bottom: 12px; }
-.plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.danger-link { color: #a35b51 !important; }
+.plan-actions { display: flex; align-items: center; gap: 12px; }
+
+.editable-record { cursor: pointer; touch-action: pan-y; transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.editable-record:hover { border-color: #d8dfd5; background-color: rgba(232,239,229,.42); }
+.editable-record:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.edit-hint { margin: -4px 0 13px; display: block; color: #8a9691; font-size: 8px; line-height: 1.4; }
+.page-edit-hint { margin: -7px 2px 13px; }
 
 .spare-hero { min-height: 250px; padding: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; overflow: hidden; position: relative; background: var(--green); color: #fff; }
 .spare-hero > div:first-child { max-width: 530px; position: relative; z-index: 1; }
@@ -350,6 +355,15 @@ button { color: inherit; }
 .budget-inclusions .inherited-note { margin: 2px 0 0; color: #687a74; font-size: 7px; line-height: 1.45; }
 .modal-submit { width: 100%; min-height: 45px; margin-top: 5px; }
 .modal-submit span { float: right; color: var(--lime); }
+.locked-summary { min-height: 66px; padding: 13px 15px; border: 1px solid #dfe3da; border-radius: 12px; display: grid; gap: 5px; align-content: center; background: #f3f6ef; }
+.locked-summary span { color: var(--ink); font-size: 14px; font-weight: 900; }
+.locked-summary small { color: #788680; font-size: 8px; line-height: 1.45; }
+.archive-zone { margin-top: 20px; padding-top: 18px; border-top: 1px solid #e6e7df; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.archive-zone > span { display: grid; gap: 4px; }
+.archive-zone strong { font-size: 9px; }
+.archive-zone small { color: #84908c; font-size: 8px; }
+.archive-zone button { min-height: 34px; padding: 0 12px; border: 1px solid #d9bcb6; border-radius: 9px; background: transparent; color: #99594f; font-size: 8px; font-weight: 900; cursor: pointer; }
+.archive-zone button:disabled { opacity: .55; cursor: wait; }
 .installment-preview { padding: 13px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 15px; background: #edf2e8; }
 .installment-preview > span { display: flex; gap: 4px; }
 .installment-preview i { width: 8px; height: 18px; border-radius: 4px; display: block; background: var(--green); opacity: .8; }

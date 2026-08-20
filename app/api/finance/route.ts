@@ -89,7 +89,7 @@ async function processAutomaticPlans(userId: string) {
 
 async function recordInstallmentPayment(userId: string, paymentId: string, date: string) {
   const payment = await env.DB.prepare(
-    "SELECT ip.*, p.title, p.payment_account_id, p.include_daily_weekly FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.id = ? AND ip.user_id = ? AND ip.status != 'paid'",
+    "SELECT ip.*, p.title, p.payment_account_id, p.include_daily_weekly FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.id = ? AND ip.user_id = ? AND ip.status = 'upcoming' AND p.status = 'active'",
   ).bind(paymentId, userId).first<Record<string, unknown>>();
   if (!payment) return false;
 
@@ -98,7 +98,7 @@ async function recordInstallmentPayment(userId: string, paymentId: string, date:
   const planId = String(payment.plan_id);
   const includeDailyWeekly = Number(payment.include_daily_weekly) === 1 ? 1 : 0;
   const results = await env.DB.batch([
-    env.DB.prepare("UPDATE installment_payments SET status = 'paid', paid_transaction_id = ? WHERE id = ? AND user_id = ? AND status != 'paid'").bind(transactionId, paymentId, userId),
+    env.DB.prepare("UPDATE installment_payments SET status = 'paid', paid_transaction_id = ? WHERE id = ? AND user_id = ? AND status = 'upcoming'").bind(transactionId, paymentId, userId),
     env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) SELECT ?, ?, ?, 'installment_payment', ?, ?, ?, 1, ?, ?, 1, 1, ? WHERE EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(transactionId, userId, payment.payment_account_id, payment.title, amount, date, includeDailyWeekly, includeDailyWeekly, planId, paymentId, userId, transactionId),
     env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(amount, payment.payment_account_id, userId, paymentId, userId, transactionId),
     env.DB.prepare("UPDATE installment_plans SET paid_cents = COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0), status = CASE WHEN COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0) >= total_cents THEN 'complete' ELSE 'active' END WHERE id = ? AND user_id = ?").bind(planId, userId, planId, userId, planId, userId),
@@ -109,7 +109,7 @@ async function recordInstallmentPayment(userId: string, paymentId: string, date:
 async function processAutomaticInstallments(userId: string) {
   const today = new Date().toISOString().slice(0, 10);
   const due = await env.DB.prepare(
-    "SELECT ip.id, ip.due_date FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.user_id = ? AND ip.status != 'paid' AND ip.due_date <= ? AND p.status = 'active' AND p.auto_post = 1 ORDER BY ip.due_date LIMIT 120",
+    "SELECT ip.id, ip.due_date FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.user_id = ? AND ip.status = 'upcoming' AND ip.due_date <= ? AND p.status = 'active' AND p.auto_post = 1 ORDER BY ip.due_date LIMIT 120",
   ).bind(userId, today).all<Record<string, unknown>>();
   for (const payment of due.results) {
     await recordInstallmentPayment(userId, String(payment.id), String(payment.due_date));
@@ -126,13 +126,13 @@ async function snapshot(user: FinanceUser) {
   await processAutomaticPlans(user.userId);
   await processAutomaticInstallments(user.userId);
   const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents] = await env.DB.batch([
-    env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
-    env.DB.prepare("SELECT * FROM categories WHERE user_id = ? AND archived = 0 ORDER BY kind, name").bind(user.userId),
-    env.DB.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, created_at DESC LIMIT 250").bind(user.userId),
+    env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
+    env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
+    env.DB.prepare("SELECT * FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC LIMIT 250").bind(user.userId),
     env.DB.prepare("SELECT * FROM budget_rules WHERE user_id = ? AND period IN ('daily', 'weekly', 'monthly') ORDER BY CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 ELSE 3 END").bind(user.userId),
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
-    env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? ORDER BY due_date").bind(user.userId),
+    env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? AND status != 'cancelled' ORDER BY due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
   ]);
@@ -207,8 +207,15 @@ export async function POST(request: Request) {
       const type = text(payload.type, "bank");
       const signedAmount = type === "credit" ? -amount : amount;
       await env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_cents, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(crypto.randomUUID(), user.userId, text(payload.name, "New account"), type, signedAmount, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId).run();
+    } else if (action === "updateAccount") {
+      const type = ["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].includes(text(payload.type)) ? text(payload.type) : "custom";
+      await env.DB.prepare("UPDATE accounts SET name = ?, type = ?, credit_limit_cents = ?, color = ?, include_spendable = ? WHERE id = ? AND user_id = ?").bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId).run();
     } else if (action === "addCategory") {
       await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color, icon) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "expense"), text(payload.color, "#cfe9d7"), text(payload.icon, "circle")).run();
+    } else if (action === "updateCategory") {
+      await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), text(payload.kind, "expense") === "income" ? "income" : "expense", text(payload.color, "#cfe9d7"), payload.categoryId, user.userId).run();
+    } else if (action === "archiveCategory") {
+      await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.categoryId, user.userId).run();
     } else if (action === "addTransaction") {
       const id = crypto.randomUUID();
       const amount = cents(payload.amount);
@@ -233,8 +240,16 @@ export async function POST(request: Request) {
         statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, id, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare));
       }
       await env.DB.batch(statements);
+    } else if (action === "updateTransaction") {
+      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, new Date().toISOString().slice(0, 10)), payload.categoryId || null, payload.transactionId, user.userId).run();
     } else if (action === "addRecurring") {
       await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, end_date, auto_post, committed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), text(payload.type, "expense"), cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, text(payload.nextDate), payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0).run();
+    } else if (action === "updateRecurring") {
+      const amount = cents(payload.amount);
+      if (!amount) return Response.json({ error: "Amount is required." }, { status: 400 });
+      await env.DB.prepare("UPDATE recurring_plans SET title = ?, amount_cents = ?, account_id = ?, frequency = ?, interval_count = ?, next_date = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), amount, payload.accountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), text(payload.nextDate), bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
+    } else if (action === "archiveRecurring") {
+      await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
     } else if (action === "addInstallment") {
       const planId = crypto.randomUUID();
       const total = cents(payload.total);
@@ -252,18 +267,19 @@ export async function POST(request: Request) {
         statements.push(env.DB.prepare("INSERT INTO installment_payments (id, user_id, plan_id, sequence, due_date, amount_cents) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, planId, index + 1, addInterval(firstDue, text(payload.frequency, "monthly"), index), amount));
       }
       await env.DB.batch(statements);
+    } else if (action === "updateInstallmentPlan") {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, payment_account_id = ?, linked_credit_account_id = ?, include_daily_weekly = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
+        env.DB.prepare("UPDATE transactions SET description = ? WHERE user_id = ? AND installment_plan_id = ? AND type = 'installment_purchase'").bind(text(payload.title, "Pay-later plan"), user.userId, payload.planId),
+      ]);
+    } else if (action === "archiveInstallmentPlan") {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
+        env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
+      ]);
     } else if (action === "payInstallment") {
       const recorded = await recordInstallmentPayment(user.userId, text(payload.paymentId), text(payload.date, new Date().toISOString().slice(0, 10)));
       if (!recorded) return Response.json({ error: "Installment not found or already paid." }, { status: 404 });
-    } else if (action === "deleteInstallmentPlan") {
-      const planId = text(payload.planId);
-      if (!planId) return Response.json({ error: "Plan is required." }, { status: 400 });
-      await env.DB.batch([
-        env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions WHERE user_id = ? AND account_id = accounts.id AND type = 'installment_payment' AND installment_plan_id = ?), 0) WHERE user_id = ? AND EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND account_id = accounts.id AND type = 'installment_payment' AND installment_plan_id = ?)").bind(user.userId, planId, user.userId, user.userId, planId),
-        env.DB.prepare("DELETE FROM transactions WHERE user_id = ? AND installment_plan_id = ?").bind(user.userId, planId),
-        env.DB.prepare("DELETE FROM installment_payments WHERE user_id = ? AND plan_id = ?").bind(user.userId, planId),
-        env.DB.prepare("DELETE FROM installment_plans WHERE user_id = ? AND id = ?").bind(user.userId, planId),
-      ]);
     } else if (action === "updateBudget") {
       const period = text(payload.period, "daily");
       if (!["daily", "weekly", "monthly"].includes(period)) return Response.json({ error: "Unknown budget window." }, { status: 400 });
@@ -292,7 +308,14 @@ export async function POST(request: Request) {
       }
     } else if (action === "addGoal") {
       await env.DB.prepare("INSERT INTO goals (id, user_id, name, kind, target_cents, contributed_cents, account_id, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "savings"), cents(payload.target) || null, cents(payload.contributed), payload.accountId || null, text(payload.color, "#dff35f")).run();
+    } else if (action === "updateGoal") {
+      await env.DB.prepare("UPDATE goals SET name = ?, kind = ?, target_cents = ?, contributed_cents = CASE WHEN ? IS NULL THEN ? ELSE contributed_cents END, account_id = ?, color = ? WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.name, "Goal"), text(payload.kind, "savings") === "investment" ? "investment" : "savings", cents(payload.target) || null, payload.accountId || null, cents(payload.contributed), payload.accountId || null, text(payload.color, "#dff35f"), payload.goalId, user.userId).run();
+    } else if (action === "archiveGoal") {
+      await env.DB.prepare("UPDATE goals SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.goalId, user.userId).run();
     } else if (action === "archiveAccount") {
+      const accountId = text(payload.accountId);
+      const blocked = await env.DB.prepare("SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM recurring_plans WHERE user_id = ? AND active = 1 AND (account_id = ? OR destination_account_id = ?)) OR EXISTS (SELECT 1 FROM installment_plans WHERE user_id = ? AND status = 'active' AND (payment_account_id = ? OR linked_credit_account_id = ?)) OR EXISTS (SELECT 1 FROM goals WHERE user_id = ? AND archived = 0 AND account_id = ?) OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND spare_destination_id = ?)").bind(user.userId, accountId, accountId, user.userId, accountId, accountId, user.userId, accountId, user.userId, accountId).first();
+      if (blocked) return Response.json({ error: "Move active plans, goals, and spare change away from this account before archiving it." }, { status: 409 });
       await env.DB.prepare("UPDATE accounts SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.accountId, user.userId).run();
     } else {
       return Response.json({ error: "Unknown action." }, { status: 400 });
