@@ -103,6 +103,7 @@ export const recurringPlans = sqliteTable("recurring_plans", {
   frequency: text("frequency").notNull(),
   intervalCount: integer("interval_count").notNull().default(1),
   nextDate: text("next_date").notNull(),
+  anchorDay: integer("anchor_day").notNull().default(1),
   endDate: text("end_date"),
   autoPost: integer("auto_post", { mode: "boolean" }).notNull().default(false),
   committed: integer("committed", { mode: "boolean" }).notNull().default(true),

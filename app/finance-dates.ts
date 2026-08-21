@@ -32,7 +32,7 @@ export function financialToday(timeZone: string, now = new Date()) {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-export function addCalendarInterval(dateValue: string, frequency: string, interval = 1) {
+export function addCalendarInterval(dateValue: string, frequency: string, interval = 1, anchorDay?: number | null) {
   const { year, month, day } = dateParts(dateValue);
   const count = Math.max(1, Math.trunc(interval) || 1);
   if (frequency === "daily") return isoDate(year, month, day + count);
@@ -43,7 +43,8 @@ export function addCalendarInterval(dateValue: string, frequency: string, interv
   const targetYear = Math.floor(targetIndex / 12);
   const targetMonth = (targetIndex % 12) + 1;
   const lastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
-  return isoDate(targetYear, targetMonth, Math.min(day, lastDay));
+  const intendedDay = Math.max(1, Math.min(31, Math.trunc(anchorDay ?? day) || day));
+  return isoDate(targetYear, targetMonth, Math.min(intendedDay, lastDay));
 }
 
 export function scheduledOccurrencesThrough(
@@ -52,6 +53,7 @@ export function scheduledOccurrencesThrough(
   interval: number,
   throughDate: string,
   endDate?: string | null,
+  anchorDay?: number | null,
   maximum = 50_000,
 ) {
   const occurrences: string[] = [];
@@ -59,7 +61,7 @@ export function scheduledOccurrencesThrough(
   while (cursor <= throughDate && (!endDate || cursor <= endDate)) {
     if (occurrences.length >= maximum) throw new Error("Automatic reconciliation exceeded its safety limit.");
     occurrences.push(cursor);
-    const following = addCalendarInterval(cursor, frequency, interval);
+    const following = addCalendarInterval(cursor, frequency, interval, anchorDay);
     if (following <= cursor) throw new Error("Automatic reconciliation could not advance the schedule.");
     cursor = following;
   }

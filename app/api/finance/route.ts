@@ -78,6 +78,7 @@ async function processAutomaticPlans(userId: string, today: string) {
         Number(plan.interval_count) || 1,
         today,
         plan.end_date ? String(plan.end_date) : null,
+        Number(plan.anchor_day) || Number(String(plan.next_date).slice(8, 10)),
       );
 
       for (const scheduledDate of schedule.occurrences) {
@@ -315,11 +316,14 @@ export async function POST(request: Request) {
       const results = await env.DB.batch(statements);
       if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction changed while you were editing it. Reopen it and try again." }, { status: 409 });
     } else if (action === "addRecurring") {
-      await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, end_date, auto_post, committed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), text(payload.type, "expense"), cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, text(payload.nextDate), payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0).run();
+      const nextDate = text(payload.nextDate);
+      await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, anchor_day, end_date, auto_post, committed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), text(payload.type, "expense"), cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, nextDate, Number(nextDate.slice(8, 10)) || 1, payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0).run();
     } else if (action === "updateRecurring") {
       const amount = cents(payload.amount);
       if (!amount) return Response.json({ error: "Amount is required." }, { status: 400 });
-      await env.DB.prepare("UPDATE recurring_plans SET title = ?, amount_cents = ?, account_id = ?, frequency = ?, interval_count = ?, next_date = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), amount, payload.accountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), text(payload.nextDate), bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
+      const nextDate = text(payload.nextDate);
+      const anchorDay = Math.max(1, Math.min(31, Math.round(Number(payload.anchorDay) || Number(nextDate.slice(8, 10)) || 1)));
+      await env.DB.prepare("UPDATE recurring_plans SET title = ?, amount_cents = ?, account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), amount, payload.accountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
     } else if (action === "archiveRecurring") {
       await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
     } else if (action === "addInstallment") {

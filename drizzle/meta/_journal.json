@@ -36,6 +36,13 @@
       "when": 1787302787606,
       "tag": "0004_orange_hellion",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787303801749,
+      "tag": "0005_conscious_the_captain",
+      "breakpoints": true
     }
   ]
 }

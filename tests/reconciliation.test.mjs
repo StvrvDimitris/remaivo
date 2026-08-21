@@ -21,6 +21,19 @@ test("monthly schedules clamp safely at month end", () => {
   assert.equal(addCalendarInterval("2026-01-31", "monthly", 1), "2026-02-28");
 });
 
+test("monthly recurring schedules restore their intended day after short months", () => {
+  const result = scheduledOccurrencesThrough("2026-08-31", "monthly", 1, "2027-03-31", null, 31);
+  assert.deepEqual(result.occurrences, [
+    "2026-08-31", "2026-09-30", "2026-10-31", "2026-11-30",
+    "2026-12-31", "2027-01-31", "2027-02-28", "2027-03-31",
+  ]);
+});
+
+test("leap-day yearly schedules restore 29 February in leap years", () => {
+  const result = scheduledOccurrencesThrough("2024-02-29", "yearly", 1, "2028-02-29", null, 29);
+  assert.deepEqual(result.occurrences, ["2024-02-29", "2025-02-28", "2026-02-28", "2027-02-28", "2028-02-29"]);
+});
+
 test("overdue unresolved plans remain reserved in the current window", () => {
   assert.equal(outstandingDateInWindow("2026-08-10", "2026-08-21", "2026-09-01", true), true);
   assert.equal(outstandingDateInWindow("2026-08-10", "2026-08-21", "2026-09-01", false), false);
