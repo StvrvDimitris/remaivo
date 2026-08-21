@@ -1,37 +1,82 @@
-export function adaptiveRemainingAllocation(sourceAllocation: number, countedSpent: number, planned: number, remainingDays: number, windowDays: number) {
-  if (remainingDays <= 0 || windowDays <= 0) return 0;
-  const remainingPool = Math.max(0, sourceAllocation - countedSpent - planned);
-  return Math.round(remainingPool * Math.min(windowDays, remainingDays) / remainingDays);
+export type AllocationMode = "fixed" | "adaptive";
+export type FixedCarryMode = "reset" | "stack_unused" | "stack_signed" | "stack_capped";
+
+export function splitCents(total: number, parts: number) {
+  const count = Math.max(0, Math.trunc(parts));
+  if (!count) return [];
+  const safeTotal = Math.max(0, Math.trunc(total));
+  const base = Math.floor(safeTotal / count);
+  const extra = safeTotal - base * count;
+  return Array.from({ length: count }, (_, index) => base + (index < extra ? 1 : 0));
 }
 
-export function fixedSplitAllocation(parentAllocation: number, divisions: number) {
-  return Math.max(0, Math.round(parentAllocation / Math.max(1, divisions)));
+export function fixedCarryValue(remainder: number, mode: FixedCarryMode, cap: number | null = null) {
+  if (mode === "stack_signed") return remainder;
+  if (mode === "stack_unused") return Math.max(0, remainder);
+  if (mode === "stack_capped") return Math.min(Math.max(0, cap ?? 0), Math.max(0, remainder));
+  return 0;
 }
 
-export function calendarWeekSegmentsInMonth(value: string, weekStart: number) {
-  const date = new Date(`${value.slice(0, 7)}-01T12:00:00Z`);
-  const monthEnd = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 12));
-  const offset = (date.getUTCDay() - weekStart + 7) % 7;
-  date.setUTCDate(date.getUTCDate() - offset);
-  let segments = 0;
-  while (date < monthEnd) {
-    segments += 1;
-    date.setUTCDate(date.getUTCDate() + 7);
+export type BudgetProjectionInput = {
+  monthlyBudget: number;
+  daysInMonth: number;
+  todayIndex: number;
+  remainingWeekDays: number;
+  mode: AllocationMode;
+  carryMode?: FixedCarryMode;
+  carryCap?: number | null;
+  resetStartIndex?: number;
+  spentBeforeToday: number;
+  spentSinceResetBeforeToday?: number;
+  spentToday: number;
+  reservedMonth?: number;
+  reservedToday?: number;
+  reservedRemainingWeek?: number;
+};
+
+export function projectBudgetPlan(input: BudgetProjectionInput) {
+  const todayIndex = Math.max(0, Math.min(input.daysInMonth - 1, input.todayIndex));
+  const daysRemaining = Math.max(1, input.daysInMonth - todayIndex);
+  const reservedMonth = Math.max(0, input.reservedMonth ?? 0);
+  const monthlyRemaining = input.monthlyBudget - input.spentBeforeToday - input.spentToday - reservedMonth;
+
+  if (input.mode === "adaptive") {
+    const poolAtStartOfToday = Math.max(0, input.monthlyBudget - input.spentBeforeToday - reservedMonth);
+    const projectedDays = splitCents(poolAtStartOfToday, daysRemaining);
+    const dailyBase = projectedDays[0] ?? 0;
+    const weeklyBase = projectedDays.slice(0, Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+    return {
+      dailyBase,
+      carry: 0,
+      dailyRemaining: dailyBase - input.spentToday,
+      weeklyBase,
+      weeklyRemaining: weeklyBase - input.spentToday,
+      monthlyRemaining,
+      poolAtStartOfToday,
+      projectedMonthRemaining: projectedDays.reduce((sum, value) => sum + value, 0) - input.spentToday,
+      projectedDays,
+    };
   }
-  return segments;
-}
 
-export function stackedWindowValue(bases: number[], deductions: number[], carryMode: string, carryCap: number | null = null) {
-  if (!bases.length) return { currentBase: 0, carry: 0, allocation: 0, remaining: 0 };
-  let carry = 0;
-  for (let index = 0; index < bases.length - 1; index += 1) {
-    const remainder = bases[index] + carry - (deductions[index] ?? 0);
-    if (carryMode === "stack_signed") carry = remainder;
-    else if (carryMode === "stack_unused" || carryMode === "manual") carry = Math.max(0, remainder);
-    else if (carryMode === "stack_capped") carry = Math.min(carryCap ?? bases[index], Math.max(0, remainder));
-    else carry = 0;
-  }
-  const currentBase = bases.at(-1) ?? 0;
-  const allocation = currentBase + carry;
-  return { currentBase, carry, allocation, remaining: allocation - (deductions.at(-1) ?? 0) };
+  const allocations = splitCents(input.monthlyBudget, input.daysInMonth);
+  const resetStart = Math.max(0, Math.min(todayIndex, input.resetStartIndex ?? todayIndex));
+  const allocatedSinceReset = allocations.slice(resetStart, todayIndex).reduce((sum, value) => sum + value, 0);
+  const carry = fixedCarryValue(
+    allocatedSinceReset - (input.spentSinceResetBeforeToday ?? 0),
+    input.carryMode ?? "reset",
+    input.carryCap,
+  );
+  const dailyBase = allocations[todayIndex] ?? 0;
+  const weeklyBase = allocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+  return {
+    dailyBase,
+    carry,
+    dailyRemaining: dailyBase + carry - input.spentToday - Math.max(0, input.reservedToday ?? 0),
+    weeklyBase,
+    weeklyRemaining: weeklyBase + carry - input.spentToday - Math.max(0, input.reservedRemainingWeek ?? 0),
+    monthlyRemaining,
+    poolAtStartOfToday: input.monthlyBudget - input.spentBeforeToday - reservedMonth,
+    projectedMonthRemaining: allocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday - reservedMonth,
+    projectedDays: allocations.slice(todayIndex),
+  };
 }

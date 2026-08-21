@@ -1,7 +1,7 @@
 "use client";
 
 import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEffect, useState } from "react";
-import { adaptiveRemainingAllocation, calendarWeekSegmentsInMonth, fixedSplitAllocation, stackedWindowValue } from "./budget-math";
+import { projectBudgetPlan, splitCents, type FixedCarryMode } from "./budget-math";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
@@ -51,25 +51,20 @@ const navItems: { id: PageName; label: string; icon: string }[] = [
 ];
 
 const carryLabels: Record<string, string> = {
-  reset: "Reset each period",
-  stack_unused: "Stack unused allowance",
-  stack_capped: "Stack up to a cap",
-  stack_signed: "Stack allowance and overspend",
+  reset: "Reset",
+  stack_unused: "Unused only",
+  stack_capped: "Capped unused",
+  stack_signed: "Signed (underspend and overspend)",
   manual: "Decide manually",
 };
 
 const resetLabels: Record<string, string> = {
+  daily: "Every day",
   none: "Never hard-reset",
-  weekly: "Reset with the week",
-  monthly: "Reset with the month",
+  weekly: "Every week",
+  monthly: "Every month",
   yearly: "Reset with the year",
   parent: "Reset with the parent pool",
-};
-
-const calculationLabels: Record<string, string> = {
-  adaptive: "Adaptive day-weighted split",
-  fixed_split: "Equal calendar-week split",
-  percentage: "Percentage of parent",
 };
 
 const weekdayLabels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -109,48 +104,12 @@ function daysBetween(start: string, end: string) {
   return Math.max(0, Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / 86400000));
 }
 
-function weeklyMonthSegment(today: string, weekStart: number) {
-  const monthStart = `${today.slice(0, 7)}-01`;
-  const monthEnd = nextPeriod(monthStart, "monthly");
-  const calendarWeekStart = periodStart(today, "weekly", weekStart);
-  const calendarWeekEnd = nextPeriod(calendarWeekStart, "weekly");
-  const start = calendarWeekStart < monthStart ? monthStart : calendarWeekStart;
-  const end = calendarWeekEnd > monthEnd ? monthEnd : calendarWeekEnd;
-  return { start, end, days: daysBetween(start, end), monthDaysRemainingAtStart: daysBetween(start, monthEnd) };
-}
-
 function transactionCounts(rule: BudgetRule, transaction: Transaction) {
   if (transaction.type === "expense") return transaction.committed === 1 ? rule.include_committed === 1 : rule.include_everyday === 1;
   if (transaction.type === "installment_payment") return rule.include_committed === 1;
   if (transaction.type === "saving") return rule.include_savings === 1;
   if (transaction.type === "investment") return rule.include_investments === 1;
   return false;
-}
-
-function resetBoundary(rule: BudgetRule) {
-  if (rule.hard_reset === "parent") return rule.parent_period ?? "none";
-  return rule.hard_reset;
-}
-
-function boundaryKey(value: string, boundary: string, weekStart: number) {
-  if (boundary === "weekly") return periodStart(value, "weekly", weekStart);
-  if (boundary === "monthly") return value.slice(0, 7);
-  if (boundary === "yearly") return value.slice(0, 4);
-  return "all-time";
-}
-
-function nextBoundary(value: string, boundary: string, weekStart: number) {
-  if (boundary === "weekly") return nextPeriod(periodStart(value, "weekly", weekStart), "weekly");
-  if (boundary === "monthly") return nextPeriod(`${value.slice(0, 7)}-01`, "monthly");
-  if (boundary === "yearly") return `${Number(value.slice(0, 4)) + 1}-01-01`;
-  return "9999-12-31";
-}
-
-function applyCarry(rule: BudgetRule, remainder: number, base: number) {
-  if (rule.carry_mode === "stack_signed") return remainder;
-  if (rule.carry_mode === "stack_unused" || rule.carry_mode === "manual") return Math.max(0, remainder);
-  if (rule.carry_mode === "stack_capped") return Math.min(rule.carry_cap_cents ?? base, Math.max(0, remainder));
-  return 0;
 }
 
 function plannedFor(rule: BudgetRule, recurring: RecurringPlan[], payments: InstallmentPayment[], start: string, end: string) {
@@ -165,141 +124,85 @@ function plannedFor(rule: BudgetRule, recurring: RecurringPlan[], payments: Inst
   return recurringAmount + installmentAmount;
 }
 
-function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number, historyStart?: string) {
-  const spendFor = (start: string, end: string) => transactions
-    .filter((transaction) => transaction.date >= start && transaction.date < end && transactionCounts(rule, transaction))
-    .reduce((sum, transaction) => sum + transaction.amount_cents, 0);
-
-  if (rule.period === "general") {
-    const spent = spendFor(rule.anchor_date, "9999-12-31");
-    const planned = plannedFor(rule, recurring, payments, today, "9999-12-31");
-    const remaining = base - spent - planned;
-    return { remaining, allocation: base, currentBase: base, carry: 0, spent, planned, windowStart: rule.anchor_date, windowEnd: "9999-12-31" };
-  }
-
-  const nominalStart = periodStart(today, rule.period, weekStart);
-  const boundary = resetBoundary(rule);
-  let cursor = periodStart(historyStart ?? rule.anchor_date, rule.period, weekStart);
-  let carry = 0;
-  let guard = 0;
-  while (cursor < nominalStart && guard < 4000) {
-    const following = nextPeriod(cursor, rule.period);
-    const remainder = base + carry - spendFor(cursor, following);
-    carry = boundary !== "none" && boundaryKey(cursor, boundary, weekStart) !== boundaryKey(following, boundary, weekStart)
-      ? 0
-      : applyCarry(rule, remainder, base);
-    cursor = following;
-    guard += 1;
-  }
-
-  const boundaryStart = boundary === "weekly" ? periodStart(today, "weekly", weekStart) : boundary === "monthly" ? `${today.slice(0, 7)}-01` : boundary === "yearly" ? `${today.slice(0, 4)}-01-01` : nominalStart;
-  const currentStart = boundaryStart > nominalStart ? boundaryStart : nominalStart;
-  if (boundary !== "none" && boundaryKey(nominalStart, boundary, weekStart) !== boundaryKey(currentStart, boundary, weekStart)) carry = 0;
-  const nominalEnd = nextPeriod(nominalStart, rule.period);
-  const resetEnd = nextBoundary(today, boundary, weekStart);
-  const currentEnd = resetEnd < nominalEnd ? resetEnd : nominalEnd;
-  const currentBase = rule.period === "weekly" && boundary === "monthly" && rule.source_type === "manual"
-    ? Math.round(base * daysBetween(currentStart, currentEnd) / 7)
-    : base;
-  const allocation = currentBase + carry;
-  const spent = spendFor(currentStart, currentEnd);
-  const planned = plannedFor(rule, recurring, payments, currentStart, currentEnd);
-  const remaining = allocation - spent - planned;
-  return { remaining, allocation, currentBase, carry, spent, planned, windowStart: currentStart, windowEnd: currentEnd };
-}
-
-function divisionCounts(period: string, parent: BudgetResult, today: string, weekStart: number) {
-  const date = parseDate(today);
-  const daysInMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-  if (period === "daily" && parent.period === "weekly") {
-    const segment = resetBoundary(parent) === "monthly" ? weeklyMonthSegment(today, weekStart) : { start: periodStart(today, "weekly", weekStart), end: nextPeriod(periodStart(today, "weekly", weekStart), "weekly") };
-    return { total: daysBetween(segment.start, segment.end), remaining: daysBetween(today, segment.end) };
-  }
-  if (period === "daily" && parent.period === "monthly") return { total: daysInMonth, remaining: daysInMonth - date.getUTCDate() + 1 };
-  if (period === "weekly" && parent.period === "monthly") return { total: calendarWeekSegmentsInMonth(today, weekStart), remaining: Math.ceil((daysInMonth - date.getUTCDate() + 1) / 7) };
-  return { total: 1, remaining: 1 };
-}
-
-function derivedWeeklyValue(rule: BudgetRule, parent: BudgetResult, transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number) {
-  const monthStart = parent.window_start;
-  const monthEnd = parent.window_end;
-  const monthDays = Math.max(1, daysBetween(monthStart, monthEnd));
-  const fixedBase = fixedSplitAllocation(parent.effective_base_cents, calendarWeekSegmentsInMonth(today, weekStart));
-  const segments: { start: string; end: string }[] = [];
-  let start = monthStart;
-  while (start < monthEnd) {
-    const calendarEnd = nextPeriod(periodStart(start, "weekly", weekStart), "weekly");
-    const end = calendarEnd < monthEnd ? calendarEnd : monthEnd;
-    segments.push({ start, end });
-    start = end;
-  }
-  const currentIndex = Math.max(0, segments.findIndex((segment) => today >= segment.start && today < segment.end));
-  const throughCurrent = segments.slice(0, currentIndex + 1);
-  const bases = throughCurrent.map((segment) => rule.calculation_mode === "adaptive"
-    ? Math.round(parent.effective_base_cents * daysBetween(segment.start, segment.end) / monthDays)
-    : fixedBase);
-  const spent = throughCurrent.map((segment) => transactions.filter((transaction) => transaction.date >= segment.start && transaction.date < segment.end && transactionCounts(rule, transaction)).reduce((sum, transaction) => sum + transaction.amount_cents, 0));
-  const planned = throughCurrent.map((segment, index) => index === throughCurrent.length - 1 ? plannedFor(rule, recurring, payments, segment.start, segment.end) : 0);
-  const deductions = spent.map((value, index) => value + planned[index]);
-  const stacked = stackedWindowValue(bases, deductions, rule.carry_mode, rule.carry_cap_cents);
-  const current = throughCurrent.at(-1) ?? { start: today, end: nextPeriod(today, "daily") };
-  return { ...stacked, spent: spent.at(-1) ?? 0, planned: planned.at(-1) ?? 0, windowStart: current.start, windowEnd: current.end };
-}
-
 function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number) {
   const byPeriod = Object.fromEntries(rules.map((rule) => [rule.period, rule]));
-  const calculated: Record<string, BudgetResult> = {};
-  for (const period of ["monthly", "weekly", "daily"]) {
-    const rule = byPeriod[period];
-    if (!rule) continue;
-    if (rule.active !== 1) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: rule.base_cents, current_base_cents: rule.base_cents, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: today, source_note: "Turned off", unavailable: false };
-      continue;
-    }
-    const parent = rule.parent_period ? calculated[rule.parent_period] : undefined;
-    if (rule.source_type === "derived" && (!parent || parent.active !== 1)) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: 0, current_base_cents: 0, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: today, source_note: `Needs an active ${rule.parent_period ?? "parent"} budget`, unavailable: true };
-      continue;
-    }
-    if (rule.source_type === "derived" && parent) {
-      const divisions = divisionCounts(rule.period, parent, today, weekStart);
-      if (rule.period === "weekly" && parent.period === "monthly" && ["adaptive", "fixed_split"].includes(rule.calculation_mode)) {
-        const value = derivedWeeklyValue(rule, parent, transactions, recurring, payments, today, weekStart);
-        calculated[period] = {
-          ...rule,
-          remaining: value.remaining,
-          effective_base_cents: value.allocation,
-          current_base_cents: value.currentBase,
-          carried_cents: value.carry,
-          spent_cents: value.spent,
-          planned_cents: value.planned,
-          window_start: value.windowStart,
-          window_end: value.windowEnd,
-          seven_day_allowance_cents: rule.calculation_mode === "adaptive" ? value.currentBase : undefined,
-          remaining_days: daysBetween(today, value.windowEnd),
-          source_note: `${rule.calculation_mode === "adaptive" ? "Day-weighted" : "Fixed"} ${parent.period} share with carry replayed from ${value.windowStart === parent.window_start ? "the month start" : "earlier calendar weeks"}`,
-          unavailable: false,
-        };
-      } else if (rule.calculation_mode === "adaptive") {
-        const sourceSpent = transactions.filter((transaction) => transaction.date >= parent.window_start && transaction.date < parent.window_end && transactionCounts(rule, transaction)).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
-        const sourcePlanned = plannedFor(rule, recurring, payments, parent.window_start, parent.window_end);
-        const remainingDays = daysBetween(today, parent.window_end);
-        const targetEnd = nextPeriod(today, "daily") < parent.window_end ? nextPeriod(today, "daily") : parent.window_end;
-        const base = adaptiveRemainingAllocation(parent.effective_base_cents, sourceSpent, sourcePlanned, remainingDays, daysBetween(today, targetEnd));
-        calculated[period] = { ...rule, remaining: base, effective_base_cents: base, current_base_cents: base, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: targetEnd, remaining_days: 1, source_note: `Adaptive share of the carried ${parent.period} allowance; counted transactions are deducted once`, unavailable: false };
-      } else {
-        const base = rule.calculation_mode === "percentage"
-          ? Math.max(0, Math.round(parent.effective_base_cents * rule.percentage_basis_points / 10000))
-          : fixedSplitAllocation(parent.effective_base_cents, divisions.total);
-        const value = manualBudgetValue(rule, base, transactions, recurring, payments, today, weekStart, parent.window_start);
-        calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, window_start: value.windowStart, window_end: value.windowEnd, source_note: rule.calculation_mode === "percentage" ? `${rule.percentage_basis_points / 100}% of ${parent.period}` : `Fixed split of the original ${parent.period} allowance`, unavailable: false };
-      }
-    } else {
-      const value = manualBudgetValue(rule, rule.base_cents, transactions, recurring, payments, today, weekStart);
-      calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, window_start: value.windowStart, window_end: value.windowEnd, source_note: "Manual allowance", unavailable: false };
-    }
+  const root = byPeriod.monthly as BudgetRule | undefined;
+  if (!root) return [];
+  const inherited = (period: string): BudgetRule => ({
+    ...root,
+    ...(byPeriod[period] ?? {}),
+    period,
+    base_cents: root.base_cents,
+    carry_mode: root.carry_mode,
+    carry_cap_cents: root.carry_cap_cents,
+    calculation_mode: root.calculation_mode,
+    hard_reset: root.hard_reset,
+    include_everyday: root.include_everyday,
+    include_committed: root.include_committed,
+    include_savings: root.include_savings,
+    include_investments: root.include_investments,
+    active: root.active,
+  });
+  if (root.active !== 1) return ["daily", "weekly", "monthly"].map((period) => ({ ...inherited(period), remaining: 0, effective_base_cents: 0, current_base_cents: 0, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: today, source_note: "Budget plan is paused", unavailable: false }));
+
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const monthEnd = nextPeriod(monthStart, "monthly");
+  const weekEnd = nextPeriod(periodStart(today, "weekly", weekStart), "weekly");
+  const currentMonthWeekEnd = weekEnd < monthEnd ? weekEnd : monthEnd;
+  const tomorrow = nextPeriod(today, "daily");
+  const todayDate = parseDate(today);
+  const daysInMonth = daysBetween(monthStart, monthEnd);
+  const todayIndex = todayDate.getUTCDate() - 1;
+  const counted = transactions.filter((transaction) => transaction.date >= monthStart && transaction.date < monthEnd && transactionCounts(root, transaction));
+  const spentBeforeToday = counted.filter((transaction) => transaction.date < today).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
+  const spentToday = counted.filter((transaction) => transaction.date === today).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
+  const reservedMonth = plannedFor(root, recurring, payments, today, monthEnd);
+  const reservedToday = plannedFor(root, recurring, payments, today, tomorrow);
+  const reservedCurrentWeek = plannedFor(root, recurring, payments, today, currentMonthWeekEnd);
+  const boundary = ["daily", "weekly", "monthly"].includes(root.hard_reset) ? root.hard_reset : "monthly";
+  const resetStart = boundary === "daily" ? today : boundary === "weekly" ? (periodStart(today, "weekly", weekStart) < monthStart ? monthStart : periodStart(today, "weekly", weekStart)) : monthStart;
+  const spentSinceReset = counted.filter((transaction) => transaction.date >= resetStart && transaction.date < today).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
+  const mode = root.calculation_mode === "adaptive" ? "adaptive" : "fixed";
+  const carryMode = (["reset", "stack_unused", "stack_signed", "stack_capped"].includes(root.carry_mode) ? root.carry_mode : "reset") as FixedCarryMode;
+  const projection = projectBudgetPlan({
+    monthlyBudget: root.base_cents,
+    daysInMonth,
+    todayIndex,
+    remainingWeekDays: daysBetween(today, currentMonthWeekEnd),
+    mode,
+    carryMode,
+    carryCap: root.carry_cap_cents,
+    resetStartIndex: daysBetween(monthStart, resetStart),
+    spentBeforeToday,
+    spentSinceResetBeforeToday: spentSinceReset,
+    spentToday,
+    reservedMonth,
+    reservedToday,
+    reservedRemainingWeek: reservedCurrentWeek,
+  });
+
+  let weeklyBase = projection.weeklyBase;
+  let weeklyRemaining = projection.weeklyRemaining;
+  let weeklyPlanned = mode === "fixed" ? reservedCurrentWeek : 0;
+  if (weekEnd > monthEnd) {
+    const nextMonthEnd = nextPeriod(monthEnd, "monthly");
+    const nextMonthDays = daysBetween(monthEnd, nextMonthEnd);
+    const nextWeekDays = daysBetween(monthEnd, weekEnd);
+    const nextReservedMonth = plannedFor(root, recurring, payments, monthEnd, nextMonthEnd);
+    const nextAllocations = mode === "adaptive"
+      ? splitCents(Math.max(0, root.base_cents - nextReservedMonth), nextMonthDays)
+      : splitCents(root.base_cents, nextMonthDays);
+    const extraBase = nextAllocations.slice(0, nextWeekDays).reduce((sum, value) => sum + value, 0);
+    const nextWeekReserved = mode === "fixed" ? plannedFor(root, recurring, payments, monthEnd, weekEnd) : 0;
+    weeklyBase += extraBase;
+    weeklyRemaining += extraBase - nextWeekReserved;
+    weeklyPlanned += nextWeekReserved;
   }
-  return rules.map((rule) => calculated[rule.period]);
+
+  const monthly: BudgetResult = { ...inherited("monthly"), remaining: projection.monthlyRemaining, effective_base_cents: root.base_cents, current_base_cents: root.base_cents, carried_cents: 0, spent_cents: spentBeforeToday + spentToday, planned_cents: reservedMonth, window_start: monthStart, window_end: monthEnd, source_note: "Actual monthly funds after posted and reserved spending", unavailable: false };
+  const weekly: BudgetResult = { ...inherited("weekly"), source_type: "derived", parent_period: "monthly", remaining: weeklyRemaining, effective_base_cents: weeklyBase + projection.carry, current_base_cents: weeklyBase, carried_cents: projection.carry, spent_cents: spentToday, planned_cents: weeklyPlanned, window_start: today, window_end: weekEnd, remaining_days: daysBetween(today, weekEnd), source_note: mode === "adaptive" ? `Projected through ${weekdayLabels[(weekStart + 6) % 7]}; earlier spending is already in today’s frozen rate` : `Daily allocations through ${weekdayLabels[(weekStart + 6) % 7]}, with carry from the ${boundary} reset boundary`, unavailable: false };
+  const daily: BudgetResult = { ...inherited("daily"), source_type: "derived", parent_period: "monthly", remaining: projection.dailyRemaining, effective_base_cents: projection.dailyBase + projection.carry, current_base_cents: projection.dailyBase, carried_cents: projection.carry, spent_cents: spentToday, planned_cents: mode === "fixed" ? reservedToday : 0, window_start: today, window_end: tomorrow, remaining_days: 1, source_note: mode === "adaptive" ? "Frozen at the start of today; today’s spending is subtracted once" : `Fixed calendar-day base with ${carryLabels[carryMode].toLowerCase()}`, unavailable: false };
+  return [daily, weekly, monthly];
 }
 
 function budgetEquation(rule: BudgetResult, currency: string) {
@@ -421,14 +324,13 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const totalBalance = accounts.reduce((sum, account) => sum + account.balance_cents, 0);
   const outstandingInstallments = installmentPlans.reduce((sum, plan) => sum + plan.total_cents - plan.paid_cents, 0);
   const monthKey = data.today.slice(0, 7);
-  const reservedThisMonth = recurring.filter((plan) => plan.committed === 1 && plan.next_date.startsWith(monthKey)).reduce((sum, plan) => sum + plan.amount_cents, 0)
-    + installmentPayments.filter((payment) => payment.status === "upcoming" && payment.due_date.startsWith(monthKey)).reduce((sum, payment) => sum + payment.amount_cents, 0);
+  const monthlyPlan = budgets.find((rule) => rule.period === "monthly");
+  const reservedThisMonth = monthlyPlan ? plannedFor(monthlyPlan, recurring, installmentPayments, data.today, nextPeriod(`${monthKey}-01`, "monthly")) : 0;
   const budgetResults = calculateBudgetResults(budgets, transactions, recurring, installmentPayments, data.today, profile.week_start);
   const primaryBudget = budgetResults.find((rule) => rule.active === 1 && !rule.unavailable) ?? null;
-  const availableNow = Math.max(0, primaryBudget?.remaining ?? spendable);
-  const primaryWeekSegment = primaryBudget?.period === "weekly" && resetBoundary(primaryBudget) === "monthly" ? weeklyMonthSegment(data.today, profile.week_start) : null;
-  const activeWindowStart = primaryWeekSegment?.start ?? (primaryBudget ? periodStart(data.today, primaryBudget.period, profile.week_start) : data.today);
-  const activeWindowEnd = primaryWeekSegment?.end ?? (primaryBudget ? nextPeriod(activeWindowStart, primaryBudget.period) : nextPeriod(data.today, "daily"));
+  const availableNow = primaryBudget?.remaining ?? spendable;
+  const activeWindowStart = primaryBudget?.window_start ?? data.today;
+  const activeWindowEnd = primaryBudget?.window_end ?? nextPeriod(data.today, "daily");
   const spentInActiveWindow = primaryBudget ? transactions.filter((transaction) => transaction.date >= activeWindowStart && transaction.date < activeWindowEnd && transactionCounts(primaryBudget, transaction)).reduce((sum, transaction) => sum + transaction.amount_cents, 0) : 0;
   const totalActiveAvailable = Math.max(primaryBudget?.effective_base_cents ?? spendable, availableNow + spentInActiveWindow);
   const sparePot = spareEvents.reduce((sum, event) => sum + event.multiplied_cents, 0);
@@ -487,7 +389,7 @@ function Overview({ context, primaryBudget, availableNow, spentInActiveWindow, t
   return <div className="dashboard-grid">
     <section className="hero-card"><div className="hero-copy"><p>AVAILABLE TO SPEND {windowLabel}</p><h2>{formatMoney(availableNow, currency, 0)}<span>.{String(Math.abs(availableNow) % 100).padStart(2, "0")}</span></h2><div className="budget-status"><i /> {primaryBudget?.remaining !== undefined && primaryBudget.remaining < 0 ? "Over budget" : "Within budget"}</div><small>{primaryBudget ? primaryBudget.source_note : "Turn on a budget window to set your spending limit."}</small><button className="hero-action" onClick={onAdd}>Add spending →</button></div><div className="hero-visual"><div className="dial" style={{ background: `conic-gradient(var(--lime) 0 ${percent}%, rgba(255,255,255,.12) ${percent}% 100%)` }}><span className="dial-inner"><b>{Math.round(percent)}%</b><small>available</small></span></div><p>{formatMoney(spentInActiveWindow, currency)} spent {windowLabel.toLowerCase()}</p></div></section>
     <section className="balance-card"><div className="card-heading"><span><p>TOTAL BALANCE</p><h3>{formatMoney(totalBalance, currency)}</h3></span><button aria-label="More balance options">•••</button></div><div className="balance-breakdown"><div><i className="dot spending"/><span><p>Spendable</p><strong>{formatMoney(spendable, currency)}</strong></span></div><div><i className="dot savings"/><span><p>Savings</p><strong>{formatMoney(savings, currency)}</strong></span></div><div><i className="dot investing"/><span><p>Raw invested</p><strong>{formatMoney(invested, currency)}</strong></span></div></div><button className="text-link" onClick={() => setPage("accounts")}>View all accounts <span>→</span></button></section>
-    <section className="budget-card"><div className="section-heading"><div><p>YOUR BUDGETS</p><h3>Every enabled window, in one view.</h3></div><button className="ghost-button" onClick={() => setPage("budget")}>Manage budgets</button></div><div className="budget-windows">{budgetResults.filter((rule) => rule.active === 1).map((rule, index) => <article key={rule.id} className={`budget-window ${["mint", "sky", "sand"][index]}`}><span>{rule.period === "daily" ? "Today" : rule.period === "weekly" ? "This week remaining" : "This month"}</span><strong>{formatMoney(rule.remaining, currency)}</strong>{rule.seven_day_allowance_cents !== undefined && <b className="budget-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, currency)}</b>}<small>{rule.unavailable ? rule.source_note : budgetEquation(rule, currency)}</small><div className="progress-track"><i style={{ width: `${Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100))}%` }} /></div></article>)}{budgetResults.filter((rule) => rule.active === 1).length === 0 && <EmptyMini text="Daily, weekly, and monthly windows are turned off." />}</div></section>
+    <section className="budget-card"><div className="section-heading"><div><p>YOUR BUDGET</p><h3>One plan, shown at three timescales.</h3></div><button className="ghost-button" onClick={() => setPage("budget")}>Manage budget</button></div><div className="budget-windows">{budgetResults.filter((rule) => rule.active === 1).map((rule, index) => <article key={rule.id} className={`budget-window ${["mint", "sky", "sand"][index]}`}><span>{rule.period === "daily" ? "Today remaining" : rule.period === "weekly" ? "Projected through week end" : "Month remaining"}</span><strong>{formatMoney(rule.remaining, currency)}</strong><small>{rule.unavailable ? rule.source_note : budgetEquation(rule, currency)}</small><div className="progress-track"><i style={{ width: `${Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100))}%` }} /></div></article>)}{budgetResults.filter((rule) => rule.active === 1).length === 0 && <EmptyMini text="Set a monthly budget to activate all three views." />}</div></section>
     <section className="commitments-card"><div className="section-heading compact"><div><p>UP NEXT</p><h3>Committed money</h3></div><button className="text-link" onClick={() => setPage("plans")}>See plans</button></div><div className="commitment-list">{upcomingPayments.slice(0, 3).map((payment) => { const plan = installmentPlans.find((item) => item.id === payment.plan_id); return <div key={payment.id}><span className="date-block"><b>{parseDate(payment.due_date).getUTCDate()}</b><small>{parseDate(payment.due_date).toLocaleString("en", { month: "short", timeZone: "UTC" }).toUpperCase()}</small></span><span><strong>{plan?.title ?? "Installment"}</strong><small>Payment {payment.sequence} of {plan?.installment_count}</small></span><b>{formatMoney(payment.amount_cents, currency, 0)}</b></div>})}{upcomingPayments.length === 0 && <EmptyMini text="No installment payments coming up." />}</div><div className="reserved-note"><span>✓</span><p><strong>{formatMoney(reservedThisMonth, currency)} reserved</strong><small>Included in this month’s budget.</small></p></div></section>
     <section className="activity-card"><div className="section-heading compact"><div><p>LATEST ACTIVITY</p><h3>Recent transactions</h3></div><button className="text-link" onClick={() => setPage("transactions")}>View all</button></div><div className="activity-list">{transactions.slice(0, 4).map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} accountById={accountById} categoryById={categoryById} currency={currency} onEdit={() => onEditTransaction(transaction)} />)}{transactions.length === 0 && <EmptyMini text="Your first transactions will appear here." />}</div></section>
   </div>;
@@ -510,7 +412,7 @@ function AccountsPage({ context, onAdd, onEdit }: { context: Context; onAdd: () 
 
 function BudgetPage({ context, onEdit }: { context: Context; onEdit: () => void }) {
   const ordered = ["daily", "weekly", "monthly"].map((period) => context.budgetResults.find((rule) => rule.period === period)).filter(Boolean) as BudgetResult[];
-  return <div className="budget-page"><section className="budget-explainer"><div><p className="eyebrow">YOUR BUDGET, YOUR RULES</p><h2>Build the budget system that fits you.</h2><p>Turn daily, weekly, or monthly windows on or off, type an allowance manually or derive it from a larger window, and decide exactly which transactions and carryover rules each one uses.</p></div><button className="primary-button" onClick={onEdit}><span>⚙</span>Configure windows</button></section><section className="budget-rule-grid">{ordered.map((rule) => <article key={rule.id} className={rule.active === 1 ? "" : "budget-rule-disabled"}><div className="budget-rule-top"><span className="budget-period-icon">{rule.period === "daily" ? "D" : rule.period === "weekly" ? "W" : "M"}</span><em>{rule.active === 1 ? "On" : "Off"}</em></div><p>{rule.period === "weekly" && rule.seven_day_allowance_cents !== undefined ? "CURRENT WEEK REMAINING" : `${rule.period.toUpperCase()} POOL`}</p><h3>{rule.active === 1 ? formatMoney(rule.remaining, context.currency) : "Paused"}</h3>{rule.seven_day_allowance_cents !== undefined && <b className="rule-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, context.currency)}</b>}<small>{rule.source_type === "derived" ? `${calculationLabels[rule.calculation_mode]} from ${rule.parent_period}` : `${formatMoney(rule.effective_base_cents, context.currency)} current allowance`}</small>{rule.active === 1 && <div className="budget-equation">{budgetEquation(rule, context.currency)}</div>}<div className="wide-progress"><i style={{ width: `${rule.active === 1 ? Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100)) : 0}%` }} /></div><div className="rule-note"><span>↻</span><p><strong>{rule.source_note}</strong><small>{carryLabels[rule.carry_mode]} · ${resetLabels[rule.hard_reset] ?? rule.hard_reset}</small></p></div><div className="budget-counts"><span className={rule.include_everyday ? "on" : ""}>Everyday</span><span className={rule.include_committed ? "on" : ""}>Committed</span><span className={rule.include_savings ? "on" : ""}>Savings</span><span className={rule.include_investments ? "on" : ""}>Investing</span></div></article>)}</section><section className="cashflow-note"><span>✓</span><div><strong>Linked allowance, independent rules</strong><p>Adaptive windows can take their allowance from a larger budget while keeping their own transaction choices, carryover mode, and reset boundary. {formatMoney(context.reservedThisMonth, context.currency)} is currently scheduled this month.</p></div></section></div>;
+  return <div className="budget-page"><section className="budget-explainer"><div><p className="eyebrow">ONE PLAN, THREE VIEWS</p><h2>A monthly budget allocated by calendar day.</h2><p>Daily and weekly numbers are views of the same monthly plan. They inherit one transaction policy and never run separate allocation engines.</p></div><button className="primary-button" onClick={onEdit}><span>⚙</span>Configure plan</button></section><section className="budget-rule-grid">{ordered.map((rule) => <article key={rule.id} className={rule.active === 1 ? "" : "budget-rule-disabled"}><div className="budget-rule-top"><span className="budget-period-icon">{rule.period === "daily" ? "D" : rule.period === "weekly" ? "W" : "M"}</span><em>{rule.calculation_mode === "adaptive" ? "Adaptive" : "Fixed"}</em></div><p>{rule.period === "daily" ? "TODAY REMAINING" : rule.period === "weekly" ? "PROJECTED THROUGH WEEK END" : "MONTH REMAINING"}</p><h3>{rule.active === 1 ? formatMoney(rule.remaining, context.currency) : "Paused"}</h3><small>{rule.period === "monthly" ? `${formatMoney(rule.current_base_cents, context.currency)} monthly budget` : `${formatMoney(rule.current_base_cents, context.currency)} allocation base`}</small>{rule.active === 1 && <div className="budget-equation">{budgetEquation(rule, context.currency)}</div>}<div className="wide-progress"><i style={{ width: `${rule.active === 1 ? Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100)) : 0}%` }} /></div><div className="rule-note"><span>↻</span><p><strong>{rule.source_note}</strong><small>{rule.calculation_mode === "adaptive" ? "Automatic redistribution · no carry setting" : `${carryLabels[rule.carry_mode]} · resets ${resetLabels[rule.hard_reset]?.toLowerCase() ?? rule.hard_reset}`}</small></p></div><div className="budget-counts"><span className={rule.include_everyday ? "on" : ""}>Everyday</span><span className={rule.include_committed ? "on" : ""}>Committed</span><span className={rule.include_savings ? "on" : ""}>Savings</span><span className={rule.include_investments ? "on" : ""}>Investing</span></div></article>)}</section><section className="cashflow-note"><span>✓</span><div><strong>One inherited transaction policy</strong><p>Posted spending and {formatMoney(context.reservedThisMonth, context.currency)} in scheduled obligations are counted once at plan level. Adaptive allocations freeze for today and redistribute again tomorrow.</p></div></section></div>;
 }
 
 function PlansPage({ context, onAdd, onPay, onEditRecurring, onEditInstallment }: { context: Context; onAdd: () => void; onPay: (id: string) => void; onEditRecurring: (record: RecurringPlan) => void; onEditInstallment: (record: InstallmentPlan) => void }) {
@@ -546,7 +448,7 @@ function FinanceModal({ name, context, busy, close, save }: { name: Exclude<Moda
     {name === "transaction" && <><ModalTitle eyebrow="MANUAL ENTRY" title="Add a transaction" copy="One entry updates every relevant balance and budget window."/><form onSubmit={submit("addTransaction", (values) => ({ ...values, type: transactionType, committed: values.committed === "on", useSpare: values.useSpare === "on" }))}><div className="segmented">{["expense", "income", "transfer", "saving", "investment"].map((type) => <button type="button" className={transactionType === type ? "active" : ""} key={type} onClick={() => setTransactionType(type)}>{typeLabel(type)}</button>)}</div><Field label="Description"><input name="description" required placeholder={transactionType === "income" ? "Salary" : "What was it?"}/></Field><div className="form-grid"><Field label="Amount"><input name="amount" required type="number" min="0.01" step="0.01" placeholder="0.00"/></Field><Field label="Date"><input name="date" type="date" defaultValue={context.today} required/></Field></div><Field label={moving ? "From account" : "Account"}><select name="accountId" required>{context.accounts.map((account) => <option value={account.id} key={account.id}>{account.name} · {formatMoney(account.balance_cents, account.currency)}</option>)}</select></Field>{moving && <Field label="To account"><select name="destinationAccountId" required defaultValue=""><option value="" disabled>Choose destination</option>{context.accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field>}{!moving && <Field label="Category"><select name="categoryId" defaultValue=""><option value="">Uncategorised</option>{context.categories.filter((category) => category.kind === (transactionType === "income" ? "income" : "expense")).map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></Field>}{transactionType === "expense" && <div className="check-stack"><label><input type="checkbox" name="committed"/> Treat this as committed spending; each budget decides whether it counts</label><label><input type="checkbox" name="useSpare" disabled={!context.profile.spare_destination_id}/> Apply ×{context.profile.spare_multiplier} spare change{!context.profile.spare_destination_id ? " (configure a destination first)" : ""}</label></div>}<Submit busy={busy} label="Save transaction"/></form></>}
     {name === "account" && <><ModalTitle eyebrow="CUSTOM ACCOUNT" title="Add where your money lives" copy="Opening balances create a snapshot—not fake income."/><form onSubmit={submit("addAccount", (values) => ({ ...values, includeSpendable: values.includeSpendable === "on" }))}><Field label="Account name"><input name="name" required placeholder="Holiday cash, Revolut, Trading 212…"/></Field><div className="form-grid"><Field label="Type"><select name="type" defaultValue="bank">{["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].map((type) => <option key={type} value={type}>{typeLabel(type)}</option>)}</select></Field><Field label="Current balance"><input name="balance" type="number" min="0" step="0.01" required placeholder="0.00"/></Field></div><Field label="Credit limit (optional)"><input name="creditLimit" type="number" min="0" step="0.01" placeholder="0.00"/></Field><Field label="Account color"><input name="color" type="color" defaultValue="#1f5b4e"/></Field><label className="single-check"><input type="checkbox" name="includeSpendable" defaultChecked/> Include this balance in available-to-spend money</label><Submit busy={busy} label="Add account"/></form></>}
     {name === "category" && <><ModalTitle eyebrow="CUSTOM CATEGORY" title="Create your own label" copy="Categories organise reports without forcing category budgets."/><form onSubmit={submit("addCategory")}><Field label="Category name"><input name="name" required placeholder="Pets, Side work, Coffee…"/></Field><div className="form-grid"><Field label="Type"><select name="kind"><option value="expense">Expense</option><option value="income">Income</option></select></Field><Field label="Color"><input name="color" type="color" defaultValue="#cfe9d7"/></Field></div><Submit busy={busy} label="Add category"/></form></>}
-    {name === "week" && <><ModalTitle eyebrow="CALENDAR WEEKS" title="Choose when your week starts" copy="Weekly windows keep this weekday anchor. Month-edge weeks remain partial and receive an exact day-weighted allowance."/><form onSubmit={submit("updateWeekStart")}><Field label="First day of the week"><select name="weekStart" defaultValue={context.profile.week_start}>{weekdayLabels.map((label, value) => <option value={value} key={label}>{label}</option>)}</select></Field><div className="budget-form-note"><span>7</span><p><strong>Changing this redraws weekly boundaries</strong><small>Existing transactions stay unchanged; Remaivo recalculates the current weekly and daily windows using the new calendar anchor.</small></p></div><Submit busy={busy} label="Save week start"/></form></>}
+    {name === "week" && <><ModalTitle eyebrow="CALENDAR WEEKS" title="Choose when your week starts" copy="The weekly view simply adds the daily allocations that fall inside this calendar week."/><form onSubmit={submit("updateWeekStart")}><Field label="First day of the week"><select name="weekStart" defaultValue={context.profile.week_start}>{weekdayLabels.map((label, value) => <option value={value} key={label}>{label}</option>)}</select></Field><div className="budget-form-note"><span>7</span><p><strong>Changing this redraws the weekly view</strong><small>Transactions and daily allocations stay unchanged. Month-crossing weeks take each date’s allocation from its own month.</small></p></div><Submit busy={busy} label="Save week start"/></form></>}
     {name === "budget" && <BudgetEditor context={context} busy={busy} save={save}/>}
     {name === "plan" && <><ModalTitle eyebrow="FUTURE MONEY" title="Add a plan" copy="Schedule a repeating item, one future payment, or a purchase split into installments."/><div className="segmented plan-switch"><button type="button" className={planType === "recurring" ? "active" : ""} onClick={() => setPlanType("recurring")}>Recurring</button><button type="button" className={planType === "installment" ? "active" : ""} onClick={() => setPlanType("installment")}>Pay later / installments</button></div>{planType === "recurring" ? <form onSubmit={submit("addRecurring", (values) => ({ ...values, autoPost: values.autoPost === "on", committed: values.committed === "on" }))}><Field label="Plan name"><input name="title" required placeholder="Rent, salary, VWCE auto-invest…"/></Field><div className="form-grid"><Field label="Type"><select name="type"><option value="expense">Expense</option><option value="income">Income</option><option value="saving">Savings transfer</option><option value="investment">Auto-invest</option></select></Field><Field label="Amount"><input name="amount" type="number" min="0.01" step="0.01" required/></Field></div><Field label="Payment account"><select name="accountId" required>{context.accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field><div className="form-grid"><Field label="Frequency"><select name="frequency"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="daily">Daily</option></select></Field><Field label="Next date"><input name="nextDate" type="date" defaultValue={context.today} required/></Field></div><div className="check-stack"><label><input type="checkbox" name="committed" defaultChecked/> Reserve this before calculating spendable money</label><label><input type="checkbox" name="autoPost"/> Add automatically when due</label></div><Submit busy={busy} label="Create recurring plan"/></form> : <form onSubmit={submit("addInstallment", (values) => ({ ...values, total: installmentTotal, installmentCount, includeDailyWeekly: values.includeDailyWeekly === "on", autoPost: values.autoPost === "on" }))}><Field label="Purchase"><input name="title" required placeholder="Laptop, flights, furniture…"/></Field><div className="form-grid"><Field label="Total purchase"><input value={installmentTotal} onChange={(event) => setInstallmentTotal(event.target.value)} type="number" min="0.01" step="0.01" required/></Field><Field label="Number of payments"><input value={installmentCount} onChange={(event) => setInstallmentCount(Number(event.target.value))} type="number" min="1" max="120" required/></Field></div><div className="installment-preview"><span>{Array.from({length: Math.min(6, installmentCount)}).map((_, index) => <i key={index} />)}</span><p>{installmentTotal ? installmentCount === 1 ? `${formatMoney(Math.round(Number(installmentTotal) * 100), context.currency)} due in one payment` : `About ${formatMoney(Math.round(Number(installmentTotal) * 100 / Math.max(1, installmentCount)), context.currency)} each` : "Enter a total to preview payments"}</p></div><div className="form-grid"><Field label={installmentCount === 1 ? "Payment due date" : "First installment"}><input name="firstDueDate" type="date" defaultValue={context.today} required/></Field><Field label="Frequency"><select name="frequency" disabled={installmentCount === 1}><option value="monthly">Monthly</option><option value="weekly">Weekly</option></select></Field></div>{installmentCount === 1 && <input type="hidden" name="frequency" value="monthly"/>}<Field label="Repayment account"><select name="paymentAccountId" required>{context.accounts.filter((account) => account.type !== "investment").map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field><div className="form-grid"><Field label="Provider label (optional)"><input name="provider" placeholder="Klarna, store finance…"/></Field><Field label="Linked credit account (optional)"><select name="linkedCreditAccountId" defaultValue=""><option value="">Standalone plan</option>{context.accounts.filter((account) => account.type === "credit").map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field></div><div className="check-stack"><label><input type="checkbox" name="includeDailyWeekly"/> Include payments in daily and weekly allowance</label><label><input type="checkbox" name="autoPost"/> Mark payments paid automatically on their due date</label></div><Submit busy={busy} label="Create pay-later plan"/></form>}</>}
     {name === "spare" && <><ModalTitle eyebrow="SPARE CHANGE" title="Accelerate every round-up" copy="A €3.60 purchase creates €0.40; at ×3 the pot receives €1.20."/><form onSubmit={submit("updateSpare")}><Field label="Multiplier"><select name="multiplier" defaultValue={context.profile.spare_multiplier}>{[1,2,3,4,5,6,8,10].map((value) => <option value={value} key={value}>×{value}</option>)}</select></Field><Field label="Destination"><select name="destinationAccountId" defaultValue={context.profile.spare_destination_id ?? ""} required><option value="" disabled>Choose savings or investment account</option>{context.accounts.filter((account) => ["savings", "investment"].includes(account.type)).map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field><div className="form-grid"><Field label="Sweep method"><select name="sweepMode" defaultValue={context.profile.spare_sweep_mode}><option value="threshold">At threshold</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="manual">Manually</option></select></Field><Field label="Threshold"><input name="threshold" type="number" min="1" step="1" defaultValue={context.profile.spare_threshold_cents / 100}/></Field></div><Submit busy={busy} label="Save spare-change rule"/></form></>}
@@ -607,38 +509,19 @@ function ArchiveAction({ busy, label, onClick }: { busy: boolean; label: string;
 }
 
 function BudgetEditor({ context, busy, save }: { context: Context; busy: boolean; save: (action: string, payload: Record<string, unknown>) => Promise<void> }) {
-  const initial = context.budgets.find((rule) => rule.period === "daily");
-  const [period, setPeriod] = useState("daily");
-  const [enabled, setEnabled] = useState(initial?.active !== 0);
-  const [source, setSource] = useState(initial?.source_type ?? "manual");
-  const [calculation, setCalculation] = useState(initial?.calculation_mode ?? "adaptive");
-  const [carry, setCarry] = useState(initial?.carry_mode ?? "reset");
-  const [parentPeriod, setParentPeriod] = useState(initial?.parent_period ?? "weekly");
-  const selected = context.budgets.find((rule) => rule.period === period);
-  const parentOptions = period === "daily" ? ["weekly", "monthly"] : period === "weekly" ? ["monthly"] : [];
-  const resetOptions = period === "daily" ? ["weekly", "monthly", "none"] : period === "weekly" ? ["monthly", "none"] : ["yearly", "none"];
-
-  function choosePeriod(nextPeriodName: string) {
-    const rule = context.budgets.find((item) => item.period === nextPeriodName);
-    setPeriod(nextPeriodName);
-    setEnabled(rule?.active !== 0);
-    setSource(nextPeriodName === "monthly" ? "manual" : rule?.source_type ?? "manual");
-    setCalculation(rule?.calculation_mode ?? "adaptive");
-    setCarry(rule?.carry_mode ?? "reset");
-    setParentPeriod(rule?.parent_period ?? (nextPeriodName === "daily" ? "weekly" : "monthly"));
-  }
+  const root = context.budgets.find((rule) => rule.period === "monthly") ?? context.budgets[0];
+  const [calculation, setCalculation] = useState(root?.calculation_mode === "adaptive" ? "adaptive" : "fixed_split");
+  const [carry, setCarry] = useState(["reset", "stack_unused", "stack_signed", "stack_capped"].includes(root?.carry_mode ?? "") ? root.carry_mode : "reset");
 
   async function submitBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
     await save("updateBudget", {
       ...values,
-      period,
-      anchorDate: selected?.anchor_date ?? context.today,
-      enabled,
-      sourceType: period === "monthly" ? "manual" : source,
+      anchorDate: root?.anchor_date ?? context.today,
+      enabled: true,
       calculationMode: calculation,
-      carryMode: carry,
+      carryMode: calculation === "adaptive" ? "reset" : carry,
       includeEveryday: values.includeEveryday === "on",
       includeCommitted: values.includeCommitted === "on",
       includeSavings: values.includeSavings === "on",
@@ -646,19 +529,13 @@ function BudgetEditor({ context, busy, save }: { context: Context; busy: boolean
     });
   }
 
-  return <><ModalTitle eyebrow="BUDGET ENGINE" title="Configure your spending windows" copy="Daily, weekly, and monthly windows can be independent, linked together, or turned off without losing their settings."/><form key={period} onSubmit={submitBudget}>
-    <div className="segmented">{["daily", "weekly", "monthly"].map((value) => <button type="button" className={period === value ? "active" : ""} key={value} onClick={() => choosePeriod(value)}>{value}</button>)}</div>
-    <label className="budget-enable"><span><strong>{period[0].toUpperCase() + period.slice(1)} window</strong><small>{enabled ? "Active and shown in your budgets" : "Paused; its settings will be kept"}</small></span><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)}/><i/></label>
-    {period !== "monthly" && <Field label="Allowance source"><select value={source} onChange={(event) => setSource(event.target.value)}><option value="manual">Enter an amount manually</option><option value="derived">Derive from a larger budget</option></select></Field>}
-    {source === "manual" || period === "monthly" ? <Field label={period === "weekly" ? "Full seven-day allowance" : "Base allowance"}><input name="base" type="number" min="0" step="0.01" defaultValue={(selected?.base_cents ?? 0) / 100} required/></Field> : <>
-      <input type="hidden" name="base" value={(selected?.base_cents ?? 0) / 100}/>
-      <div className="form-grid"><Field label="Derive from"><select name="parentPeriod" value={parentPeriod} onChange={(event) => setParentPeriod(event.target.value)}>{parentOptions.map((value) => <option value={value} key={value}>{value[0].toUpperCase() + value.slice(1)} budget</option>)}</select></Field><Field label="Calculation"><select value={calculation} onChange={(event) => setCalculation(event.target.value)}>{Object.entries(calculationLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></Field></div>
-      {calculation === "percentage" ? <Field label="Percentage of parent allowance"><input name="percentage" type="number" min="1" max="100" step="0.1" defaultValue={(selected?.percentage_basis_points ?? 10000) / 100} required/></Field> : <input type="hidden" name="percentage" value={(selected?.percentage_basis_points ?? 10000) / 100}/>}
-      <div className="budget-form-note"><span>↳</span><p><strong>{calculation === "adaptive" ? "Linked allowance, independent budget rules" : calculation === "fixed_split" ? "Equal calendar-week shares" : "Uses your chosen share"}</strong><small>{calculation === "adaptive" ? "The allowance comes from the parent, while this window keeps its own carryover and transaction choices." : "Spending and carryover are tracked inside this child window."}</small></p></div>
-    </>}
-    <div className="form-grid"><Field label="Carryover mode"><select value={carry} onChange={(event) => setCarry(event.target.value)}>{Object.entries(carryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></Field><Field label="Hard reset"><select name="hardReset" defaultValue={selected?.hard_reset ?? resetOptions[0]}>{resetOptions.map((value) => <option value={value} key={value}>{resetLabels[value]}</option>)}</select></Field></div>{carry === "stack_capped" ? <Field label="Maximum carried amount"><input name="carryCap" type="number" min="0" step="0.01" defaultValue={(selected?.carry_cap_cents ?? 0) / 100}/></Field> : <input type="hidden" name="carryCap" value={(selected?.carry_cap_cents ?? 0) / 100}/>} 
-    <fieldset className="budget-inclusions"><legend>What should reduce this window?</legend><label><input type="checkbox" name="includeEveryday" defaultChecked={selected?.include_everyday !== 0}/><span><strong>Everyday expenses</strong><small>Groceries, eating out, shopping and other flexible spending</small></span></label><label><input type="checkbox" name="includeCommitted" defaultChecked={selected?.include_committed === 1}/><span><strong>Committed payments</strong><small>Bills and installments due inside this window</small></span></label><label><input type="checkbox" name="includeSavings" defaultChecked={selected?.include_savings === 1}/><span><strong>Savings transfers</strong><small>Money moved into savings accounts</small></span></label><label><input type="checkbox" name="includeInvestments" defaultChecked={selected?.include_investments === 1}/><span><strong>Investment contributions</strong><small>Auto-invest and manual investment transfers</small></span></label></fieldset>
-    <Submit busy={busy} label="Save this window"/>
+  return <><ModalTitle eyebrow="BUDGET PLAN" title="One monthly budget, three consistent views" copy="Daily allocations power both the Today and Week views. Transaction choices apply everywhere."/><form onSubmit={submitBudget}>
+    <Field label="Monthly budget"><input name="base" type="number" min="0" step="0.01" defaultValue={(root?.base_cents ?? 0) / 100} required/></Field>
+    <Field label="Allocation"><select value={calculation} onChange={(event) => setCalculation(event.target.value)}><option value="fixed_split">Fixed</option><option value="adaptive">Adaptive</option></select></Field>
+    {calculation === "adaptive" ? <div className="budget-form-note"><span>↻</span><p><strong>Automatic redistribution</strong><small>Remaining monthly funds are spread across the remaining calendar days. Today’s allocation stays frozen until tomorrow.</small></p></div> : <><div className="form-grid"><Field label="Fixed carry"><select value={carry} onChange={(event) => setCarry(event.target.value)}>{["reset", "stack_unused", "stack_signed", "stack_capped"].map((value) => <option value={value} key={value}>{carryLabels[value]}</option>)}</select></Field><Field label="Reset carry"><select name="hardReset" defaultValue={["daily", "weekly", "monthly"].includes(root?.hard_reset ?? "") ? root?.hard_reset : "monthly"}>{["daily", "weekly", "monthly"].map((value) => <option value={value} key={value}>{resetLabels[value]}</option>)}</select></Field></div>{carry === "stack_capped" ? <Field label="Maximum carried amount"><input name="carryCap" type="number" min="0" step="0.01" defaultValue={(root?.carry_cap_cents ?? 0) / 100}/></Field> : <input type="hidden" name="carryCap" value={(root?.carry_cap_cents ?? 0) / 100}/>}</>}
+    {calculation === "adaptive" && <><input type="hidden" name="hardReset" value="monthly"/><input type="hidden" name="carryCap" value="0"/></>}
+    <fieldset className="budget-inclusions"><legend>Transactions included everywhere</legend><label><input type="checkbox" name="includeEveryday" defaultChecked={root?.include_everyday !== 0}/><span><strong>Everyday expenses</strong><small>Groceries, eating out, shopping and other flexible spending</small></span></label><label><input type="checkbox" name="includeCommitted" defaultChecked={root?.include_committed === 1}/><span><strong>Committed payments</strong><small>Bills and installments reserved by the plan</small></span></label><label><input type="checkbox" name="includeSavings" defaultChecked={root?.include_savings === 1}/><span><strong>Savings transfers</strong><small>Money moved into savings accounts</small></span></label><label><input type="checkbox" name="includeInvestments" defaultChecked={root?.include_investments === 1}/><span><strong>Investment contributions</strong><small>Auto-invest and manual investment transfers</small></span></label></fieldset>
+    <Submit busy={busy} label="Save budget plan"/>
   </form></>;
 }
 
@@ -674,15 +551,17 @@ function Onboarding({ displayName, busy, onComplete }: { displayName: string; bu
   const [currency, setCurrency] = useState("EUR");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [accounts, setAccounts] = useState([{ id: crypto.randomUUID(), name: "Main account", type: "bank", balance: "", includeSpendable: true, color: "#1f5b4e" }]);
-  const [budgets, setBudgets] = useState({ daily: "50", weekly: "300", monthly: "1200" });
-  const [carryModes, setCarryModes] = useState({ daily: "stack_unused", weekly: "stack_unused", monthly: "reset" });
+  const [budgets, setBudgets] = useState({ monthly: "1200" });
+  const [budgetMode, setBudgetMode] = useState("adaptive");
+  const [carryMode, setCarryMode] = useState("stack_signed");
+  const [resetBoundary, setResetBoundary] = useState("monthly");
 
   function updateAccount(id: string, key: string, value: string | boolean) { setAccounts((items) => items.map((item) => item.id === id ? { ...item, [key]: value } : item)); }
-  async function finish() { await onComplete({ currency, startDate, weekStart: 1, accounts, budgets, carryModes }); }
+  async function finish() { await onComplete({ currency, startDate, weekStart: 1, accounts, budgets, budgetMode, carryMode, resetBoundary }); }
   return <main className="onboarding-screen"><aside className="onboarding-aside"><div className="brand-mark"><span className="remaivo-logo-mark" aria-hidden="true" /><strong>Remaivo</strong></div><div><p className="eyebrow">YOUR OPENING SNAPSHOT</p><h1>Start where your money is today.</h1><p>No fake income. No starting from zero. Add what already exists, then Remaivo takes it from here.</p></div><ol>{["Basics", "Accounts", "Budgets", "Review"].map((label, index) => <li className={step === index ? "active" : step > index ? "done" : ""} key={label}><span>{step > index ? "✓" : index + 1}</span>{label}</li>)}</ol><small>Signed in as {displayName}</small></aside><section className="onboarding-main">
     {step === 0 && <div className="setup-panel"><p className="eyebrow">WELCOME, {displayName.split(" ")[0].toUpperCase()}</p><h2>Let’s set your financial starting line.</h2><p>Choose the few basics Remaivo needs to organise every amount correctly.</p><div className="setup-form"><Field label="Primary currency"><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="EUR">Euro · EUR</option><option value="USD">US dollar · USD</option><option value="GBP">British pound · GBP</option></select></Field><Field label="Opening snapshot date"><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}/></Field><div className="setup-note"><span>✓</span><p><strong>This date is not income.</strong><small>Opening balances stay out of spending and income reports.</small></p></div></div></div>}
     {step === 1 && <div className="setup-panel wide"><p className="eyebrow">FINANCIAL ACCOUNTS</p><h2>Add where your money already lives.</h2><p>Include spending, savings, cash, raw investments, or credit. You can add custom accounts later.</p><div className="setup-accounts">{accounts.map((account, index) => <article key={account.id}><span className="setup-account-number">{index + 1}</span><input aria-label="Account name" value={account.name} onChange={(event) => updateAccount(account.id, "name", event.target.value)} placeholder="Account name"/><select aria-label="Account type" value={account.type} onChange={(event) => { const type = event.target.value; updateAccount(account.id, "type", type); updateAccount(account.id, "includeSpendable", !["savings", "investment", "credit"].includes(type)); }}><option value="bank">Bank</option><option value="savings">Savings</option><option value="cash">Cash</option><option value="credit">Credit</option><option value="investment">Investment</option><option value="wallet">Wallet</option><option value="custom">Custom</option></select><label><span>{currency}</span><input aria-label="Opening balance" type="number" min="0" step="0.01" value={account.balance} onChange={(event) => updateAccount(account.id, "balance", event.target.value)} placeholder="0.00"/></label>{accounts.length > 1 && <button aria-label="Remove account" onClick={() => setAccounts((items) => items.filter((item) => item.id !== account.id))}>×</button>}</article>)}<button className="add-account-line" onClick={() => setAccounts((items) => [...items, { id: crypto.randomUUID(), name: "", type: "bank", balance: "", includeSpendable: true, color: ["#d68b64", "#4c8b98", "#705f83"][items.length % 3] }])}>＋ Add another account</button></div></div>}
-    {step === 2 && <div className="setup-panel wide"><p className="eyebrow">CONNECTED BUDGETS</p><h2>Start with one monthly pool.</h2><p>Remaivo will calculate a day-weighted weekly allowance from the month, then adapt the daily allowance from the week. Each window still keeps its own carryover rule.</p><div className="setup-budget-grid">{(["daily", "weekly", "monthly"] as const).map((period) => <article key={period}><span>{period === "daily" ? "D" : period === "weekly" ? "W" : "M"}</span><strong>{period}</strong>{period === "daily" || period === "weekly" ? <div className="setup-derived"><b>{period === "weekly" ? "Day-weighted" : "Adaptive"}</b><small>From the {period === "daily" ? "weekly" : "monthly"} pool</small><em>{period === "daily" ? "Resets each week" : "Partial weeks are proportional"}</em></div> : <label><small>Manual allowance</small><div><i>{currency}</i><input type="number" min="0" step="1" value={budgets[period]} onChange={(event) => setBudgets((value) => ({ ...value, [period]: event.target.value }))}/></div></label>}<label><small>Carryover</small><select value={carryModes[period]} onChange={(event) => setCarryModes((value) => ({ ...value, [period]: event.target.value }))}>{Object.entries(carryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></article>)}</div><div className="stack-example"><span>↻</span><p><strong>Calendar weeks stay realistic at month boundaries</strong><small>The week still starts on your chosen weekday. A shorter first or last week receives only its exact day-weighted share of the monthly pool.</small></p></div></div>}
+    {step === 2 && <div className="setup-panel wide"><p className="eyebrow">ONE BUDGET PLAN</p><h2>Start with one monthly pool.</h2><p>Remaivo allocates that pool by calendar day. Today and Week are always derived views of the same plan.</p><div className="setup-budget-grid"><article><span>M</span><strong>Monthly budget</strong><label><small>Spending pool</small><div><i>{currency}</i><input type="number" min="0" step="1" value={budgets.monthly} onChange={(event) => setBudgets({ monthly: event.target.value })}/></div></label></article><article><span>↻</span><strong>Allocation</strong><label><small>Mode</small><select value={budgetMode} onChange={(event) => setBudgetMode(event.target.value)}><option value="adaptive">Adaptive</option><option value="fixed_split">Fixed</option></select></label><div className="setup-derived"><b>{budgetMode === "adaptive" ? "Redistributes each morning" : "Same calendar-day base"}</b><small>{budgetMode === "adaptive" ? "Today stays frozen after it starts" : "Transactions never change the base"}</small></div></article>{budgetMode === "fixed_split" && <article><span>＋</span><strong>Fixed carry</strong><label><small>Mode</small><select value={carryMode} onChange={(event) => setCarryMode(event.target.value)}>{["reset", "stack_unused", "stack_signed", "stack_capped"].map((value) => <option value={value} key={value}>{carryLabels[value]}</option>)}</select></label><label><small>Reset</small><select value={resetBoundary} onChange={(event) => setResetBoundary(event.target.value)}>{["daily", "weekly", "monthly"].map((value) => <option value={value} key={value}>{resetLabels[value]}</option>)}</select></label></article>}</div><div className="stack-example"><span>7</span><p><strong>Weeks are views, not separate budgets</strong><small>Remaivo adds the daily allocations inside each calendar week, including weeks that cross into a new month.</small></p></div></div>}
     {step === 3 && <div className="setup-panel"><p className="eyebrow">READY TO BEGIN</p><h2>Your opening snapshot is set.</h2><p>Remaivo will create these balances and rules without counting any of them as new activity.</p><div className="review-list"><div><span>◫</span><p><strong>{accounts.length} financial {accounts.length === 1 ? "account" : "accounts"}</strong><small>{accounts.map((account) => account.name || typeLabel(account.type)).join(" · ")}</small></p></div><div><span>◔</span><p><strong>{currency} {budgets.monthly} monthly spending pool</strong><small>Weekly and daily allowances adapt automatically</small></p></div><div><span>☁</span><p><strong>Private cross-device space</strong><small>Connected to your ChatGPT sign-in</small></p></div></div></div>}
     <footer className="setup-actions"><button className="ghost-button" disabled={step === 0 || busy} onClick={() => setStep((value) => value - 1)}>Back</button>{step < 3 ? <button className="primary-button" onClick={() => setStep((value) => value + 1)}>Continue <span>→</span></button> : <button className="primary-button" disabled={busy} onClick={finish}>{busy ? "Creating your space…" : "Open Remaivo"}<span>→</span></button>}</footer>
   </section></main>;
