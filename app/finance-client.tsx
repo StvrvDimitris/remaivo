@@ -1,12 +1,13 @@
 "use client";
 
 import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEffect, useState } from "react";
+import { adaptiveRemainingAllocation, calendarWeekSegmentsInMonth, fixedSplitAllocation, stackedWindowValue } from "./budget-math";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
 type Transaction = { id: string; account_id: string | null; destination_account_id: string | null; category_id: string | null; type: string; description: string; amount_cents: number; date: string; committed: number; counts_daily: number; counts_weekly: number; counts_monthly: number; counts_general: number; recurring_plan_id: string | null; installment_plan_id: string | null; replaces_transaction_id: string | null; spare_change_cents: number };
 type BudgetRule = { id: string; period: string; base_cents: number; carry_mode: string; carry_cap_cents: number | null; anchor_date: string; source_type: string; parent_period: string | null; calculation_mode: string; percentage_basis_points: number; hard_reset: string; include_everyday: number; include_committed: number; include_savings: number; include_investments: number; active: number };
-type BudgetResult = BudgetRule & { remaining: number; effective_base_cents: number; current_base_cents: number; carried_cents: number; spent_cents: number; planned_cents: number; source_note: string; unavailable: boolean; seven_day_allowance_cents?: number; remaining_days?: number };
+type BudgetResult = BudgetRule & { remaining: number; effective_base_cents: number; current_base_cents: number; carried_cents: number; spent_cents: number; planned_cents: number; window_start: string; window_end: string; source_note: string; unavailable: boolean; seven_day_allowance_cents?: number; remaining_days?: number };
 type RecurringPlan = { id: string; title: string; type: string; amount_cents: number; account_id: string | null; destination_account_id: string | null; frequency: string; interval_count: number; next_date: string; auto_post: number; committed: number };
 type InstallmentPlan = { id: string; title: string; provider: string | null; total_cents: number; paid_cents: number; installment_count: number; first_due_date: string; frequency: string; payment_account_id: string; linked_credit_account_id: string | null; include_daily_weekly: number; auto_post: number; status: string };
 type InstallmentPayment = { id: string; plan_id: string; sequence: number; due_date: string; amount_cents: number; status: string };
@@ -118,17 +119,6 @@ function weeklyMonthSegment(today: string, weekStart: number) {
   return { start, end, days: daysBetween(start, end), monthDaysRemainingAtStart: daysBetween(start, monthEnd) };
 }
 
-function adaptiveWeekWindow(today: string, weekStart: number) {
-  const monthEnd = nextPeriod(`${today.slice(0, 7)}-01`, "monthly");
-  const calendarWeekEnd = nextPeriod(periodStart(today, "weekly", weekStart), "weekly");
-  const end = calendarWeekEnd < monthEnd ? calendarWeekEnd : monthEnd;
-  return {
-    end,
-    daysRemaining: daysBetween(today, end),
-    monthDaysRemaining: daysBetween(today, monthEnd),
-  };
-}
-
 function transactionCounts(rule: BudgetRule, transaction: Transaction) {
   if (transaction.type === "expense") return transaction.committed === 1 ? rule.include_committed === 1 : rule.include_everyday === 1;
   if (transaction.type === "installment_payment") return rule.include_committed === 1;
@@ -175,7 +165,7 @@ function plannedFor(rule: BudgetRule, recurring: RecurringPlan[], payments: Inst
   return recurringAmount + installmentAmount;
 }
 
-function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number) {
+function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number, historyStart?: string) {
   const spendFor = (start: string, end: string) => transactions
     .filter((transaction) => transaction.date >= start && transaction.date < end && transactionCounts(rule, transaction))
     .reduce((sum, transaction) => sum + transaction.amount_cents, 0);
@@ -184,12 +174,12 @@ function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transac
     const spent = spendFor(rule.anchor_date, "9999-12-31");
     const planned = plannedFor(rule, recurring, payments, today, "9999-12-31");
     const remaining = base - spent - planned;
-    return { remaining, allocation: base, currentBase: base, carry: 0, spent, planned };
+    return { remaining, allocation: base, currentBase: base, carry: 0, spent, planned, windowStart: rule.anchor_date, windowEnd: "9999-12-31" };
   }
 
   const nominalStart = periodStart(today, rule.period, weekStart);
   const boundary = resetBoundary(rule);
-  let cursor = periodStart(rule.anchor_date, rule.period, weekStart);
+  let cursor = periodStart(historyStart ?? rule.anchor_date, rule.period, weekStart);
   let carry = 0;
   let guard = 0;
   while (cursor < nominalStart && guard < 4000) {
@@ -215,7 +205,7 @@ function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transac
   const spent = spendFor(currentStart, currentEnd);
   const planned = plannedFor(rule, recurring, payments, currentStart, currentEnd);
   const remaining = allocation - spent - planned;
-  return { remaining, allocation, currentBase, carry, spent, planned };
+  return { remaining, allocation, currentBase, carry, spent, planned, windowStart: currentStart, windowEnd: currentEnd };
 }
 
 function divisionCounts(period: string, parent: BudgetResult, today: string, weekStart: number) {
@@ -226,19 +216,34 @@ function divisionCounts(period: string, parent: BudgetResult, today: string, wee
     return { total: daysBetween(segment.start, segment.end), remaining: daysBetween(today, segment.end) };
   }
   if (period === "daily" && parent.period === "monthly") return { total: daysInMonth, remaining: daysInMonth - date.getUTCDate() + 1 };
-  if (period === "weekly" && parent.period === "monthly") return { total: Math.ceil(daysInMonth / 7), remaining: Math.ceil((daysInMonth - date.getUTCDate() + 1) / 7) };
+  if (period === "weekly" && parent.period === "monthly") return { total: calendarWeekSegmentsInMonth(today, weekStart), remaining: Math.ceil((daysInMonth - date.getUTCDate() + 1) / 7) };
   return { total: 1, remaining: 1 };
 }
 
-function adaptiveDerivedBase(period: string, parent: BudgetResult, today: string, weekStart: number) {
-  const divisions = divisionCounts(period, parent, today, weekStart);
-  if (period === "weekly" && parent.period === "monthly") {
-    const segment = weeklyMonthSegment(today, weekStart);
-    const monthStart = `${today.slice(0, 7)}-01`;
-    const daysInMonth = daysBetween(monthStart, nextPeriod(monthStart, "monthly"));
-    return Math.max(0, Math.round(parent.effective_base_cents * segment.days / Math.max(1, daysInMonth)));
+function derivedWeeklyValue(rule: BudgetRule, parent: BudgetResult, transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number) {
+  const monthStart = parent.window_start;
+  const monthEnd = parent.window_end;
+  const monthDays = Math.max(1, daysBetween(monthStart, monthEnd));
+  const fixedBase = fixedSplitAllocation(parent.effective_base_cents, calendarWeekSegmentsInMonth(today, weekStart));
+  const segments: { start: string; end: string }[] = [];
+  let start = monthStart;
+  while (start < monthEnd) {
+    const calendarEnd = nextPeriod(periodStart(start, "weekly", weekStart), "weekly");
+    const end = calendarEnd < monthEnd ? calendarEnd : monthEnd;
+    segments.push({ start, end });
+    start = end;
   }
-  return Math.max(0, Math.round(parent.effective_base_cents / Math.max(1, divisions.total)));
+  const currentIndex = Math.max(0, segments.findIndex((segment) => today >= segment.start && today < segment.end));
+  const throughCurrent = segments.slice(0, currentIndex + 1);
+  const bases = throughCurrent.map((segment) => rule.calculation_mode === "adaptive"
+    ? Math.round(parent.effective_base_cents * daysBetween(segment.start, segment.end) / monthDays)
+    : fixedBase);
+  const spent = throughCurrent.map((segment) => transactions.filter((transaction) => transaction.date >= segment.start && transaction.date < segment.end && transactionCounts(rule, transaction)).reduce((sum, transaction) => sum + transaction.amount_cents, 0));
+  const planned = throughCurrent.map((segment, index) => index === throughCurrent.length - 1 ? plannedFor(rule, recurring, payments, segment.start, segment.end) : 0);
+  const deductions = spent.map((value, index) => value + planned[index]);
+  const stacked = stackedWindowValue(bases, deductions, rule.carry_mode, rule.carry_cap_cents);
+  const current = throughCurrent.at(-1) ?? { start: today, end: nextPeriod(today, "daily") };
+  return { ...stacked, spent: spent.at(-1) ?? 0, planned: planned.at(-1) ?? 0, windowStart: current.start, windowEnd: current.end };
 }
 
 function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[], recurring: RecurringPlan[], payments: InstallmentPayment[], today: string, weekStart: number) {
@@ -248,20 +253,18 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
     const rule = byPeriod[period];
     if (!rule) continue;
     if (rule.active !== 1) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: rule.base_cents, current_base_cents: rule.base_cents, carried_cents: 0, spent_cents: 0, planned_cents: 0, source_note: "Turned off", unavailable: false };
+      calculated[period] = { ...rule, remaining: 0, effective_base_cents: rule.base_cents, current_base_cents: rule.base_cents, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: today, source_note: "Turned off", unavailable: false };
       continue;
     }
     const parent = rule.parent_period ? calculated[rule.parent_period] : undefined;
     if (rule.source_type === "derived" && (!parent || parent.active !== 1)) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: 0, current_base_cents: 0, carried_cents: 0, spent_cents: 0, planned_cents: 0, source_note: `Needs an active ${rule.parent_period ?? "parent"} budget`, unavailable: true };
+      calculated[period] = { ...rule, remaining: 0, effective_base_cents: 0, current_base_cents: 0, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: today, source_note: `Needs an active ${rule.parent_period ?? "parent"} budget`, unavailable: true };
       continue;
     }
     if (rule.source_type === "derived" && parent) {
       const divisions = divisionCounts(rule.period, parent, today, weekStart);
-      if (rule.calculation_mode === "adaptive") {
-        const base = adaptiveDerivedBase(rule.period, parent, today, weekStart);
-        const value = manualBudgetValue(rule, base, transactions, recurring, payments, today, weekStart);
-        const window = rule.period === "weekly" && parent.period === "monthly" ? adaptiveWeekWindow(today, weekStart) : null;
+      if (rule.period === "weekly" && parent.period === "monthly" && ["adaptive", "fixed_split"].includes(rule.calculation_mode)) {
+        const value = derivedWeeklyValue(rule, parent, transactions, recurring, payments, today, weekStart);
         calculated[period] = {
           ...rule,
           remaining: value.remaining,
@@ -270,21 +273,30 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
           carried_cents: value.carry,
           spent_cents: value.spent,
           planned_cents: value.planned,
-          seven_day_allowance_cents: window ? Math.round(parent.effective_base_cents / Math.max(1, divisionCounts("daily", parent, today, weekStart).total) * Math.min(7, window.monthDaysRemaining)) : undefined,
-          remaining_days: window?.daysRemaining ?? (rule.period === "daily" ? 1 : divisions.remaining),
-          source_note: `Adaptive allowance from ${parent.period}; this window uses its own counting and carryover rules`,
+          window_start: value.windowStart,
+          window_end: value.windowEnd,
+          seven_day_allowance_cents: rule.calculation_mode === "adaptive" ? value.currentBase : undefined,
+          remaining_days: daysBetween(today, value.windowEnd),
+          source_note: `${rule.calculation_mode === "adaptive" ? "Day-weighted" : "Fixed"} ${parent.period} share with carry replayed from ${value.windowStart === parent.window_start ? "the month start" : "earlier calendar weeks"}`,
           unavailable: false,
         };
+      } else if (rule.calculation_mode === "adaptive") {
+        const sourceSpent = transactions.filter((transaction) => transaction.date >= parent.window_start && transaction.date < parent.window_end && transactionCounts(rule, transaction)).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
+        const sourcePlanned = plannedFor(rule, recurring, payments, parent.window_start, parent.window_end);
+        const remainingDays = daysBetween(today, parent.window_end);
+        const targetEnd = nextPeriod(today, "daily") < parent.window_end ? nextPeriod(today, "daily") : parent.window_end;
+        const base = adaptiveRemainingAllocation(parent.effective_base_cents, sourceSpent, sourcePlanned, remainingDays, daysBetween(today, targetEnd));
+        calculated[period] = { ...rule, remaining: base, effective_base_cents: base, current_base_cents: base, carried_cents: 0, spent_cents: 0, planned_cents: 0, window_start: today, window_end: targetEnd, remaining_days: 1, source_note: `Adaptive share of the carried ${parent.period} allowance; counted transactions are deducted once`, unavailable: false };
       } else {
         const base = rule.calculation_mode === "percentage"
           ? Math.max(0, Math.round(parent.effective_base_cents * rule.percentage_basis_points / 10000))
-          : Math.max(0, Math.round(parent.effective_base_cents / Math.max(1, divisions.total)));
-        const value = manualBudgetValue(rule, base, transactions, recurring, payments, today, weekStart);
-        calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, source_note: rule.calculation_mode === "percentage" ? `${rule.percentage_basis_points / 100}% of ${parent.period}` : `Even split of ${parent.period}`, unavailable: false };
+          : fixedSplitAllocation(parent.effective_base_cents, divisions.total);
+        const value = manualBudgetValue(rule, base, transactions, recurring, payments, today, weekStart, parent.window_start);
+        calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, window_start: value.windowStart, window_end: value.windowEnd, source_note: rule.calculation_mode === "percentage" ? `${rule.percentage_basis_points / 100}% of ${parent.period}` : `Fixed split of the original ${parent.period} allowance`, unavailable: false };
       }
     } else {
       const value = manualBudgetValue(rule, rule.base_cents, transactions, recurring, payments, today, weekStart);
-      calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, source_note: "Manual allowance", unavailable: false };
+      calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, window_start: value.windowStart, window_end: value.windowEnd, source_note: "Manual allowance", unavailable: false };
     }
   }
   return rules.map((rule) => calculated[rule.period]);
