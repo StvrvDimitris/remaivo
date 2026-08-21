@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
+import { PwaClient } from "./pwa-client";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,12 +40,6 @@ export async function generateMetadata(): Promise<Metadata> {
       shortcut: "/remaivo-v1-favicon-32.png",
       apple: [{ url: "/remaivo-v1-apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
     },
-    appleWebApp: {
-      capable: true,
-      title: "Remaivo",
-      statusBarStyle: "black-translucent",
-    },
-    other: { "mobile-web-app-capable": "yes" },
     openGraph: { title, description, type: "website" },
     twitter: { card: "summary", title, description },
   };
@@ -60,6 +55,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <PwaClient />
         {children}
       </body>
     </html>

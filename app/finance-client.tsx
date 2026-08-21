@@ -1,11 +1,7 @@
 "use client";
 
 import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEffect, useState } from "react";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+import { clearRemaivoInstallPrompt, getRemaivoInstallPrompt, type RemaivoInstallPrompt } from "./pwa-client";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
@@ -336,7 +332,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<RemaivoInstallPrompt | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
 
   const load = useCallback(async () => {
@@ -353,31 +349,24 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
 
   useEffect(() => {
     const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
-    setIsInstalled(window.matchMedia("(display-mode: standalone)").matches || standaloneNavigator.standalone === true);
-    navigator.serviceWorker?.register("/sw.js", { scope: "/" }).catch(() => undefined);
-    const onInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
+    const syncInstallState = () => {
+      setIsInstalled(window.matchMedia("(display-mode: standalone)").matches || standaloneNavigator.standalone === true || document.documentElement.dataset.remaivoInstalled === "true");
+      setInstallPrompt(getRemaivoInstallPrompt() ?? null);
     };
-    const onInstalled = () => {
-      setIsInstalled(true);
-      setInstallPrompt(null);
-    };
-    window.addEventListener("beforeinstallprompt", onInstallPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onInstallPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    syncInstallState();
+    window.addEventListener("remaivo-install-state", syncInstallState);
+    return () => window.removeEventListener("remaivo-install-state", syncInstallState);
   }, []);
 
   async function installApp() {
-    if (!installPrompt) {
-      setNotice(isInstalled ? "Remaivo is already installed as an app." : "In Chrome, use Install app from the browser menu once it becomes available.");
+    const prompt = installPrompt ?? getRemaivoInstallPrompt();
+    if (!prompt) {
+      setNotice(isInstalled ? "Remaivo is already installed as an app." : "Chrome is still checking app installation. Keep Remaivo open briefly and try again.");
       return;
     }
-    await installPrompt.prompt();
-    const choice = await installPrompt.userChoice;
+    await prompt.prompt();
+    const choice = await prompt.userChoice;
+    clearRemaivoInstallPrompt();
     setInstallPrompt(null);
     if (choice.outcome === "accepted") setNotice("Remaivo is installing as an app.");
   }
@@ -533,7 +522,7 @@ function GoalsPage({ context, onGoal, onSpare, onSweep, onEdit }: { context: Con
 }
 
 function SettingsPage({ context, onCategory, onSpare, onWeek, onInstall, installReady, isInstalled, onEditCategory }: { context: Context; onCategory: () => void; onSpare: () => void; onWeek: () => void; onInstall: () => void; installReady: boolean; isInstalled: boolean; onEditCategory: (record: Category) => void }) {
-  return <div className="settings-grid"><section className="page-card"><div className="section-heading"><div><p>CATEGORIES</p><h3>Custom income & expense labels</h3></div><button className="ghost-button" onClick={onCategory}>＋ Add category</button></div><p className="edit-hint">Double-click or hold a category to edit or archive it.</p><div className="category-cloud">{context.categories.map((category) => <span className="editable-record" {...editableProps(() => onEditCategory(category))} key={category.id} style={{ background: category.color }}><i>{category.name[0]}</i>{category.name}<small>{category.kind}</small></span>)}</div></section><section className="page-card setting-stack"><div><span className="setting-icon">¤</span><span><strong>Currency</strong><small>Primary display and manual entry currency</small></span><b>{context.profile.currency}</b></div><button onClick={onSpare}><span className="setting-icon">×{context.profile.spare_multiplier}</span><span><strong>Spare change</strong><small>{context.profile.spare_sweep_mode} · {formatMoney(context.profile.spare_threshold_cents, context.currency)} threshold</small></span><b>→</b></button><button onClick={onWeek}><span className="setting-icon">7</span><span><strong>Week starts</strong><small>Calendar-week anchor for weekly and daily windows</small></span><b>{weekdayLabels[context.profile.week_start]} →</b></button><button onClick={onInstall}><span className="setting-icon">R</span><span><strong>Install Remaivo</strong><small>{isInstalled ? "Running as a standalone app" : installReady ? "Install the full app experience from Chrome" : "Chrome will offer installation when the app is ready"}</small></span><b>{isInstalled ? "Installed" : "Install →"}</b></button><div><span className="setting-icon">☁</span><span><strong>Cross-device data</strong><small>Stored privately with your ChatGPT sign-in</small></span><b>Active</b></div></section></div>;
+  return <div className="settings-grid"><section className="page-card"><div className="section-heading"><div><p>CATEGORIES</p><h3>Custom income & expense labels</h3></div><button className="ghost-button" onClick={onCategory}>＋ Add category</button></div><p className="edit-hint">Double-click or hold a category to edit or archive it.</p><div className="category-cloud">{context.categories.map((category) => <span className="editable-record" {...editableProps(() => onEditCategory(category))} key={category.id} style={{ background: category.color }}><i>{category.name[0]}</i>{category.name}<small>{category.kind}</small></span>)}</div></section><section className="page-card setting-stack"><div><span className="setting-icon">¤</span><span><strong>Currency</strong><small>Primary display and manual entry currency</small></span><b>{context.profile.currency}</b></div><button onClick={onSpare}><span className="setting-icon">×{context.profile.spare_multiplier}</span><span><strong>Spare change</strong><small>{context.profile.spare_sweep_mode} · {formatMoney(context.profile.spare_threshold_cents, context.currency)} threshold</small></span><b>→</b></button><button onClick={onWeek}><span className="setting-icon">7</span><span><strong>Week starts</strong><small>Calendar-week anchor for weekly and daily windows</small></span><b>{weekdayLabels[context.profile.week_start]} →</b></button><button onClick={onInstall} disabled={!installReady || isInstalled}><span className="setting-icon">R</span><span><strong>Install Remaivo</strong><small>{isInstalled ? "Running as a standalone app" : installReady ? "Chrome has verified the standalone app" : "Preparing the standalone app; keep Remaivo open briefly"}</small></span><b>{isInstalled ? "Installed" : installReady ? "Install →" : "Preparing…"}</b></button><div><span className="setting-icon">☁</span><span><strong>Cross-device data</strong><small>Stored privately with your ChatGPT sign-in</small></span><b>Active</b></div></section></div>;
 }
 
 /* eslint-disable jsx-a11y/label-has-associated-control -- modal labels wrap their controls and visible descriptions. */
