@@ -6,7 +6,7 @@ type Account = { id: string; name: string; type: string; currency: string; balan
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
 type Transaction = { id: string; account_id: string | null; destination_account_id: string | null; category_id: string | null; type: string; description: string; amount_cents: number; date: string; committed: number; counts_daily: number; counts_weekly: number; counts_monthly: number; counts_general: number; recurring_plan_id: string | null; installment_plan_id: string | null; replaces_transaction_id: string | null; spare_change_cents: number };
 type BudgetRule = { id: string; period: string; base_cents: number; carry_mode: string; carry_cap_cents: number | null; anchor_date: string; source_type: string; parent_period: string | null; calculation_mode: string; percentage_basis_points: number; hard_reset: string; include_everyday: number; include_committed: number; include_savings: number; include_investments: number; active: number };
-type BudgetResult = BudgetRule & { remaining: number; effective_base_cents: number; source_note: string; unavailable: boolean; seven_day_allowance_cents?: number; remaining_days?: number };
+type BudgetResult = BudgetRule & { remaining: number; effective_base_cents: number; current_base_cents: number; carried_cents: number; spent_cents: number; planned_cents: number; source_note: string; unavailable: boolean; seven_day_allowance_cents?: number; remaining_days?: number };
 type RecurringPlan = { id: string; title: string; type: string; amount_cents: number; account_id: string | null; destination_account_id: string | null; frequency: string; interval_count: number; next_date: string; auto_post: number; committed: number };
 type InstallmentPlan = { id: string; title: string; provider: string | null; total_cents: number; paid_cents: number; installment_count: number; first_due_date: string; frequency: string; payment_account_id: string; linked_credit_account_id: string | null; include_daily_weekly: number; auto_post: number; status: string };
 type InstallmentPayment = { id: string; plan_id: string; sequence: number; due_date: string; amount_cents: number; status: string };
@@ -181,8 +181,10 @@ function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transac
     .reduce((sum, transaction) => sum + transaction.amount_cents, 0);
 
   if (rule.period === "general") {
-    const remaining = base - spendFor(rule.anchor_date, "9999-12-31") - plannedFor(rule, recurring, payments, today, "9999-12-31");
-    return { remaining, allocation: base };
+    const spent = spendFor(rule.anchor_date, "9999-12-31");
+    const planned = plannedFor(rule, recurring, payments, today, "9999-12-31");
+    const remaining = base - spent - planned;
+    return { remaining, allocation: base, currentBase: base, carry: 0, spent, planned };
   }
 
   const nominalStart = periodStart(today, rule.period, weekStart);
@@ -210,8 +212,10 @@ function manualBudgetValue(rule: BudgetRule, base: number, transactions: Transac
     ? Math.round(base * daysBetween(currentStart, currentEnd) / 7)
     : base;
   const allocation = currentBase + carry;
-  const remaining = allocation - spendFor(currentStart, currentEnd) - plannedFor(rule, recurring, payments, currentStart, currentEnd);
-  return { remaining, allocation };
+  const spent = spendFor(currentStart, currentEnd);
+  const planned = plannedFor(rule, recurring, payments, currentStart, currentEnd);
+  const remaining = allocation - spent - planned;
+  return { remaining, allocation, currentBase, carry, spent, planned };
 }
 
 function divisionCounts(period: string, parent: BudgetResult, today: string, weekStart: number) {
@@ -244,12 +248,12 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
     const rule = byPeriod[period];
     if (!rule) continue;
     if (rule.active !== 1) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: rule.base_cents, source_note: "Turned off", unavailable: false };
+      calculated[period] = { ...rule, remaining: 0, effective_base_cents: rule.base_cents, current_base_cents: rule.base_cents, carried_cents: 0, spent_cents: 0, planned_cents: 0, source_note: "Turned off", unavailable: false };
       continue;
     }
     const parent = rule.parent_period ? calculated[rule.parent_period] : undefined;
     if (rule.source_type === "derived" && (!parent || parent.active !== 1)) {
-      calculated[period] = { ...rule, remaining: 0, effective_base_cents: 0, source_note: `Needs an active ${rule.parent_period ?? "parent"} budget`, unavailable: true };
+      calculated[period] = { ...rule, remaining: 0, effective_base_cents: 0, current_base_cents: 0, carried_cents: 0, spent_cents: 0, planned_cents: 0, source_note: `Needs an active ${rule.parent_period ?? "parent"} budget`, unavailable: true };
       continue;
     }
     if (rule.source_type === "derived" && parent) {
@@ -262,6 +266,10 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
           ...rule,
           remaining: value.remaining,
           effective_base_cents: value.allocation,
+          current_base_cents: value.currentBase,
+          carried_cents: value.carry,
+          spent_cents: value.spent,
+          planned_cents: value.planned,
           seven_day_allowance_cents: window ? Math.round(parent.effective_base_cents / Math.max(1, divisionCounts("daily", parent, today, weekStart).total) * Math.min(7, window.monthDaysRemaining)) : undefined,
           remaining_days: window?.daysRemaining ?? (rule.period === "daily" ? 1 : divisions.remaining),
           source_note: `Adaptive allowance from ${parent.period}; this window uses its own counting and carryover rules`,
@@ -272,14 +280,22 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
           ? Math.max(0, Math.round(parent.effective_base_cents * rule.percentage_basis_points / 10000))
           : Math.max(0, Math.round(parent.effective_base_cents / Math.max(1, divisions.total)));
         const value = manualBudgetValue(rule, base, transactions, recurring, payments, today, weekStart);
-        calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, source_note: rule.calculation_mode === "percentage" ? `${rule.percentage_basis_points / 100}% of ${parent.period}` : `Even split of ${parent.period}`, unavailable: false };
+        calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, source_note: rule.calculation_mode === "percentage" ? `${rule.percentage_basis_points / 100}% of ${parent.period}` : `Even split of ${parent.period}`, unavailable: false };
       }
     } else {
       const value = manualBudgetValue(rule, rule.base_cents, transactions, recurring, payments, today, weekStart);
-      calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, source_note: "Manual allowance", unavailable: false };
+      calculated[period] = { ...rule, remaining: value.remaining, effective_base_cents: value.allocation, current_base_cents: value.currentBase, carried_cents: value.carry, spent_cents: value.spent, planned_cents: value.planned, source_note: "Manual allowance", unavailable: false };
     }
   }
   return rules.map((rule) => calculated[rule.period]);
+}
+
+function budgetEquation(rule: BudgetResult, currency: string) {
+  const parts = [formatMoney(rule.current_base_cents, currency)];
+  if (rule.carried_cents !== 0) parts.push(`${rule.carried_cents > 0 ? "+" : "−"} ${formatMoney(Math.abs(rule.carried_cents), currency)} carried`);
+  if (rule.spent_cents !== 0) parts.push(`− ${formatMoney(rule.spent_cents, currency)} transactions`);
+  if (rule.planned_cents !== 0) parts.push(`− ${formatMoney(rule.planned_cents, currency)} planned`);
+  return `${parts.join(" ")} = ${formatMoney(rule.remaining, currency)}`;
 }
 
 function shortDate(value: string) {
@@ -459,7 +475,7 @@ function Overview({ context, primaryBudget, availableNow, spentInActiveWindow, t
   return <div className="dashboard-grid">
     <section className="hero-card"><div className="hero-copy"><p>AVAILABLE TO SPEND {windowLabel}</p><h2>{formatMoney(availableNow, currency, 0)}<span>.{String(Math.abs(availableNow) % 100).padStart(2, "0")}</span></h2><div className="budget-status"><i /> {primaryBudget?.remaining !== undefined && primaryBudget.remaining < 0 ? "Over budget" : "Within budget"}</div><small>{primaryBudget ? primaryBudget.source_note : "Turn on a budget window to set your spending limit."}</small><button className="hero-action" onClick={onAdd}>Add spending →</button></div><div className="hero-visual"><div className="dial" style={{ background: `conic-gradient(var(--lime) 0 ${percent}%, rgba(255,255,255,.12) ${percent}% 100%)` }}><span className="dial-inner"><b>{Math.round(percent)}%</b><small>available</small></span></div><p>{formatMoney(spentInActiveWindow, currency)} spent {windowLabel.toLowerCase()}</p></div></section>
     <section className="balance-card"><div className="card-heading"><span><p>TOTAL BALANCE</p><h3>{formatMoney(totalBalance, currency)}</h3></span><button aria-label="More balance options">•••</button></div><div className="balance-breakdown"><div><i className="dot spending"/><span><p>Spendable</p><strong>{formatMoney(spendable, currency)}</strong></span></div><div><i className="dot savings"/><span><p>Savings</p><strong>{formatMoney(savings, currency)}</strong></span></div><div><i className="dot investing"/><span><p>Raw invested</p><strong>{formatMoney(invested, currency)}</strong></span></div></div><button className="text-link" onClick={() => setPage("accounts")}>View all accounts <span>→</span></button></section>
-    <section className="budget-card"><div className="section-heading"><div><p>YOUR BUDGETS</p><h3>Every enabled window, in one view.</h3></div><button className="ghost-button" onClick={() => setPage("budget")}>Manage budgets</button></div><div className="budget-windows">{budgetResults.filter((rule) => rule.active === 1).map((rule, index) => <article key={rule.id} className={`budget-window ${["mint", "sky", "sand"][index]}`}><span>{rule.period === "daily" ? "Today" : rule.period === "weekly" ? "This week remaining" : "This month"}</span><strong>{formatMoney(Math.max(0, rule.remaining), currency, 0)}</strong>{rule.seven_day_allowance_cents !== undefined && <b className="budget-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, currency, 0)}</b>}<small>{rule.unavailable ? rule.source_note : rule.source_type === "derived" ? rule.source_note : carryLabels[rule.carry_mode]}</small><div className="progress-track"><i style={{ width: `${Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100))}%` }} /></div></article>)}{budgetResults.filter((rule) => rule.active === 1).length === 0 && <EmptyMini text="Daily, weekly, and monthly windows are turned off." />}</div></section>
+    <section className="budget-card"><div className="section-heading"><div><p>YOUR BUDGETS</p><h3>Every enabled window, in one view.</h3></div><button className="ghost-button" onClick={() => setPage("budget")}>Manage budgets</button></div><div className="budget-windows">{budgetResults.filter((rule) => rule.active === 1).map((rule, index) => <article key={rule.id} className={`budget-window ${["mint", "sky", "sand"][index]}`}><span>{rule.period === "daily" ? "Today" : rule.period === "weekly" ? "This week remaining" : "This month"}</span><strong>{formatMoney(rule.remaining, currency)}</strong>{rule.seven_day_allowance_cents !== undefined && <b className="budget-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, currency)}</b>}<small>{rule.unavailable ? rule.source_note : budgetEquation(rule, currency)}</small><div className="progress-track"><i style={{ width: `${Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100))}%` }} /></div></article>)}{budgetResults.filter((rule) => rule.active === 1).length === 0 && <EmptyMini text="Daily, weekly, and monthly windows are turned off." />}</div></section>
     <section className="commitments-card"><div className="section-heading compact"><div><p>UP NEXT</p><h3>Committed money</h3></div><button className="text-link" onClick={() => setPage("plans")}>See plans</button></div><div className="commitment-list">{upcomingPayments.slice(0, 3).map((payment) => { const plan = installmentPlans.find((item) => item.id === payment.plan_id); return <div key={payment.id}><span className="date-block"><b>{parseDate(payment.due_date).getUTCDate()}</b><small>{parseDate(payment.due_date).toLocaleString("en", { month: "short", timeZone: "UTC" }).toUpperCase()}</small></span><span><strong>{plan?.title ?? "Installment"}</strong><small>Payment {payment.sequence} of {plan?.installment_count}</small></span><b>{formatMoney(payment.amount_cents, currency, 0)}</b></div>})}{upcomingPayments.length === 0 && <EmptyMini text="No installment payments coming up." />}</div><div className="reserved-note"><span>✓</span><p><strong>{formatMoney(reservedThisMonth, currency)} reserved</strong><small>Included in this month’s budget.</small></p></div></section>
     <section className="activity-card"><div className="section-heading compact"><div><p>LATEST ACTIVITY</p><h3>Recent transactions</h3></div><button className="text-link" onClick={() => setPage("transactions")}>View all</button></div><div className="activity-list">{transactions.slice(0, 4).map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} accountById={accountById} categoryById={categoryById} currency={currency} onEdit={() => onEditTransaction(transaction)} />)}{transactions.length === 0 && <EmptyMini text="Your first transactions will appear here." />}</div></section>
   </div>;
@@ -482,7 +498,7 @@ function AccountsPage({ context, onAdd, onEdit }: { context: Context; onAdd: () 
 
 function BudgetPage({ context, onEdit }: { context: Context; onEdit: () => void }) {
   const ordered = ["daily", "weekly", "monthly"].map((period) => context.budgetResults.find((rule) => rule.period === period)).filter(Boolean) as BudgetResult[];
-  return <div className="budget-page"><section className="budget-explainer"><div><p className="eyebrow">YOUR BUDGET, YOUR RULES</p><h2>Build the budget system that fits you.</h2><p>Turn daily, weekly, or monthly windows on or off, type an allowance manually or derive it from a larger window, and decide exactly which transactions and carryover rules each one uses.</p></div><button className="primary-button" onClick={onEdit}><span>⚙</span>Configure windows</button></section><section className="budget-rule-grid">{ordered.map((rule) => <article key={rule.id} className={rule.active === 1 ? "" : "budget-rule-disabled"}><div className="budget-rule-top"><span className="budget-period-icon">{rule.period === "daily" ? "D" : rule.period === "weekly" ? "W" : "M"}</span><em>{rule.active === 1 ? "On" : "Off"}</em></div><p>{rule.period === "weekly" && rule.seven_day_allowance_cents !== undefined ? "CURRENT WEEK REMAINING" : `${rule.period.toUpperCase()} POOL`}</p><h3>{rule.active === 1 ? formatMoney(Math.max(0, rule.remaining), context.currency, 0) : "Paused"}</h3>{rule.seven_day_allowance_cents !== undefined && <b className="rule-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, context.currency, 0)}</b>}<small>{rule.source_type === "derived" ? `${calculationLabels[rule.calculation_mode]} from ${rule.parent_period}` : `${formatMoney(rule.effective_base_cents, context.currency, 0)} current allowance`}</small><div className="wide-progress"><i style={{ width: `${rule.active === 1 ? Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100)) : 0}%` }} /></div><div className="rule-note"><span>↻</span><p><strong>{rule.source_note}</strong><small>{carryLabels[rule.carry_mode]} · ${resetLabels[rule.hard_reset] ?? rule.hard_reset}</small></p></div><div className="budget-counts"><span className={rule.include_everyday ? "on" : ""}>Everyday</span><span className={rule.include_committed ? "on" : ""}>Committed</span><span className={rule.include_savings ? "on" : ""}>Savings</span><span className={rule.include_investments ? "on" : ""}>Investing</span></div></article>)}</section><section className="cashflow-note"><span>✓</span><div><strong>Linked allowance, independent rules</strong><p>Adaptive windows can take their allowance from a larger budget while keeping their own transaction choices, carryover mode, and reset boundary. {formatMoney(context.reservedThisMonth, context.currency)} is currently scheduled this month.</p></div></section></div>;
+  return <div className="budget-page"><section className="budget-explainer"><div><p className="eyebrow">YOUR BUDGET, YOUR RULES</p><h2>Build the budget system that fits you.</h2><p>Turn daily, weekly, or monthly windows on or off, type an allowance manually or derive it from a larger window, and decide exactly which transactions and carryover rules each one uses.</p></div><button className="primary-button" onClick={onEdit}><span>⚙</span>Configure windows</button></section><section className="budget-rule-grid">{ordered.map((rule) => <article key={rule.id} className={rule.active === 1 ? "" : "budget-rule-disabled"}><div className="budget-rule-top"><span className="budget-period-icon">{rule.period === "daily" ? "D" : rule.period === "weekly" ? "W" : "M"}</span><em>{rule.active === 1 ? "On" : "Off"}</em></div><p>{rule.period === "weekly" && rule.seven_day_allowance_cents !== undefined ? "CURRENT WEEK REMAINING" : `${rule.period.toUpperCase()} POOL`}</p><h3>{rule.active === 1 ? formatMoney(rule.remaining, context.currency) : "Paused"}</h3>{rule.seven_day_allowance_cents !== undefined && <b className="rule-secondary">7-day allowance {formatMoney(rule.seven_day_allowance_cents, context.currency)}</b>}<small>{rule.source_type === "derived" ? `${calculationLabels[rule.calculation_mode]} from ${rule.parent_period}` : `${formatMoney(rule.effective_base_cents, context.currency)} current allowance`}</small>{rule.active === 1 && <div className="budget-equation">{budgetEquation(rule, context.currency)}</div>}<div className="wide-progress"><i style={{ width: `${rule.active === 1 ? Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100)) : 0}%` }} /></div><div className="rule-note"><span>↻</span><p><strong>{rule.source_note}</strong><small>{carryLabels[rule.carry_mode]} · ${resetLabels[rule.hard_reset] ?? rule.hard_reset}</small></p></div><div className="budget-counts"><span className={rule.include_everyday ? "on" : ""}>Everyday</span><span className={rule.include_committed ? "on" : ""}>Committed</span><span className={rule.include_savings ? "on" : ""}>Savings</span><span className={rule.include_investments ? "on" : ""}>Investing</span></div></article>)}</section><section className="cashflow-note"><span>✓</span><div><strong>Linked allowance, independent rules</strong><p>Adaptive windows can take their allowance from a larger budget while keeping their own transaction choices, carryover mode, and reset boundary. {formatMoney(context.reservedThisMonth, context.currency)} is currently scheduled this month.</p></div></section></div>;
 }
 
 function PlansPage({ context, onAdd, onPay, onEditRecurring, onEditInstallment }: { context: Context; onAdd: () => void; onPay: (id: string) => void; onEditRecurring: (record: RecurringPlan) => void; onEditInstallment: (record: InstallmentPlan) => void }) {

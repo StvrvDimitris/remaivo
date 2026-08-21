@@ -225,6 +225,7 @@ button { color: inherit; }
 .budget-rule-grid h3 { margin: 0 0 3px; font-size: 26px; letter-spacing: -.045em; }
 .budget-rule-grid .rule-secondary { display: block; margin: 0 0 4px; color: var(--green); font-size: 9px; }
 .budget-rule-grid article > small { color: #84908c; font-size: 9px; }
+.budget-equation { margin-top: 12px; padding: 9px 10px; border-radius: 9px; background: #f3f5ee; color: #596963; font-size: 8px; line-height: 1.45; }
 .wide-progress { height: 6px; margin: 16px 0; overflow: hidden; border-radius: 20px; background: #ebeee7; }
 .wide-progress i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
 .rule-note { padding-top: 13px; border-top: 1px solid #efefe8; display: flex; gap: 8px; }
