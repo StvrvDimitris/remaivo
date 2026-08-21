@@ -1,7 +1,6 @@
 "use client";
 
 import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEffect, useState } from "react";
-import { clearRemaivoInstallPrompt, getRemaivoInstallPrompt, type RemaivoInstallPrompt } from "./pwa-client";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
@@ -332,8 +331,6 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  const [installPrompt, setInstallPrompt] = useState<RemaivoInstallPrompt | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/finance", { cache: "no-store" });
@@ -346,30 +343,6 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
     // eslint-disable-next-line react-hooks/set-state-in-effect -- this effect loads the server snapshot on mount.
     load().catch((error) => setNotice(error instanceof Error ? error.message : "Unable to load Remaivo."));
   }, [load]);
-
-  useEffect(() => {
-    const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
-    const syncInstallState = () => {
-      setIsInstalled(window.matchMedia("(display-mode: standalone)").matches || standaloneNavigator.standalone === true || document.documentElement.dataset.remaivoInstalled === "true");
-      setInstallPrompt(getRemaivoInstallPrompt() ?? null);
-    };
-    syncInstallState();
-    window.addEventListener("remaivo-install-state", syncInstallState);
-    return () => window.removeEventListener("remaivo-install-state", syncInstallState);
-  }, []);
-
-  async function installApp() {
-    const prompt = installPrompt ?? getRemaivoInstallPrompt();
-    if (!prompt) {
-      setNotice(isInstalled ? "Remaivo is already installed as an app." : "Chrome is still checking app installation. Keep Remaivo open briefly and try again.");
-      return;
-    }
-    await prompt.prompt();
-    const choice = await prompt.userChoice;
-    clearRemaivoInstallPrompt();
-    setInstallPrompt(null);
-    if (choice.outcome === "accepted") setNotice("Remaivo is installing as an app.");
-  }
 
   async function mutate(action: string, payload: Record<string, unknown>) {
     setBusy(true);
@@ -461,7 +434,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
         {page === "budget" && <BudgetPage context={context} onEdit={() => setModal("budget")} />}
         {page === "plans" && <PlansPage context={context} onAdd={() => setModal("plan")} onPay={async (paymentId) => { if (window.confirm("Mark this installment as paid today?")) await mutate("payInstallment", { paymentId, date: data.today }); }} onEditRecurring={(record) => setEditTarget({ kind: "recurring", record })} onEditInstallment={(record) => setEditTarget({ kind: "installment", record })} />}
         {page === "goals" && <GoalsPage context={context} onGoal={() => setModal("goal")} onSpare={() => setModal("spare")} onSweep={async () => { const source = accounts.find((account) => account.include_spendable === 1); if (source && profile.spare_destination_id) await mutate("sweepSpare", { sourceAccountId: source.id, destinationAccountId: profile.spare_destination_id }); }} onEdit={(record) => setEditTarget({ kind: "goal", record })} />}
-        {page === "settings" && <SettingsPage context={context} onCategory={() => setModal("category")} onSpare={() => setModal("spare")} onWeek={() => setModal("week")} onInstall={installApp} installReady={Boolean(installPrompt)} isInstalled={isInstalled} onEditCategory={(record) => setEditTarget({ kind: "category", record })} />}
+        {page === "settings" && <SettingsPage context={context} onCategory={() => setModal("category")} onSpare={() => setModal("spare")} onWeek={() => setModal("week")} onEditCategory={(record) => setEditTarget({ kind: "category", record })} />}
       </section>
 
       {notice && <div className={`toast ${notice === "Saved" ? "success" : ""}`}>{notice}</div>}
@@ -521,8 +494,8 @@ function GoalsPage({ context, onGoal, onSpare, onSweep, onEdit }: { context: Con
   return <div className="goals-page"><section className="spare-hero"><div><p className="eyebrow">SPARE-CHANGE ACCELERATOR</p><h2>{formatMoney(context.sparePot, context.currency)} waiting</h2><p>Round-ups are multiplied ×{context.profile.spare_multiplier} and collected before moving to {destination?.name ?? "a destination you choose"}.</p><div className="spare-actions"><button className="primary-button" onClick={onSpare}><span>⚙</span>Configure</button><button className="ghost-button" disabled={!context.sparePot || !destination} onClick={onSweep}>Sweep now</button></div></div><div className="spare-orbit"><span>×{context.profile.spare_multiplier}</span><small>{context.profile.spare_sweep_mode}</small></div></section><div className="section-heading goal-heading"><div><p>SAVINGS & RAW INVESTMENTS</p><h3>Your pots and contribution targets</h3><small className="edit-hint">Double-click or hold a pot to edit or archive it.</small></div><button className="ghost-button" onClick={onGoal}>＋ New goal</button></div><section className="goal-grid">{context.goals.map((goal) => { const contributed = goal.account_id ? context.accountById[goal.account_id]?.balance_cents ?? goal.contributed_cents : goal.contributed_cents; const percent = goal.target_cents ? contributed / goal.target_cents * 100 : 0; return <article className="editable-record" {...editableProps(() => onEdit(goal))} key={goal.id}><span className="goal-kind">{goal.kind === "investment" ? "RAW INVESTED" : "SAVINGS"}</span><h3>{goal.name}</h3><strong>{formatMoney(contributed, context.currency)}</strong>{goal.target_cents && <><small>of {formatMoney(goal.target_cents, context.currency)}</small><div className="wide-progress"><i style={{ width: `${Math.min(100, percent)}%`, background: goal.color }} /></div><p>{Math.round(percent)}% complete</p></>}</article>})}{context.goals.length === 0 && <button className="add-card" onClick={onGoal}><span>＋</span><strong>Create your first goal</strong><small>Track savings or raw investment contributions without market prices.</small></button>}</section></div>;
 }
 
-function SettingsPage({ context, onCategory, onSpare, onWeek, onInstall, installReady, isInstalled, onEditCategory }: { context: Context; onCategory: () => void; onSpare: () => void; onWeek: () => void; onInstall: () => void; installReady: boolean; isInstalled: boolean; onEditCategory: (record: Category) => void }) {
-  return <div className="settings-grid"><section className="page-card"><div className="section-heading"><div><p>CATEGORIES</p><h3>Custom income & expense labels</h3></div><button className="ghost-button" onClick={onCategory}>＋ Add category</button></div><p className="edit-hint">Double-click or hold a category to edit or archive it.</p><div className="category-cloud">{context.categories.map((category) => <span className="editable-record" {...editableProps(() => onEditCategory(category))} key={category.id} style={{ background: category.color }}><i>{category.name[0]}</i>{category.name}<small>{category.kind}</small></span>)}</div></section><section className="page-card setting-stack"><div><span className="setting-icon">¤</span><span><strong>Currency</strong><small>Primary display and manual entry currency</small></span><b>{context.profile.currency}</b></div><button onClick={onSpare}><span className="setting-icon">×{context.profile.spare_multiplier}</span><span><strong>Spare change</strong><small>{context.profile.spare_sweep_mode} · {formatMoney(context.profile.spare_threshold_cents, context.currency)} threshold</small></span><b>→</b></button><button onClick={onWeek}><span className="setting-icon">7</span><span><strong>Week starts</strong><small>Calendar-week anchor for weekly and daily windows</small></span><b>{weekdayLabels[context.profile.week_start]} →</b></button><button onClick={onInstall} disabled={!installReady || isInstalled}><span className="setting-icon">R</span><span><strong>Install Remaivo</strong><small>{isInstalled ? "Running as a standalone app" : installReady ? "Chrome has verified the standalone app" : "Preparing the standalone app; keep Remaivo open briefly"}</small></span><b>{isInstalled ? "Installed" : installReady ? "Install →" : "Preparing…"}</b></button><div><span className="setting-icon">☁</span><span><strong>Cross-device data</strong><small>Stored privately with your ChatGPT sign-in</small></span><b>Active</b></div></section></div>;
+function SettingsPage({ context, onCategory, onSpare, onWeek, onEditCategory }: { context: Context; onCategory: () => void; onSpare: () => void; onWeek: () => void; onEditCategory: (record: Category) => void }) {
+  return <div className="settings-grid"><section className="page-card"><div className="section-heading"><div><p>CATEGORIES</p><h3>Custom income & expense labels</h3></div><button className="ghost-button" onClick={onCategory}>＋ Add category</button></div><p className="edit-hint">Double-click or hold a category to edit or archive it.</p><div className="category-cloud">{context.categories.map((category) => <span className="editable-record" {...editableProps(() => onEditCategory(category))} key={category.id} style={{ background: category.color }}><i>{category.name[0]}</i>{category.name}<small>{category.kind}</small></span>)}</div></section><section className="page-card setting-stack"><div><span className="setting-icon">¤</span><span><strong>Currency</strong><small>Primary display and manual entry currency</small></span><b>{context.profile.currency}</b></div><button onClick={onSpare}><span className="setting-icon">×{context.profile.spare_multiplier}</span><span><strong>Spare change</strong><small>{context.profile.spare_sweep_mode} · {formatMoney(context.profile.spare_threshold_cents, context.currency)} threshold</small></span><b>→</b></button><button onClick={onWeek}><span className="setting-icon">7</span><span><strong>Week starts</strong><small>Calendar-week anchor for weekly and daily windows</small></span><b>{weekdayLabels[context.profile.week_start]} →</b></button><div><span className="setting-icon">☁</span><span><strong>Cross-device data</strong><small>Stored privately with your ChatGPT sign-in</small></span><b>Active</b></div></section></div>;
 }
 
 /* eslint-disable jsx-a11y/label-has-associated-control -- modal labels wrap their controls and visible descriptions. */

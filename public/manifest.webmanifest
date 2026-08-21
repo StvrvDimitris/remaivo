@@ -1,7 +1,5 @@
 {
   "id": "/",
-  "lang": "en",
-  "dir": "ltr",
   "name": "Remaivo Personal Finance",
   "short_name": "Remaivo",
   "description": "Know what you can spend across budgets, accounts, plans, savings, and investments.",
@@ -10,20 +8,7 @@
   "display": "standalone",
   "background_color": "#f4f1e9",
   "theme_color": "#15372f",
-  "orientation": "any",
   "categories": ["finance", "productivity"],
-  "prefer_related_applications": false,
-  "launch_handler": {
-    "client_mode": "navigate-existing"
-  },
-  "shortcuts": [
-    {
-      "name": "Open Remaivo",
-      "short_name": "Overview",
-      "url": "/?source=pwa-shortcut",
-      "icons": [{ "src": "/remaivo-v1-icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    }
-  ],
   "icons": [
     {
       "src": "/remaivo-v1-icon-192.png",
@@ -38,7 +23,7 @@
       "purpose": "any"
     },
     {
-      "src": "/remaivo-v1-icon-maskable-512.png",
+      "src": "/remaivo-v1-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

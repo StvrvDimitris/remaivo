@@ -297,7 +297,6 @@ button { color: inherit; }
 .setting-stack { padding-block: 14px; }
 .setting-stack > div, .setting-stack > button { width: 100%; min-height: 68px; padding: 9px 0; border: 0; border-bottom: 1px solid #efefe8; display: flex; align-items: center; gap: 12px; background: transparent; color: inherit; text-align: left; }
 .setting-stack > button { cursor: pointer; }
-.setting-stack > button:disabled { opacity: .58; cursor: wait; }
 .setting-stack > *:last-child { border: 0; }
 .setting-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #edf0e7; color: var(--green); font-size: 10px; font-weight: 900; }
 .setting-stack > div > span:nth-child(2), .setting-stack > button > span:nth-child(2) { flex: 1; display: grid; gap: 4px; }
