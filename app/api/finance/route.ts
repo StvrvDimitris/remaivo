@@ -43,6 +43,13 @@ function bool(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function calendarDate(value: unknown) {
+  const date = text(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== date ? null : date;
+}
+
 function balanceStatements(userId: string, transaction: Record<string, unknown>, direction: 1 | -1, guard?: { id: string; status: string }) {
   const amount = Number(transaction.amount_cents) * direction;
   const type = String(transaction.type);
@@ -145,7 +152,7 @@ async function snapshot(user: FinanceUser) {
 
   await processAutomaticPlans(user.userId, today);
   await processAutomaticInstallments(user.userId, today);
-  const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents] = await env.DB.batch([
+  const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
     env.DB.prepare("SELECT * FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC").bind(user.userId),
@@ -155,6 +162,7 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? AND status != 'cancelled' ORDER BY due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
+    env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
   ]);
 
   return {
@@ -170,6 +178,7 @@ async function snapshot(user: FinanceUser) {
     installmentPayments: installmentPayments.results,
     goals: goals.results,
     spareEvents: spareEvents.results,
+    investmentSnapshots: investmentSnapshots.results,
     today,
   };
 }
@@ -232,6 +241,29 @@ export async function POST(request: Request) {
     } else if (action === "updateAccount") {
       const type = ["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].includes(text(payload.type)) ? text(payload.type) : "custom";
       await env.DB.prepare("UPDATE accounts SET name = ?, type = ?, credit_limit_cents = ?, color = ?, include_spendable = ? WHERE id = ? AND user_id = ?").bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId).run();
+    } else if (action === "addInvestmentSnapshot" || action === "updateInvestmentSnapshot") {
+      const accountId = text(payload.accountId);
+      const snapshotDate = calendarDate(payload.snapshotDate);
+      const numericValue = typeof payload.value === "number" ? payload.value : Number(payload.value);
+      if (!snapshotDate) return Response.json({ error: "Choose a valid snapshot date." }, { status: 400 });
+      if (!Number.isFinite(numericValue) || numericValue < 0) return Response.json({ error: "Enter a valid portfolio value of zero or more." }, { status: 400 });
+      const valueCents = Math.round(numericValue * 100);
+      const note = text(payload.note).slice(0, 500) || null;
+
+      if (action === "addInvestmentSnapshot") {
+        const result = await env.DB.prepare("INSERT INTO investment_valuation_snapshots (id, user_id, account_id, snapshot_date, value_cents, note, created_at) SELECT ?, ?, id, ?, ?, ?, ? FROM accounts WHERE id = ? AND user_id = ? AND type = 'investment' AND archived = 0")
+          .bind(crypto.randomUUID(), user.userId, snapshotDate, valueCents, note, new Date().toISOString(), accountId, user.userId).run();
+        if (!Number(result.meta.changes)) return Response.json({ error: "Choose an active investment account." }, { status: 404 });
+      } else {
+        const snapshotId = text(payload.snapshotId);
+        const result = await env.DB.prepare("UPDATE investment_valuation_snapshots SET snapshot_date = ?, value_cents = ?, note = ? WHERE id = ? AND user_id = ? AND account_id = ? AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND user_id = ? AND type = 'investment' AND archived = 0)")
+          .bind(snapshotDate, valueCents, note, snapshotId, user.userId, accountId, accountId, user.userId).run();
+        if (!Number(result.meta.changes)) return Response.json({ error: "Valuation snapshot not found." }, { status: 404 });
+      }
+    } else if (action === "deleteInvestmentSnapshot") {
+      const result = await env.DB.prepare("DELETE FROM investment_valuation_snapshots WHERE id = ? AND user_id = ?")
+        .bind(text(payload.snapshotId), user.userId).run();
+      if (!Number(result.meta.changes)) return Response.json({ error: "Valuation snapshot not found." }, { status: 404 });
     } else if (action === "addCategory") {
       await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color, icon) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "expense"), text(payload.color, "#cfe9d7"), text(payload.icon, "circle")).run();
     } else if (action === "updateCategory") {

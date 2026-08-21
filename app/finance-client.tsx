@@ -3,6 +3,7 @@
 import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEffect, useState } from "react";
 import { projectBudgetPlan, splitCents, type FixedCarryMode } from "./budget-math";
 import { financialToday, outstandingDateInWindow } from "./finance-dates";
+import { calculateInvestmentValue, type InvestmentValuationSnapshot, type InvestmentValueMetrics } from "./investment-valuations";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
@@ -29,6 +30,7 @@ type Snapshot = {
   installmentPayments?: InstallmentPayment[];
   goals?: Goal[];
   spareEvents?: SpareEvent[];
+  investmentSnapshots?: InvestmentValuationSnapshot[];
   error?: string;
 };
 
@@ -81,6 +83,18 @@ function browserTimezone() {
 
 function formatMoney(cents: number, currency = "EUR", digits = 2) {
   return new Intl.NumberFormat("en-IE", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(cents / 100);
+}
+
+function movementMoney(cents: number, currency: string) {
+  return `${cents > 0 ? "+" : ""}${formatMoney(cents, currency)}`;
+}
+
+function movementPercent(percent: number | null) {
+  return percent === null ? "—" : `${percent > 0 ? "+" : ""}${percent.toFixed(2)}%`;
+}
+
+function movementTone(value: number) {
+  return value > 0 ? "positive" : value < 0 ? "negative" : "neutral";
 }
 
 function parseDate(value: string) {
@@ -272,6 +286,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [valuationAccountId, setValuationAccountId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/finance", { cache: "no-store" });
@@ -323,6 +338,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const installmentPayments = data.installmentPayments ?? [];
   const goals = data.goals ?? [];
   const spareEvents = data.spareEvents ?? [];
+  const investmentSnapshots = data.investmentSnapshots ?? [];
   const profile = data.profile!;
   const currency = profile.currency;
 
@@ -330,8 +346,13 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const categoryById = Object.fromEntries(allCategories.map((category) => [category.id, category]));
   const spendable = accounts.filter((account) => account.include_spendable === 1).reduce((sum, account) => sum + account.balance_cents, 0);
   const savings = accounts.filter((account) => account.type === "savings").reduce((sum, account) => sum + account.balance_cents, 0);
-  const invested = accounts.filter((account) => account.type === "investment").reduce((sum, account) => sum + account.balance_cents, 0);
-  const totalBalance = accounts.reduce((sum, account) => sum + account.balance_cents, 0);
+  const investmentAccounts = accounts.filter((account) => account.type === "investment");
+  const investmentMetrics = Object.fromEntries(investmentAccounts.map((account) => [account.id, calculateInvestmentValue({ accountId: account.id, rawInvested: account.balance_cents, transactions, snapshots: investmentSnapshots })])) as Record<string, InvestmentValueMetrics>;
+  const rawInvested = investmentAccounts.reduce((sum, account) => sum + account.balance_cents, 0);
+  const invested = investmentAccounts.reduce((sum, account) => sum + investmentMetrics[account.id].estimatedCurrentValue, 0);
+  const investmentMovement = invested - rawInvested;
+  const investmentMovementPercent = rawInvested !== 0 ? investmentMovement / rawInvested * 100 : null;
+  const totalBalance = accounts.filter((account) => account.type !== "investment").reduce((sum, account) => sum + account.balance_cents, 0) + invested;
   const outstandingInstallments = installmentPlans.reduce((sum, plan) => sum + plan.total_cents - plan.paid_cents, 0);
   const monthKey = data.today.slice(0, 7);
   const monthlyPlan = budgets.find((rule) => rule.period === "monthly");
@@ -346,7 +367,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const sparePot = spareEvents.reduce((sum, event) => sum + event.multiplied_cents, 0);
   const upcomingPayments = installmentPayments.filter((payment) => payment.status === "upcoming").slice(0, 5);
 
-  const context = { accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, profile, currency, accountById, categoryById, budgetResults, reservedThisMonth, spendable, savings, invested, totalBalance, outstandingInstallments, sparePot, upcomingPayments, today: data.today };
+  const context = { accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, investmentSnapshots, investmentMetrics, profile, currency, accountById, categoryById, budgetResults, reservedThisMonth, spendable, savings, rawInvested, invested, investmentMovement, investmentMovementPercent, totalBalance, outstandingInstallments, sparePot, upcomingPayments, today: data.today };
 
   return (
     <main className="app-shell">
@@ -371,7 +392,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
         <AppHeader page={page} displayName={displayName} today={data.today} onAdd={() => setModal("transaction")} />
         {page === "overview" && <Overview context={context} primaryBudget={primaryBudget} availableNow={availableNow} spentInActiveWindow={spentInActiveWindow} totalActiveAvailable={totalActiveAvailable} setPage={setPage} onAdd={() => setModal("transaction")} onEditTransaction={(record) => setEditTarget({ kind: "transaction", record })} />}
         {page === "transactions" && <TransactionsPage context={context} search={search} setSearch={setSearch} onAdd={() => setModal("transaction")} onEdit={(record) => setEditTarget({ kind: "transaction", record })} />}
-        {page === "accounts" && <AccountsPage context={context} onAdd={() => setModal("account")} onEdit={(record) => setEditTarget({ kind: "account", record })} />}
+        {page === "accounts" && <AccountsPage context={context} onAdd={() => setModal("account")} onEdit={(record) => setEditTarget({ kind: "account", record })} onSnapshot={(record) => setValuationAccountId(record.id)} />}
         {page === "budget" && <BudgetPage context={context} onEdit={() => setModal("budget")} />}
         {page === "plans" && <PlansPage context={context} onAdd={() => setModal("plan")} onPay={async (paymentId) => { if (window.confirm("Mark this installment as paid on its scheduled date?")) await mutate("payInstallment", { paymentId }); }} onEditRecurring={(record) => setEditTarget({ kind: "recurring", record })} onEditInstallment={(record) => setEditTarget({ kind: "installment", record })} />}
         {page === "goals" && <GoalsPage context={context} onGoal={() => setModal("goal")} onSpare={() => setModal("spare")} onSweep={async () => { const source = accounts.find((account) => account.include_spendable === 1); if (source && profile.spare_destination_id) await mutate("sweepSpare", { sourceAccountId: source.id, destinationAccountId: profile.spare_destination_id }); }} onEdit={(record) => setEditTarget({ kind: "goal", record })} />}
@@ -381,6 +402,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
       {notice && <div className={`toast ${notice === "Saved" ? "success" : ""}`}>{notice}</div>}
       {modal && <FinanceModal name={modal} context={context} busy={busy} close={() => setModal(null)} save={async (action, payload) => { const ok = await mutate(action, payload); if (ok) setModal(null); }} />}
       {editTarget && <EditModal target={editTarget} context={context} busy={busy} close={() => setEditTarget(null)} save={async (action, payload) => { const ok = await mutate(action, payload); if (ok) setEditTarget(null); }} />}
+      {valuationAccountId && accountById[valuationAccountId]?.type === "investment" && <ValuationModal account={accountById[valuationAccountId]} snapshots={investmentSnapshots.filter((snapshot) => snapshot.account_id === valuationAccountId)} currency={currency} today={data.today} busy={busy} close={() => setValuationAccountId(null)} save={mutate} />}
     </main>
   );
 }
@@ -391,16 +413,16 @@ function AppHeader({ page, displayName, today, onAdd }: { page: PageName; displa
   return <header className="topbar"><div><p className="eyebrow">{page === "overview" ? now.toUpperCase() : "REMAIVO PERSONAL FINANCE"}</p><h1>{title[page]}</h1></div><div className="top-actions"><button className="icon-button" aria-label="Notifications">●</button><button className="primary-button" onClick={onAdd}><span>＋</span>Add transaction</button></div></header>;
 }
 
-type Context = { accounts: Account[]; categories: Category[]; transactions: Transaction[]; budgets: BudgetRule[]; recurring: RecurringPlan[]; installmentPlans: InstallmentPlan[]; installmentPayments: InstallmentPayment[]; goals: Goal[]; profile: Profile; currency: string; accountById: Record<string, Account>; categoryById: Record<string, Category>; budgetResults: BudgetResult[]; reservedThisMonth: number; spendable: number; savings: number; invested: number; totalBalance: number; outstandingInstallments: number; sparePot: number; upcomingPayments: InstallmentPayment[]; today: string };
+type Context = { accounts: Account[]; categories: Category[]; transactions: Transaction[]; budgets: BudgetRule[]; recurring: RecurringPlan[]; installmentPlans: InstallmentPlan[]; installmentPayments: InstallmentPayment[]; goals: Goal[]; investmentSnapshots: InvestmentValuationSnapshot[]; investmentMetrics: Record<string, InvestmentValueMetrics>; profile: Profile; currency: string; accountById: Record<string, Account>; categoryById: Record<string, Category>; budgetResults: BudgetResult[]; reservedThisMonth: number; spendable: number; savings: number; rawInvested: number; invested: number; investmentMovement: number; investmentMovementPercent: number | null; totalBalance: number; outstandingInstallments: number; sparePot: number; upcomingPayments: InstallmentPayment[]; today: string };
 
 function Overview({ context, primaryBudget, availableNow, spentInActiveWindow, totalActiveAvailable, setPage, onAdd, onEditTransaction }: { context: Context; primaryBudget: BudgetResult | null; availableNow: number; spentInActiveWindow: number; totalActiveAvailable: number; setPage: (page: PageName) => void; onAdd: () => void; onEditTransaction: (record: Transaction) => void }) {
-  const { currency, totalBalance, spendable, savings, invested, budgetResults, upcomingPayments, installmentPlans, accountById, transactions, categoryById, reservedThisMonth } = context;
+  const { currency, totalBalance, spendable, savings, invested, investmentMovement, investmentMovementPercent, budgetResults, upcomingPayments, installmentPlans, accountById, transactions, categoryById, reservedThisMonth } = context;
   const percent = totalActiveAvailable > 0 ? Math.max(0, Math.min(100, availableNow / totalActiveAvailable * 100)) : 0;
   const windowLabel = primaryBudget?.period === "daily" ? "TODAY" : primaryBudget?.period === "weekly" ? "THIS WEEK" : primaryBudget?.period === "monthly" ? "THIS MONTH" : "NOW";
   const [availableMajor, availableMinor = "00"] = formatMoney(availableNow, currency).split(".");
   return <div className="dashboard-grid">
     <section className="hero-card"><div className="hero-copy"><p>AVAILABLE TO SPEND {windowLabel}</p><h2>{availableMajor}<span>.{availableMinor}</span></h2><div className="budget-status"><i /> {primaryBudget?.remaining !== undefined && primaryBudget.remaining < 0 ? "Over budget" : "Within budget"}</div><small>{primaryBudget ? primaryBudget.source_note : "Turn on a budget window to set your spending limit."}</small><button className="hero-action" onClick={onAdd}>Add spending →</button></div><div className="hero-visual"><div className="dial" style={{ background: `conic-gradient(var(--lime) 0 ${percent}%, rgba(255,255,255,.12) ${percent}% 100%)` }}><span className="dial-inner"><b>{Math.round(percent)}%</b><small>available</small></span></div><p>{formatMoney(spentInActiveWindow, currency)} spent {windowLabel.toLowerCase()}</p></div></section>
-    <section className="balance-card"><div className="card-heading"><span><p>TOTAL BALANCE</p><h3>{formatMoney(totalBalance, currency)}</h3></span><button aria-label="More balance options">•••</button></div><div className="balance-breakdown"><div><i className="dot spending"/><span><p>Spendable</p><strong>{formatMoney(spendable, currency)}</strong></span></div><div><i className="dot savings"/><span><p>Savings</p><strong>{formatMoney(savings, currency)}</strong></span></div><div><i className="dot investing"/><span><p>Raw invested</p><strong>{formatMoney(invested, currency)}</strong></span></div></div><button className="text-link" onClick={() => setPage("accounts")}>View all accounts <span>→</span></button></section>
+    <section className="balance-card"><div className="card-heading"><span><p>TOTAL BALANCE</p><h3>{formatMoney(totalBalance, currency)}</h3></span><button aria-label="More balance options">•••</button></div><div className="balance-breakdown"><div><i className="dot spending"/><span><p>Spendable</p><strong>{formatMoney(spendable, currency)}</strong></span></div><div><i className="dot savings"/><span><p>Savings</p><strong>{formatMoney(savings, currency)}</strong></span></div><div className="investment-breakdown"><i className="dot investing"/><span><p>Investments (estimated)</p><strong>{formatMoney(invested, currency)}</strong><small className={movementTone(investmentMovement)}>{movementMoney(investmentMovement, currency)} · {movementPercent(investmentMovementPercent)}</small></span></div></div><button className="text-link" onClick={() => setPage("accounts")}>View all accounts <span>→</span></button></section>
     <section className="budget-card"><div className="section-heading"><div><p>YOUR BUDGET</p><h3>One plan, shown at three timescales.</h3></div><button className="ghost-button" onClick={() => setPage("budget")}>Manage budget</button></div><div className="budget-windows">{budgetResults.filter((rule) => rule.active === 1).map((rule, index) => <article key={rule.id} className={`budget-window ${["mint", "sky", "sand"][index]}`}><span>{rule.period === "daily" ? "Today remaining" : rule.period === "weekly" ? "Projected through week end" : "Month remaining"}</span><strong>{formatMoney(rule.remaining, currency)}</strong><small>{rule.unavailable ? rule.source_note : budgetEquation(rule, currency)}</small><div className="progress-track"><i style={{ width: `${Math.max(0, Math.min(100, rule.remaining / Math.max(1, rule.effective_base_cents) * 100))}%` }} /></div></article>)}{budgetResults.filter((rule) => rule.active === 1).length === 0 && <EmptyMini text="Set a monthly budget to activate all three views." />}</div></section>
     <section className="commitments-card"><div className="section-heading compact"><div><p>UP NEXT</p><h3>Committed money</h3></div><button className="text-link" onClick={() => setPage("plans")}>See plans</button></div><div className="commitment-list">{upcomingPayments.slice(0, 3).map((payment) => { const plan = installmentPlans.find((item) => item.id === payment.plan_id); return <div key={payment.id}><span className="date-block"><b>{parseDate(payment.due_date).getUTCDate()}</b><small>{parseDate(payment.due_date).toLocaleString("en", { month: "short", timeZone: "UTC" }).toUpperCase()}</small></span><span><strong>{plan?.title ?? "Installment"}</strong><small>Payment {payment.sequence} of {plan?.installment_count}</small></span><b>{formatMoney(payment.amount_cents, currency, 0)}</b></div>})}{upcomingPayments.length === 0 && <EmptyMini text="No installment payments coming up." />}</div><div className="reserved-note"><span>✓</span><p><strong>{formatMoney(reservedThisMonth, currency)} reserved</strong><small>Included in this month’s budget.</small></p></div></section>
     <section className="activity-card"><div className="section-heading compact"><div><p>LATEST ACTIVITY</p><h3>Recent transactions</h3></div><button className="text-link" onClick={() => setPage("transactions")}>View all</button></div><div className="activity-list">{transactions.slice(0, 4).map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} accountById={accountById} categoryById={categoryById} currency={currency} onEdit={() => onEditTransaction(transaction)} />)}{transactions.length === 0 && <EmptyMini text="Your first transactions will appear here." />}</div></section>
@@ -418,8 +440,11 @@ function TransactionsPage({ context, search, setSearch, onAdd, onEdit }: { conte
   return <section className="page-card"><div className="page-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions" /></label><button className="ghost-button" onClick={onAdd}>＋ New transaction</button></div><p className="edit-hint">Double-click or hold a transaction to correct its amount, account, date, or details.</p><div className="transaction-table"><div className="table-head"><span>Transaction</span><span>Date</span><span>Account</span><span>Amount</span></div>{filtered.map((transaction) => <div className="table-row editable-record" {...editableProps(() => onEdit(transaction))} key={transaction.id}><span className="transaction-name"><i style={{ background: context.categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description[0]}</i><span><strong>{transaction.description}</strong><small>{context.categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)}{transaction.committed ? " · Committed" : ""}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span></span><span>{shortDate(transaction.date)}</span><span>{context.accountById[transaction.account_id ?? ""]?.name ?? "Plan"}</span><b className={transaction.type === "income" ? "income" : ""}>{transaction.type === "income" ? "+" : transaction.type === "expense" ? "−" : ""}{formatMoney(transaction.amount_cents, context.currency)}</b></div>)}{filtered.length === 0 && <EmptyState title="No transactions found" copy="Add a transaction or try a different search." />}</div></section>;
 }
 
-function AccountsPage({ context, onAdd, onEdit }: { context: Context; onAdd: () => void; onEdit: (record: Account) => void }) {
-  return <><section className="summary-strip"><div><p>NET BALANCE</p><strong>{formatMoney(context.totalBalance, context.currency)}</strong></div><div><p>AVAILABLE CASH</p><strong>{formatMoney(context.spendable, context.currency)}</strong></div><div><p>INSTALLMENT DEBT</p><strong>{formatMoney(context.outstandingInstallments, context.currency)}</strong></div></section><p className="edit-hint page-edit-hint">Double-click or hold an account to edit its details. Balance changes belong in transactions.</p><section className="accounts-grid">{context.accounts.map((account) => <article className="account-card editable-record" {...editableProps(() => onEdit(account))} key={account.id} style={{ "--account-color": account.color } as CSSProperties}><div className="account-card-top"><span className="account-icon">{account.type === "cash" ? "¤" : account.type === "investment" ? "↗" : account.type === "savings" ? "◇" : account.type === "credit" ? "▰" : "◫"}</span></div><p>{typeLabel(account.type)}</p><h3>{account.name}</h3><strong>{formatMoney(account.balance_cents, account.currency)}</strong><small>{account.type === "investment" ? "Raw contributions only" : account.include_spendable ? "Included in available money" : "Excluded from available money"}</small></article>)}<button className="add-card" onClick={onAdd}><span>＋</span><strong>Add custom account</strong><small>Bank, cash, savings, credit, investment, or anything else.</small></button></section></>;
+function AccountsPage({ context, onAdd, onEdit, onSnapshot }: { context: Context; onAdd: () => void; onEdit: (record: Account) => void; onSnapshot: (record: Account) => void }) {
+  return <><section className="summary-strip"><div><p>NET BALANCE</p><strong>{formatMoney(context.totalBalance, context.currency)}</strong></div><div><p>AVAILABLE CASH</p><strong>{formatMoney(context.spendable, context.currency)}</strong></div><div><p>INSTALLMENT DEBT</p><strong>{formatMoney(context.outstandingInstallments, context.currency)}</strong></div></section><p className="edit-hint page-edit-hint">Double-click or hold an account to edit its details. Balance changes belong in transactions.</p><section className="accounts-grid">{context.accounts.map((account) => {
+    const metrics = context.investmentMetrics[account.id];
+    return <article className={`account-card editable-record ${metrics ? "investment-account-card" : ""}`} {...editableProps(() => onEdit(account))} key={account.id} style={{ "--account-color": account.color } as CSSProperties}><div className="account-card-top"><span className="account-icon">{account.type === "cash" ? "¤" : account.type === "investment" ? "↗" : account.type === "savings" ? "◇" : account.type === "credit" ? "▰" : "◫"}</span></div><p>{typeLabel(account.type)}</p><h3>{account.name}</h3><strong>{formatMoney(account.balance_cents, account.currency)}</strong><small>{metrics ? "Raw / net amount invested" : account.include_spendable ? "Included in available money" : "Excluded from available money"}</small>{metrics && <div className="valuation-summary"><span><small>Estimated / current value</small><strong>{formatMoney(metrics.estimatedCurrentValue, account.currency)}</strong><em>{metrics.latestSnapshot ? `Snapshot ${formatMoney(metrics.latestSnapshot.value_cents, account.currency)} · ${shortDate(metrics.latestSnapshot.snapshot_date)}` : "No valuation snapshot yet"}</em></span><span className={`movement-pill ${movementTone(metrics.movement)}`}><b>{movementMoney(metrics.movement, account.currency)}</b><small>{movementPercent(metrics.movementPercent)}</small></span></div>}{metrics && <button className="snapshot-action" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSnapshot(account); }}>＋ Add value snapshot</button>}</article>;
+  })}<button className="add-card" onClick={onAdd}><span>＋</span><strong>Add custom account</strong><small>Bank, cash, savings, credit, investment, or anything else.</small></button></section></>;
 }
 
 function BudgetPage({ context, onEdit }: { context: Context; onEdit: () => void }) {
@@ -438,6 +463,26 @@ function GoalsPage({ context, onGoal, onSpare, onSweep, onEdit }: { context: Con
 
 function SettingsPage({ context, onCategory, onSpare, onWeek, onTimezone, onEditCategory }: { context: Context; onCategory: () => void; onSpare: () => void; onWeek: () => void; onTimezone: () => void; onEditCategory: (record: Category) => void }) {
   return <div className="settings-grid"><section className="page-card"><div className="section-heading"><div><p>CATEGORIES</p><h3>Custom income & expense labels</h3></div><button className="ghost-button" onClick={onCategory}>＋ Add category</button></div><p className="edit-hint">Double-click or hold a category to edit or archive it.</p><div className="category-cloud">{context.categories.map((category) => <span className="editable-record" {...editableProps(() => onEditCategory(category))} key={category.id} style={{ background: category.color }}><i>{category.name[0]}</i>{category.name}<small>{category.kind}</small></span>)}</div></section><section className="page-card setting-stack"><div><span className="setting-icon">¤</span><span><strong>Currency</strong><small>Primary display and manual entry currency</small></span><b>{context.profile.currency}</b></div><button onClick={onTimezone}><span className="setting-icon">◷</span><span><strong>Financial timezone</strong><small>Controls today, due dates, resets, and automatic catch-up</small></span><b>{context.profile.timezone} →</b></button><button onClick={onSpare}><span className="setting-icon">×{context.profile.spare_multiplier}</span><span><strong>Spare change</strong><small>{context.profile.spare_sweep_mode} · {formatMoney(context.profile.spare_threshold_cents, context.currency)} threshold</small></span><b>→</b></button><button onClick={onWeek}><span className="setting-icon">7</span><span><strong>Week starts</strong><small>Calendar-week anchor for weekly and daily windows</small></span><b>{weekdayLabels[context.profile.week_start]} →</b></button><div><span className="setting-icon">☁</span><span><strong>Cross-device data</strong><small>Stored privately with your ChatGPT sign-in</small></span><b>Active</b></div></section></div>;
+}
+
+function ValuationModal({ account, snapshots, currency, today, busy, close, save }: { account: Account; snapshots: InvestmentValuationSnapshot[]; currency: string; today: string; busy: boolean; close: () => void; save: (action: string, payload: Record<string, unknown>) => Promise<boolean> }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = snapshots.find((snapshot) => snapshot.id === editingId) ?? null;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const ok = await save(editing ? "updateInvestmentSnapshot" : "addInvestmentSnapshot", { ...values, accountId: account.id, snapshotId: editing?.id });
+    if (ok) setEditingId(null);
+  }
+
+  async function remove(snapshot: InvestmentValuationSnapshot) {
+    if (!window.confirm(`Delete the ${shortDate(snapshot.snapshot_date)} valuation snapshot? This will not delete any transaction.`)) return;
+    const ok = await save("deleteInvestmentSnapshot", { snapshotId: snapshot.id });
+    if (ok && editingId === snapshot.id) setEditingId(null);
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="modal-card valuation-modal" role="dialog" aria-modal="true"><button className="modal-close" onClick={close} aria-label="Close">×</button><ModalTitle eyebrow="MANUAL INVESTMENT VALUATION" title={account.name} copy="A snapshot records portfolio value only. It never creates a transaction or changes raw invested history or budgets."/><form key={editing?.id ?? "new"} onSubmit={submit}><div className="form-grid"><Field label="Portfolio value"><input name="value" type="number" min="0" step="0.01" defaultValue={editing ? editing.value_cents / 100 : ""} required placeholder="0.00"/></Field><Field label="Snapshot date"><input name="snapshotDate" type="date" max={today} defaultValue={editing?.snapshot_date ?? today} required/></Field></div><Field label="Note (optional)"><input name="note" maxLength={500} defaultValue={editing?.note ?? ""} placeholder="Broker statement, manual check…"/></Field><div className="valuation-form-actions">{editing && <button type="button" className="ghost-button" onClick={() => setEditingId(null)}>Cancel edit</button>}<Submit busy={busy} label={editing ? "Save snapshot changes" : "Add value snapshot"}/></div></form><div className="valuation-history"><div className="section-heading compact"><div><p>VALUATION HISTORY</p><h3>{snapshots.length ? `${snapshots.length} manual ${snapshots.length === 1 ? "snapshot" : "snapshots"}` : "No snapshots yet"}</h3></div></div>{snapshots.map((snapshot, index) => <article key={snapshot.id}><span><strong>{formatMoney(snapshot.value_cents, currency)}</strong><small>{shortDate(snapshot.snapshot_date)}{index === 0 ? " · Latest" : ""}{snapshot.note ? ` · ${snapshot.note}` : ""}</small></span><span><button type="button" className="text-link" disabled={busy} onClick={() => setEditingId(snapshot.id)}>Edit</button><button type="button" className="delete-snapshot" disabled={busy} onClick={() => remove(snapshot)}>Delete</button></span></article>)}{snapshots.length === 0 && <EmptyMini text="Add the value from a statement or broker screen whenever you want to refresh the estimate." />}</div></section></div>;
 }
 
 /* eslint-disable jsx-a11y/label-has-associated-control -- modal labels wrap their controls and visible descriptions. */

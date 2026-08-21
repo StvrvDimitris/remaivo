@@ -30,6 +30,16 @@ export const accounts = sqliteTable("accounts", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_accounts_user_active").on(table.userId, table.archived)]);
 
+export const investmentValuationSnapshots = sqliteTable("investment_valuation_snapshots", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  accountId: text("account_id").notNull(),
+  snapshotDate: text("snapshot_date").notNull(),
+  valueCents: integer("value_cents").notNull(),
+  note: text("note"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("idx_investment_snapshots_user_account_date").on(table.userId, table.accountId, table.snapshotDate)]);
+
 export const categories = sqliteTable("categories", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
