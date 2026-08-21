@@ -5,6 +5,7 @@ export const profiles = sqliteTable("profiles", {
   userId: text("user_id").primaryKey(),
   currency: text("currency").notNull().default("EUR"),
   weekStart: integer("week_start").notNull().default(1),
+  timezone: text("timezone").notNull().default("UTC"),
   setupComplete: integer("setup_complete", { mode: "boolean" }).notNull().default(false),
   spareMultiplier: integer("spare_multiplier").notNull().default(1),
   spareDestinationId: text("spare_destination_id"),

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 let schemaReady: Promise<void> | null = null;
 
 const statements = [
-  `CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY, currency TEXT NOT NULL DEFAULT 'EUR', week_start INTEGER NOT NULL DEFAULT 1, setup_complete INTEGER NOT NULL DEFAULT 0, spare_multiplier INTEGER NOT NULL DEFAULT 1, spare_destination_id TEXT, spare_sweep_mode TEXT NOT NULL DEFAULT 'threshold', spare_threshold_cents INTEGER NOT NULL DEFAULT 1000, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY, currency TEXT NOT NULL DEFAULT 'EUR', week_start INTEGER NOT NULL DEFAULT 1, timezone TEXT NOT NULL DEFAULT 'UTC', setup_complete INTEGER NOT NULL DEFAULT 0, spare_multiplier INTEGER NOT NULL DEFAULT 1, spare_destination_id TEXT, spare_sweep_mode TEXT NOT NULL DEFAULT 'threshold', spare_threshold_cents INTEGER NOT NULL DEFAULT 1000, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR', opening_balance_cents INTEGER NOT NULL DEFAULT 0, balance_cents INTEGER NOT NULL DEFAULT 0, credit_limit_cents INTEGER, color TEXT NOT NULL DEFAULT '#1f5b4e', icon TEXT NOT NULL DEFAULT 'wallet', include_spendable INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#cfe9d7', icon TEXT NOT NULL DEFAULT 'circle', archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_id TEXT, destination_account_id TEXT, category_id TEXT, type TEXT NOT NULL, description TEXT NOT NULL, amount_cents INTEGER NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'posted', committed INTEGER NOT NULL DEFAULT 0, counts_daily INTEGER NOT NULL DEFAULT 1, counts_weekly INTEGER NOT NULL DEFAULT 1, counts_monthly INTEGER NOT NULL DEFAULT 1, counts_general INTEGER NOT NULL DEFAULT 1, recurring_plan_id TEXT, installment_plan_id TEXT, replaces_transaction_id TEXT, spare_change_cents INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
@@ -47,10 +47,21 @@ const transactionUpgrades = [
   `ALTER TABLE transactions ADD COLUMN replaces_transaction_id TEXT`,
 ];
 
+const profileUpgrades = [
+  `ALTER TABLE profiles ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'`,
+];
+
 export function ensureFinanceSchema() {
   if (!schemaReady) {
     schemaReady = (async () => {
       await env.DB.batch(statements.map((statement) => env.DB.prepare(statement)));
+      for (const statement of profileUpgrades) {
+        try {
+          await env.DB.prepare(statement).run();
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.toLowerCase().includes("duplicate column")) throw error;
+        }
+      }
       let budgetColumnsAdded = false;
       for (const statement of budgetUpgrades) {
         try {
