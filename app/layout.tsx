@@ -19,7 +19,7 @@ export const viewport: Viewport = {
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "pace.local";
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "remaivo.local";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.includes("localhost") ? "http" : "https");
   const baseUrl = new URL(`${protocol}://${host}`);
   const title = "Remaivo — Know what's left";

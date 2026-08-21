@@ -217,7 +217,7 @@ export async function POST(request: Request) {
         const parent = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : null;
         const reset = period === "daily" ? "weekly" : period === "weekly" ? "monthly" : "yearly";
         const broadPool = period === "monthly";
-        statements.push(env.DB.prepare("INSERT OR REPLACE INTO budget_rules (id, user_id, period, base_cents, carry_mode, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'adaptive', 10000, ?, 1, ?, ?, ?, 1)").bind(crypto.randomUUID(), user.userId, period, cents(budgetInput[period]), derived ? "reset" : text(carryInput[period], "reset"), today, derived ? "derived" : "manual", parent, reset, broadPool ? 1 : 0, broadPool ? 1 : 0, broadPool ? 1 : 0));
+        statements.push(env.DB.prepare("INSERT OR REPLACE INTO budget_rules (id, user_id, period, base_cents, carry_mode, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'adaptive', 10000, ?, 1, ?, ?, ?, 1)").bind(crypto.randomUUID(), user.userId, period, cents(budgetInput[period]), text(carryInput[period], "reset"), today, derived ? "derived" : "manual", parent, reset, broadPool ? 1 : 0, broadPool ? 1 : 0, broadPool ? 1 : 0));
       }
       await env.DB.batch(statements);
     } else if (action === "addAccount") {
@@ -261,7 +261,16 @@ export async function POST(request: Request) {
     } else if (action === "updateTransaction") {
       await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, new Date().toISOString().slice(0, 10)), payload.categoryId || null, payload.transactionId, user.userId).run();
     } else if (action === "correctTransaction") {
-      const original = await env.DB.prepare("SELECT * FROM transactions WHERE id = ? AND user_id = ? AND status = 'posted'").bind(payload.transactionId, user.userId).first<Record<string, unknown>>();
+      const original = await env.DB.prepare(
+        `WITH RECURSIVE correction_chain AS (
+          SELECT * FROM transactions WHERE id = ? AND user_id = ?
+          UNION ALL
+          SELECT child.* FROM transactions child
+          JOIN correction_chain parent ON child.replaces_transaction_id = parent.id
+          WHERE child.user_id = ?
+        )
+        SELECT * FROM correction_chain WHERE status = 'posted' ORDER BY created_at DESC LIMIT 1`,
+      ).bind(payload.transactionId, user.userId, user.userId).first<Record<string, unknown>>();
       if (!original) return Response.json({ error: "That transaction is no longer available to correct." }, { status: 404 });
       const type = String(original.type);
       if (["installment_payment", "installment_purchase"].includes(type)) return Response.json({ error: "Correct installment entries from their pay-later plan." }, { status: 409 });
@@ -301,7 +310,7 @@ export async function POST(request: Request) {
       if (spare && profile?.spare_destination_id) statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare, original.id, user.userId, correctionMarker));
       statements.push(env.DB.prepare("UPDATE transactions SET status = 'corrected' WHERE id = ? AND user_id = ? AND status = ?").bind(original.id, user.userId, correctionMarker));
       const results = await env.DB.batch(statements);
-      if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction was already corrected." }, { status: 409 });
+      if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction changed while you were editing it. Reopen it and try again." }, { status: 409 });
     } else if (action === "addRecurring") {
       await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, end_date, auto_post, committed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), text(payload.type, "expense"), cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, text(payload.nextDate), payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0).run();
     } else if (action === "updateRecurring") {

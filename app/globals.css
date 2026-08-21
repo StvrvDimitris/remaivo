@@ -84,8 +84,8 @@ button { color: inherit; }
 .hero-copy > p { color: #a8c3bb; }
 .hero-copy h2 { margin: 2px 0 12px; font-size: clamp(54px, 6vw, 80px); letter-spacing: -.07em; line-height: 1; }
 .hero-copy h2 span { font-size: .42em; color: #9fbab2; letter-spacing: -.02em; }
-.pace-pill { width: max-content; margin: 0 0 18px; padding: 7px 10px; border-radius: 20px; background: rgba(223,243,95,.12); color: var(--lime); font-size: 10px; font-weight: 900; }
-.pace-pill i { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--lime); }
+.budget-status { width: max-content; margin: 0 0 18px; padding: 7px 10px; border-radius: 20px; background: rgba(223,243,95,.12); color: var(--lime); font-size: 10px; font-weight: 900; }
+.budget-status i { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--lime); }
 .hero-copy small { display: block; max-width: 320px; color: #b9cdc7; font-size: 11px; line-height: 1.55; }
 .hero-visual { position: relative; z-index: 1; text-align: center; }
 .dial { width: 158px; height: 158px; padding: 12px; border-radius: 50%; background: conic-gradient(var(--lime) 0 75%, rgba(255,255,255,.12) 75% 100%); transform: rotate(-38deg); }
