@@ -13,10 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
   themeColor: "#15372f",
-  viewportFit: "cover",
 };
 
 const title = "Remaivo — Know what's left";
