@@ -4,6 +4,8 @@ import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useCallback, useEf
 import { projectBudgetPlan, splitCents, type FixedCarryMode } from "./budget-math";
 import { financialToday, outstandingDateInWindow } from "./finance-dates";
 import { calculateInvestmentValue, type InvestmentValuationSnapshot, type InvestmentValueMetrics } from "./investment-valuations";
+import { budgetCountsTransaction } from "./transaction-classification";
+import { AnalyticsFilterBar, StatisticsPage, analyticsRange, useAnalyticsFilters } from "./statistics-page";
 
 type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; opening_balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 type Category = { id: string; name: string; kind: string; color: string; icon: string; archived: number };
@@ -38,7 +40,7 @@ type TransactionSort = "description" | "date" | "account" | "amount";
 type TransactionPageResult = { items: Transaction[]; page: number; pageSize: number; total: number; totalPages: number; from: string; to: string; today: string; error?: string };
 
 type ModalName = "transaction" | "account" | "budget" | "plan" | "category" | "spare" | "goal" | "week" | "timezone" | null;
-type PageName = "overview" | "transactions" | "accounts" | "budget" | "plans" | "goals" | "settings";
+type PageName = "overview" | "transactions" | "statistics" | "accounts" | "budget" | "plans" | "goals" | "settings";
 type EditTarget =
   | { kind: "transaction"; record: Transaction }
   | { kind: "account"; record: Account }
@@ -50,6 +52,7 @@ type EditTarget =
 const navItems: { id: PageName; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "⌂" },
   { id: "transactions", label: "Transactions", icon: "↕" },
+  { id: "statistics", label: "Statistics", icon: "⌁" },
   { id: "accounts", label: "Accounts", icon: "◫" },
   { id: "budget", label: "Budget", icon: "◔" },
   { id: "plans", label: "Plans", icon: "↻" },
@@ -131,11 +134,7 @@ function daysBetween(start: string, end: string) {
 }
 
 function transactionCounts(rule: BudgetRule, transaction: Transaction) {
-  if (transaction.type === "expense") return transaction.committed === 1 ? rule.include_committed === 1 : rule.include_everyday === 1;
-  if (transaction.type === "installment_payment") return rule.include_committed === 1;
-  if (transaction.type === "saving") return rule.include_savings === 1;
-  if (transaction.type === "investment") return rule.include_investments === 1;
-  return false;
+  return budgetCountsTransaction(rule, transaction);
 }
 
 function plannedFor(rule: BudgetRule, recurring: RecurringPlan[], payments: InstallmentPayment[], start: string, end: string, includeOverdue = false) {
@@ -292,11 +291,14 @@ function editableProps(onEdit: () => void): HTMLAttributes<HTMLElement> {
 
 export function FinanceClient({ displayName, email, signOutHref }: { displayName: string; email: string; signOutHref: string }) {
   const [data, setData] = useState<Snapshot | null>(null);
-  const [page, setPage] = useState<PageName>("overview");
+  const [page, setPage] = useState<PageName>(() => {
+    if (typeof window === "undefined") return "overview";
+    const candidate = new URLSearchParams(window.location.search).get("view");
+    return (["overview", "transactions", "statistics", "accounts", "budget", "plans", "goals", "settings"].includes(candidate ?? "") ? candidate : "overview") as PageName;
+  });
   const [modal, setModal] = useState<ModalName>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [search, setSearch] = useState("");
   const [revision, setRevision] = useState(0);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [valuationAccountId, setValuationAccountId] = useState<string | null>(null);
@@ -312,6 +314,13 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
     // eslint-disable-next-line react-hooks/set-state-in-effect -- this effect loads the server snapshot on mount.
     load().catch((error) => setNotice(error instanceof Error ? error.message : "Unable to load Remaivo."));
   }, [load]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (page === "overview") url.searchParams.delete("view");
+    else url.searchParams.set("view", page);
+    window.history.replaceState({}, "", url);
+  }, [page]);
 
   async function mutate(action: string, payload: Record<string, unknown>) {
     setBusy(true);
@@ -400,7 +409,8 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
       <section className="workspace">
         <AppHeader page={page} displayName={displayName} today={data.today} onAdd={() => setModal("transaction")} />
         {page === "overview" && <Overview context={context} primaryBudget={primaryBudget} availableNow={availableNow} spentInActiveWindow={spentInActiveWindow} totalActiveAvailable={totalActiveAvailable} setPage={setPage} onAdd={() => setModal("transaction")} onEditTransaction={(record) => setEditTarget({ kind: "transaction", record })} />}
-        {page === "transactions" && <TransactionsPage context={context} search={search} setSearch={setSearch} revision={revision} onAdd={() => setModal("transaction")} onEdit={(record) => setEditTarget({ kind: "transaction", record })} />}
+        {page === "transactions" && <TransactionsPage context={context} revision={revision} onAdd={() => setModal("transaction")} onEdit={(record) => setEditTarget({ kind: "transaction", record })} />}
+        {page === "statistics" && <StatisticsPage context={context} revision={revision} />}
         {page === "accounts" && <AccountsPage context={context} onAdd={() => setModal("account")} onEdit={(record) => setEditTarget({ kind: "account", record })} onSnapshot={(record) => setValuationAccountId(record.id)} />}
         {page === "budget" && <BudgetPage context={context} onEdit={() => setModal("budget")} />}
         {page === "plans" && <PlansPage context={context} onAdd={() => setModal("plan")} onPay={async (paymentId) => { if (window.confirm("Mark this installment as paid on its scheduled date?")) await mutate("payInstallment", { paymentId }); }} onEditRecurring={(record) => setEditTarget({ kind: "recurring", record })} onEditInstallment={(record) => setEditTarget({ kind: "installment", record })} />}
@@ -417,7 +427,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
 }
 
 function AppHeader({ page, displayName, today, onAdd }: { page: PageName; displayName: string; today: string; onAdd: () => void }) {
-  const title: Record<PageName, string> = { overview: `Good morning, ${displayName.split(" ")[0]}.`, transactions: "Transactions", accounts: "Your accounts", budget: "Budgets", plans: "Plans & commitments", goals: "Save & invest", settings: "Settings" };
+  const title: Record<PageName, string> = { overview: `Good morning, ${displayName.split(" ")[0]}.`, transactions: "Transactions", statistics: "Statistics", accounts: "Your accounts", budget: "Budgets", plans: "Plans & commitments", goals: "Save & invest", settings: "Settings" };
   const now = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(parseDate(today));
   return <header className="topbar"><div><p className="eyebrow">{page === "overview" ? now.toUpperCase() : "REMAIVO PERSONAL FINANCE"}</p><h1>{title[page]}</h1></div><div className="top-actions"><button className="icon-button" aria-label="Notifications">●</button><button className="primary-button" onClick={onAdd}><span>＋</span>Add transaction</button></div></header>;
 }
@@ -452,30 +462,26 @@ function Pager({ page, totalPages, total, pageSize, label, onPage }: { page: num
   return <nav className="pager" aria-label={`${label} pages`}><span>{first}–{last} of {total}</span><div><button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label={`Previous ${label} page`}>←</button><b>Page {page} of {totalPages}</b><button type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)} aria-label={`Next ${label} page`}>→</button></div></nav>;
 }
 
-function TransactionsPage({ context, search, setSearch, revision, onAdd, onEdit }: { context: Context; search: string; setSearch: (value: string) => void; revision: number; onAdd: () => void; onEdit: (record: Transaction) => void }) {
-  const monthStart = `${context.today.slice(0, 7)}-01`;
-  const weekStart = periodStart(context.today, "weekly", context.profile.week_start);
-  const [range, setRange] = useState<"day" | "week" | "month" | "custom">("month");
-  const [customFrom, setCustomFrom] = useState(monthStart);
-  const [customTo, setCustomTo] = useState(context.today);
-  const [categoryId, setCategoryId] = useState("");
+function TransactionsPage({ context, revision, onAdd, onEdit }: { context: Context; revision: number; onAdd: () => void; onEdit: (record: Transaction) => void }) {
+  const [filters, setFilters] = useAnalyticsFilters(context);
+  const { accountId, categoryId, description, origin, transactionType } = filters;
   const [sort, setSort] = useState<TransactionSort>("date");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [transactionPage, setTransactionPage] = useState(1);
   const [result, setResult] = useState<TransactionPageResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const from = range === "day" ? context.today : range === "week" ? weekStart : range === "month" ? monthStart : customFrom || monthStart;
-  const to = range === "custom" ? customTo || context.today : context.today;
+  const range = analyticsRange(filters, context);
 
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
       setLoadError("");
-      const params = new URLSearchParams({ view: "transactions", from, to, page: String(transactionPage), sort, direction });
-      if (search.trim()) params.set("search", search.trim());
-      if (categoryId) params.set("categoryId", categoryId);
+      const params = new URLSearchParams({ view: "transactions", from: range.from, to: range.to, page: String(transactionPage), sort, direction });
+      if (description.trim()) params.set("search", description.trim());
+      const optional = { accountId, categoryId, transactionType, origin };
+      for (const [key, value] of Object.entries(optional)) if (value) params.set(key, value);
       try {
         const response = await fetch(`/api/finance?${params}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as TransactionPageResult;
@@ -487,11 +493,10 @@ function TransactionsPage({ context, search, setSearch, revision, onAdd, onEdit 
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
-    }, search.trim() ? 250 : 0);
+    }, description.trim() ? 250 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [categoryId, direction, from, revision, search, sort, to, transactionPage]);
+  }, [accountId, categoryId, description, direction, origin, range.from, range.to, revision, sort, transactionPage, transactionType]);
 
-  const chooseRange = (value: "day" | "week" | "month") => { setRange(value); setTransactionPage(1); };
   const changeSort = (value: TransactionSort) => {
     if (sort === value) setDirection((current) => current === "asc" ? "desc" : "asc");
     else { setSort(value); setDirection(value === "description" || value === "account" ? "asc" : "desc"); }
@@ -500,7 +505,7 @@ function TransactionsPage({ context, search, setSearch, revision, onAdd, onEdit 
   const sortLabel = (value: TransactionSort, label: string) => `${label}${sort === value ? direction === "asc" ? " ↑" : " ↓" : ""}`;
   const items = result?.items ?? [];
 
-  return <section className="page-card transaction-page"><div className="page-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(event) => { setSearch(event.target.value); setTransactionPage(1); }} placeholder="Search transactions, categories, or accounts" /></label><button className="ghost-button" onClick={onAdd}>＋ New transaction</button></div><div className="transaction-filter-bar"><div className="quick-filters" aria-label="Transaction period"><button className={range === "day" ? "active" : ""} onClick={() => chooseRange("day")}>Today</button><button className={range === "week" ? "active" : ""} onClick={() => chooseRange("week")}>This week</button><button className={range === "month" ? "active" : ""} onClick={() => chooseRange("month")}>This month</button></div><details className="advanced-filters"><summary>More filters{(range === "custom" || categoryId) ? " · Active" : ""}</summary><div><label><span>From</span><input type="date" required max={customTo || context.today} value={customFrom} onChange={(event) => { setCustomFrom(event.target.value); setRange("custom"); setTransactionPage(1); }} /></label><label><span>To</span><input type="date" required min={customFrom || monthStart} max={context.today} value={customTo} onChange={(event) => { setCustomTo(event.target.value); setRange("custom"); setTransactionPage(1); }} /></label><label><span>Category</span><select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setTransactionPage(1); }}><option value="">All categories</option>{context.categories.map((category) => <option value={category.id} key={category.id}>{category.name} · {category.kind}</option>)}</select></label><button type="button" className="clear-filter" disabled={range !== "custom" && !categoryId} onClick={() => { setRange("month"); setCustomFrom(monthStart); setCustomTo(context.today); setCategoryId(""); setTransactionPage(1); }}>Reset</button></div></details></div><p className="edit-hint">Showing {range === "day" ? "today" : range === "week" ? "this week" : range === "month" ? "this month" : `${shortDate(from)}–${shortDate(to)}`}. Double-click or hold a transaction to correct it.</p><div className={`transaction-table ${loading ? "is-loading" : ""}`} aria-busy={loading}><div className="table-head"><button onClick={() => changeSort("description")}>{sortLabel("description", "Transaction")}</button><button onClick={() => changeSort("date")}>{sortLabel("date", "Date")}</button><button onClick={() => changeSort("account")}>{sortLabel("account", "Account")}</button><button onClick={() => changeSort("amount")}>{sortLabel("amount", "Amount")}</button></div>{items.map((transaction) => <div className="table-row editable-record" {...editableProps(() => onEdit(transaction))} key={transaction.id}><span className="transaction-name"><i style={{ background: context.categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description[0]}</i><span><strong>{transaction.description}</strong><small>{context.categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)}{transaction.committed ? " · Committed" : ""}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span></span><span>{shortDate(transaction.date)}</span><span>{context.accountById[transaction.account_id ?? ""]?.name ?? "Plan"}</span><b className={transaction.type === "income" ? "income" : ""}>{transaction.type === "income" ? "+" : transaction.type === "expense" ? "−" : ""}{formatMoney(transaction.amount_cents, context.currency)}</b></div>)}{!loading && !loadError && items.length === 0 && <EmptyState title="No transactions found" copy="Try a broader date range, clear a filter, or add a transaction." />}{loadError && <EmptyState title="Transactions could not load" copy={loadError} />}</div>{result && <Pager page={result.page} totalPages={result.totalPages} total={result.total} pageSize={result.pageSize} label="transactions" onPage={setTransactionPage} />}</section>;
+  return <section className="page-card transaction-page"><AnalyticsFilterBar context={context} filters={filters} setFilters={(change, replace) => { setTransactionPage(1); setFilters(change, replace); }} action={<button className="ghost-button" onClick={onAdd}>＋ New transaction</button>} /><p className="edit-hint">Filters are shared with Statistics and saved in the URL. Double-click or hold a transaction to correct it.</p><div className={`transaction-table ${loading ? "is-loading" : ""}`} aria-busy={loading}><div className="table-head"><button onClick={() => changeSort("description")}>{sortLabel("description", "Transaction")}</button><button onClick={() => changeSort("date")}>{sortLabel("date", "Date")}</button><button onClick={() => changeSort("account")}>{sortLabel("account", "Account")}</button><button onClick={() => changeSort("amount")}>{sortLabel("amount", "Amount")}</button></div>{items.map((transaction) => <div className="table-row editable-record" {...editableProps(() => onEdit(transaction))} key={transaction.id}><span className="transaction-name"><i style={{ background: context.categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description[0]}</i><span><strong>{transaction.description}</strong><small>{context.categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)}{transaction.committed ? " · Committed" : ""}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span></span><span>{shortDate(transaction.date)}</span><span>{context.accountById[transaction.account_id ?? ""]?.name ?? "Plan"}</span><b className={transaction.type === "income" ? "income" : ""}>{transaction.type === "income" ? "+" : transaction.type === "expense" ? "−" : ""}{formatMoney(transaction.amount_cents, context.currency)}</b></div>)}{!loading && !loadError && items.length === 0 && <EmptyState title="No transactions found" copy="Try a broader date range, clear a filter, or add a transaction." />}{loadError && <EmptyState title="Transactions could not load" copy={loadError} />}</div>{result && <Pager page={result.page} totalPages={result.totalPages} total={result.total} pageSize={result.pageSize} label="transactions" onPage={setTransactionPage} />}</section>;
 }
 
 function AccountsPage({ context, onAdd, onEdit, onSnapshot }: { context: Context; onAdd: () => void; onEdit: (record: Account) => void; onSnapshot: (record: Account) => void }) {

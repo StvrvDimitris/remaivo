@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, scheduledOccurrencesThrough, validTimeZone } from "../../finance-dates";
+import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
+import type { StatisticsMode } from "../../transaction-classification";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +83,9 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
   const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
   const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
   const categoryId = text(params.get("categoryId"));
+  const accountId = text(params.get("accountId"));
+  const transactionType = text(params.get("transactionType"));
+  const origin = text(params.get("origin"));
   const search = text(params.get("search")).slice(0, 120).toLowerCase();
   const sort = transactionSortColumns[text(params.get("sort"))] ? text(params.get("sort")) : "date";
   const direction = text(params.get("direction")) === "asc" ? "ASC" : "DESC";
@@ -93,6 +98,16 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
     where.push("t.category_id = ?");
     bindings.push(categoryId);
   }
+  if (accountId) {
+    where.push("(t.account_id = ? OR t.destination_account_id = ?)");
+    bindings.push(accountId, accountId);
+  }
+  if (transactionType) {
+    where.push("t.type = ?");
+    bindings.push(transactionType);
+  }
+  if (origin === "recurring") where.push("t.recurring_plan_id IS NOT NULL");
+  else if (origin === "nonrecurring") where.push("t.recurring_plan_id IS NULL");
   if (search) {
     where.push("(instr(lower(t.description), ?) > 0 OR instr(lower(COALESCE(c.name, '')), ?) > 0 OR instr(lower(COALESCE(a.name, '')), ?) > 0)");
     bindings.push(search, search, search);
@@ -110,6 +125,80 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
   ).bind(...bindings, pageSize, (page - 1) * pageSize).all<Record<string, unknown>>();
 
   return { items: rows.results, page, pageSize, total, totalPages, from, to, today };
+}
+
+async function statisticsResponse(user: FinanceUser, request: Request) {
+  await ensureFinanceSchema();
+  const profile = await env.DB.prepare("SELECT setup_complete, timezone, currency FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
+  const today = financialToday(String(profile?.timezone || "UTC"));
+  if (!profile?.setup_complete) return { needsSetup: true, today };
+
+  await processAutomaticPlans(user.userId, today);
+  await processAutomaticInstallments(user.userId, today);
+
+  const params = new URL(request.url).searchParams;
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const requestedFrom = calendarDate(params.get("from"));
+  const requestedTo = calendarDate(params.get("to"));
+  const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
+  const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
+  const comparison = (["previousEquivalent", "previousMonth", "previousYear", "none"].includes(text(params.get("comparison"))) ? text(params.get("comparison")) : "previousMonth") as ComparisonMode;
+  const mode = (["spending", "income", "cashflow"].includes(text(params.get("mode"))) ? text(params.get("mode")) : "spending") as StatisticsMode;
+  const comparisonDates = comparisonRange(from, to, comparison);
+  const filters: StatisticsFilters = {
+    from,
+    to,
+    comparison,
+    comparisonFrom: comparisonDates?.from ?? null,
+    comparisonTo: comparisonDates?.to ?? null,
+    mode,
+    accountId: text(params.get("accountId")),
+    categoryId: text(params.get("categoryId")),
+    transactionType: text(params.get("transactionType")),
+    origin: text(params.get("origin")),
+    description: text(params.get("description")).slice(0, 120),
+  };
+
+  const prepareRows = (rangeFrom: string, rangeTo: string) => {
+    const where = ["t.user_id = ?", "t.status = 'posted'", "t.date >= ?", "t.date <= ?"];
+    const bindings: unknown[] = [user.userId, rangeFrom, rangeTo];
+    if (filters.accountId) {
+      where.push("(t.account_id = ? OR t.destination_account_id = ?)");
+      bindings.push(filters.accountId, filters.accountId);
+    }
+    if (filters.categoryId) {
+      where.push("t.category_id = ?");
+      bindings.push(filters.categoryId);
+    }
+    if (filters.transactionType) {
+      where.push("t.type = ?");
+      bindings.push(filters.transactionType);
+    }
+    if (filters.origin === "recurring") where.push("t.recurring_plan_id IS NOT NULL");
+    else if (filters.origin === "nonrecurring") where.push("t.recurring_plan_id IS NULL");
+    if (filters.description) {
+      where.push("instr(lower(t.description), ?) > 0");
+      bindings.push(filters.description.toLowerCase());
+    }
+    return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
+  };
+
+  const statements = [
+    prepareRows(from, to),
+    comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color FROM transactions t WHERE 0"),
+    env.DB.prepare("SELECT base_cents, include_everyday, include_committed, include_savings, include_investments, active FROM budget_rules WHERE user_id = ? AND period = 'monthly'").bind(user.userId),
+  ];
+  const [currentRows, comparisonRows, budgetRows] = await env.DB.batch(statements);
+  const budgetEligible = from === monthStart && to === today && !filters.accountId && !filters.categoryId && !filters.transactionType && !filters.origin && !filters.description;
+  return buildStatistics({
+    rows: currentRows.results as StatisticsRow[],
+    comparisonRows: comparisonRows.results as StatisticsRow[],
+    filters,
+    budget: (budgetRows.results[0] as Parameters<typeof buildStatistics>[0]["budget"]) ?? null,
+    budgetEligible,
+    today,
+    currency: String(profile.currency || "EUR"),
+  });
 }
 
 function balanceStatements(userId: string, transaction: Record<string, unknown>, direction: 1 | -1, guard?: { id: string; status: string }) {
@@ -264,7 +353,9 @@ export async function GET(request: Request) {
   const user = await currentUser();
   if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
   try {
-    if (new URL(request.url).searchParams.get("view") === "transactions") return Response.json(await pagedTransactions(user, request));
+    const view = new URL(request.url).searchParams.get("view");
+    if (view === "transactions") return Response.json(await pagedTransactions(user, request));
+    if (view === "statistics") return Response.json(await statisticsResponse(user, request));
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });
