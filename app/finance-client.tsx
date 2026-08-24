@@ -34,6 +34,9 @@ type Snapshot = {
   error?: string;
 };
 
+type TransactionSort = "description" | "date" | "account" | "amount";
+type TransactionPageResult = { items: Transaction[]; page: number; pageSize: number; total: number; totalPages: number; from: string; to: string; today: string; error?: string };
+
 type ModalName = "transaction" | "account" | "budget" | "plan" | "category" | "spare" | "goal" | "week" | "timezone" | null;
 type PageName = "overview" | "transactions" | "accounts" | "budget" | "plans" | "goals" | "settings";
 type EditTarget =
@@ -294,6 +297,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
+  const [revision, setRevision] = useState(0);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [valuationAccountId, setValuationAccountId] = useState<string | null>(null);
 
@@ -317,6 +321,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
       const next = await response.json() as Snapshot;
       if (!response.ok) throw new Error(next.error || "Unable to save that change.");
       setData(next);
+      setRevision((value) => value + 1);
       setNotice("Saved");
       window.setTimeout(() => setNotice(""), 2200);
       return true;
@@ -395,7 +400,7 @@ export function FinanceClient({ displayName, email, signOutHref }: { displayName
       <section className="workspace">
         <AppHeader page={page} displayName={displayName} today={data.today} onAdd={() => setModal("transaction")} />
         {page === "overview" && <Overview context={context} primaryBudget={primaryBudget} availableNow={availableNow} spentInActiveWindow={spentInActiveWindow} totalActiveAvailable={totalActiveAvailable} setPage={setPage} onAdd={() => setModal("transaction")} onEditTransaction={(record) => setEditTarget({ kind: "transaction", record })} />}
-        {page === "transactions" && <TransactionsPage context={context} search={search} setSearch={setSearch} onAdd={() => setModal("transaction")} onEdit={(record) => setEditTarget({ kind: "transaction", record })} />}
+        {page === "transactions" && <TransactionsPage context={context} search={search} setSearch={setSearch} revision={revision} onAdd={() => setModal("transaction")} onEdit={(record) => setEditTarget({ kind: "transaction", record })} />}
         {page === "accounts" && <AccountsPage context={context} onAdd={() => setModal("account")} onEdit={(record) => setEditTarget({ kind: "account", record })} onSnapshot={(record) => setValuationAccountId(record.id)} />}
         {page === "budget" && <BudgetPage context={context} onEdit={() => setModal("budget")} />}
         {page === "plans" && <PlansPage context={context} onAdd={() => setModal("plan")} onPay={async (paymentId) => { if (window.confirm("Mark this installment as paid on its scheduled date?")) await mutate("payInstallment", { paymentId }); }} onEditRecurring={(record) => setEditTarget({ kind: "recurring", record })} onEditInstallment={(record) => setEditTarget({ kind: "installment", record })} />}
@@ -440,9 +445,62 @@ function TransactionRow({ transaction, accountById, categoryById, currency, onEd
   return <div className="editable-record" {...editableProps(onEdit)}><span className="activity-icon" style={{ background: categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description.slice(0, 1).toUpperCase()}</span><span><strong>{transaction.description}</strong><small>{categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)} · {accountById[transaction.account_id ?? ""]?.name ?? "Plan"}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span><b className={positive ? "income" : neutral ? "neutral" : ""}>{positive ? "+" : neutral ? "" : "−"}{formatMoney(transaction.amount_cents, currency)}</b></div>;
 }
 
-function TransactionsPage({ context, search, setSearch, onAdd, onEdit }: { context: Context; search: string; setSearch: (value: string) => void; onAdd: () => void; onEdit: (record: Transaction) => void }) {
-  const filtered = context.transactions.filter((transaction) => transaction.description.toLowerCase().includes(search.toLowerCase()) || (context.categoryById[transaction.category_id ?? ""]?.name ?? "").toLowerCase().includes(search.toLowerCase()));
-  return <section className="page-card"><div className="page-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions" /></label><button className="ghost-button" onClick={onAdd}>＋ New transaction</button></div><p className="edit-hint">Double-click or hold a transaction to correct its amount, account, date, or details.</p><div className="transaction-table"><div className="table-head"><span>Transaction</span><span>Date</span><span>Account</span><span>Amount</span></div>{filtered.map((transaction) => <div className="table-row editable-record" {...editableProps(() => onEdit(transaction))} key={transaction.id}><span className="transaction-name"><i style={{ background: context.categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description[0]}</i><span><strong>{transaction.description}</strong><small>{context.categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)}{transaction.committed ? " · Committed" : ""}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span></span><span>{shortDate(transaction.date)}</span><span>{context.accountById[transaction.account_id ?? ""]?.name ?? "Plan"}</span><b className={transaction.type === "income" ? "income" : ""}>{transaction.type === "income" ? "+" : transaction.type === "expense" ? "−" : ""}{formatMoney(transaction.amount_cents, context.currency)}</b></div>)}{filtered.length === 0 && <EmptyState title="No transactions found" copy="Add a transaction or try a different search." />}</div></section>;
+function Pager({ page, totalPages, total, pageSize, label, onPage }: { page: number; totalPages: number; total: number; pageSize: number; label: string; onPage: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(total, page * pageSize);
+  return <nav className="pager" aria-label={`${label} pages`}><span>{first}–{last} of {total}</span><div><button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label={`Previous ${label} page`}>←</button><b>Page {page} of {totalPages}</b><button type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)} aria-label={`Next ${label} page`}>→</button></div></nav>;
+}
+
+function TransactionsPage({ context, search, setSearch, revision, onAdd, onEdit }: { context: Context; search: string; setSearch: (value: string) => void; revision: number; onAdd: () => void; onEdit: (record: Transaction) => void }) {
+  const monthStart = `${context.today.slice(0, 7)}-01`;
+  const weekStart = periodStart(context.today, "weekly", context.profile.week_start);
+  const [range, setRange] = useState<"day" | "week" | "month" | "custom">("month");
+  const [customFrom, setCustomFrom] = useState(monthStart);
+  const [customTo, setCustomTo] = useState(context.today);
+  const [categoryId, setCategoryId] = useState("");
+  const [sort, setSort] = useState<TransactionSort>("date");
+  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [result, setResult] = useState<TransactionPageResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const from = range === "day" ? context.today : range === "week" ? weekStart : range === "month" ? monthStart : customFrom || monthStart;
+  const to = range === "custom" ? customTo || context.today : context.today;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setLoadError("");
+      const params = new URLSearchParams({ view: "transactions", from, to, page: String(transactionPage), sort, direction });
+      if (search.trim()) params.set("search", search.trim());
+      if (categoryId) params.set("categoryId", categoryId);
+      try {
+        const response = await fetch(`/api/finance?${params}`, { cache: "no-store", signal: controller.signal });
+        const payload = await response.json() as TransactionPageResult;
+        if (!response.ok) throw new Error(payload.error || "Unable to load transactions.");
+        setResult(payload);
+        if (payload.page !== transactionPage) setTransactionPage(payload.page);
+      } catch (error) {
+        if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Unable to load transactions.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, search.trim() ? 250 : 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [categoryId, direction, from, revision, search, sort, to, transactionPage]);
+
+  const chooseRange = (value: "day" | "week" | "month") => { setRange(value); setTransactionPage(1); };
+  const changeSort = (value: TransactionSort) => {
+    if (sort === value) setDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSort(value); setDirection(value === "description" || value === "account" ? "asc" : "desc"); }
+    setTransactionPage(1);
+  };
+  const sortLabel = (value: TransactionSort, label: string) => `${label}${sort === value ? direction === "asc" ? " ↑" : " ↓" : ""}`;
+  const items = result?.items ?? [];
+
+  return <section className="page-card transaction-page"><div className="page-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(event) => { setSearch(event.target.value); setTransactionPage(1); }} placeholder="Search transactions, categories, or accounts" /></label><button className="ghost-button" onClick={onAdd}>＋ New transaction</button></div><div className="transaction-filter-bar"><div className="quick-filters" aria-label="Transaction period"><button className={range === "day" ? "active" : ""} onClick={() => chooseRange("day")}>Today</button><button className={range === "week" ? "active" : ""} onClick={() => chooseRange("week")}>This week</button><button className={range === "month" ? "active" : ""} onClick={() => chooseRange("month")}>This month</button></div><details className="advanced-filters"><summary>More filters{(range === "custom" || categoryId) ? " · Active" : ""}</summary><div><label><span>From</span><input type="date" required max={customTo || context.today} value={customFrom} onChange={(event) => { setCustomFrom(event.target.value); setRange("custom"); setTransactionPage(1); }} /></label><label><span>To</span><input type="date" required min={customFrom || monthStart} max={context.today} value={customTo} onChange={(event) => { setCustomTo(event.target.value); setRange("custom"); setTransactionPage(1); }} /></label><label><span>Category</span><select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setTransactionPage(1); }}><option value="">All categories</option>{context.categories.map((category) => <option value={category.id} key={category.id}>{category.name} · {category.kind}</option>)}</select></label><button type="button" className="clear-filter" disabled={range !== "custom" && !categoryId} onClick={() => { setRange("month"); setCustomFrom(monthStart); setCustomTo(context.today); setCategoryId(""); setTransactionPage(1); }}>Reset</button></div></details></div><p className="edit-hint">Showing {range === "day" ? "today" : range === "week" ? "this week" : range === "month" ? "this month" : `${shortDate(from)}–${shortDate(to)}`}. Double-click or hold a transaction to correct it.</p><div className={`transaction-table ${loading ? "is-loading" : ""}`} aria-busy={loading}><div className="table-head"><button onClick={() => changeSort("description")}>{sortLabel("description", "Transaction")}</button><button onClick={() => changeSort("date")}>{sortLabel("date", "Date")}</button><button onClick={() => changeSort("account")}>{sortLabel("account", "Account")}</button><button onClick={() => changeSort("amount")}>{sortLabel("amount", "Amount")}</button></div>{items.map((transaction) => <div className="table-row editable-record" {...editableProps(() => onEdit(transaction))} key={transaction.id}><span className="transaction-name"><i style={{ background: context.categoryById[transaction.category_id ?? ""]?.color }}>{transaction.description[0]}</i><span><strong>{transaction.description}</strong><small>{context.categoryById[transaction.category_id ?? ""]?.name ?? typeLabel(transaction.type)}{transaction.committed ? " · Committed" : ""}{transaction.replaces_transaction_id ? " · Corrected" : ""}</small></span></span><span>{shortDate(transaction.date)}</span><span>{context.accountById[transaction.account_id ?? ""]?.name ?? "Plan"}</span><b className={transaction.type === "income" ? "income" : ""}>{transaction.type === "income" ? "+" : transaction.type === "expense" ? "−" : ""}{formatMoney(transaction.amount_cents, context.currency)}</b></div>)}{!loading && !loadError && items.length === 0 && <EmptyState title="No transactions found" copy="Try a broader date range, clear a filter, or add a transaction." />}{loadError && <EmptyState title="Transactions could not load" copy={loadError} />}</div>{result && <Pager page={result.page} totalPages={result.totalPages} total={result.total} pageSize={result.pageSize} label="transactions" onPage={setTransactionPage} />}</section>;
 }
 
 function AccountsPage({ context, onAdd, onEdit, onSnapshot }: { context: Context; onAdd: () => void; onEdit: (record: Account) => void; onSnapshot: (record: Account) => void }) {
@@ -458,7 +516,16 @@ function BudgetPage({ context, onEdit }: { context: Context; onEdit: () => void 
 }
 
 function PlansPage({ context, onAdd, onPay, onEditRecurring, onEditInstallment }: { context: Context; onAdd: () => void; onPay: (id: string) => void; onEditRecurring: (record: RecurringPlan) => void; onEditInstallment: (record: InstallmentPlan) => void }) {
-  return <div className="plans-layout"><section className="page-card"><div className="section-heading"><div><p>RECURRING</p><h3>Income, bills & auto-invest</h3></div><button className="ghost-button" onClick={onAdd}>＋ Add plan</button></div><p className="edit-hint">Double-click or hold a plan to edit or archive it.</p><div className="plan-list">{context.recurring.map((plan) => <article className="editable-record" {...editableProps(() => onEditRecurring(plan))} key={plan.id}><span className={`plan-symbol ${plan.type}`}>{plan.type === "income" ? "+" : plan.type === "investment" ? "↗" : "↻"}</span><span><strong>{plan.title}</strong><small>Every {plan.interval_count > 1 ? `${plan.interval_count} ` : ""}{plan.frequency.replace("ly", "")} · Next {shortDate(plan.next_date)}</small></span><b>{formatMoney(plan.amount_cents, context.currency)}</b><em>{plan.auto_post ? "Auto" : "Confirm"}</em></article>)}{context.recurring.length === 0 && <EmptyState title="No recurring plans yet" copy="Add salary, bills, subscriptions, savings, or auto-invest schedules." />}</div></section><section className="page-card"><div className="section-heading"><div><p>PAY LATER</p><h3>Deferred & split purchases</h3></div><button className="ghost-button" onClick={onAdd}>＋ Add purchase</button></div><p className="edit-hint">Double-click or hold a purchase to edit or archive it.</p><div className="installment-list">{context.installmentPlans.map((plan) => { const payments = context.installmentPayments.filter((payment) => payment.plan_id === plan.id); const next = payments.find((payment) => payment.status === "upcoming"); const percent = plan.total_cents ? plan.paid_cents / plan.total_cents * 100 : 0; return <article className="editable-record" {...editableProps(() => onEditInstallment(plan))} key={plan.id}><div className="installment-top"><span><strong>{plan.title}</strong><small>{plan.provider || (plan.installment_count === 1 ? "Pay-later purchase" : "Installment purchase")} · {plan.installment_count} {plan.installment_count === 1 ? "payment" : "payments"}{plan.auto_post ? " · Auto-pay" : ""}</small></span><b>{formatMoney(plan.total_cents - plan.paid_cents, context.currency)} left</b></div><div className="wide-progress"><i style={{ width: `${percent}%` }} /></div><div className="installment-bottom"><span>{Math.round(percent)}% paid</span>{next ? <span>Next: {formatMoney(next.amount_cents, context.currency)} on {shortDate(next.due_date)}</span> : <span>Complete</span>}</div>{next && plan.auto_post !== 1 && <div className="plan-actions"><button className="text-link" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPay(next.id); }}>Mark next payment paid →</button></div>}</article>})}{context.installmentPlans.length === 0 && <EmptyState title="No pay-later purchases" copy="Schedule one full future payment or split a purchase into as many payments as you need." />}</div></section></div>;
+  const pageSize = 5;
+  const [recurringPage, setRecurringPage] = useState(1);
+  const [installmentPage, setInstallmentPage] = useState(1);
+  const recurringPages = Math.max(1, Math.ceil(context.recurring.length / pageSize));
+  const installmentPages = Math.max(1, Math.ceil(context.installmentPlans.length / pageSize));
+  const visibleRecurringPage = Math.min(recurringPage, recurringPages);
+  const visibleInstallmentPage = Math.min(installmentPage, installmentPages);
+  const recurringItems = context.recurring.slice((visibleRecurringPage - 1) * pageSize, visibleRecurringPage * pageSize);
+  const installmentItems = context.installmentPlans.slice((visibleInstallmentPage - 1) * pageSize, visibleInstallmentPage * pageSize);
+  return <div className="plans-layout"><section className="page-card"><div className="section-heading"><div><p>RECURRING</p><h3>Income, bills & auto-invest</h3></div><button className="ghost-button" onClick={onAdd}>＋ Add plan</button></div><p className="edit-hint">Double-click or hold a plan to edit or archive it.</p><div className="plan-list">{recurringItems.map((plan) => <article className="editable-record" {...editableProps(() => onEditRecurring(plan))} key={plan.id}><span className={`plan-symbol ${plan.type}`}>{plan.type === "income" ? "+" : plan.type === "investment" ? "↗" : "↻"}</span><span><strong>{plan.title}</strong><small>Every {plan.interval_count > 1 ? `${plan.interval_count} ` : ""}{plan.frequency.replace("ly", "")} · Next {shortDate(plan.next_date)}</small></span><b>{formatMoney(plan.amount_cents, context.currency)}</b><em>{plan.auto_post ? "Auto" : "Confirm"}</em></article>)}{context.recurring.length === 0 && <EmptyState title="No recurring plans yet" copy="Add salary, bills, subscriptions, savings, or auto-invest schedules." />}</div><Pager page={visibleRecurringPage} totalPages={recurringPages} total={context.recurring.length} pageSize={pageSize} label="recurring plans" onPage={setRecurringPage} /></section><section className="page-card"><div className="section-heading"><div><p>PAY LATER</p><h3>Deferred & split purchases</h3></div><button className="ghost-button" onClick={onAdd}>＋ Add purchase</button></div><p className="edit-hint">Double-click or hold a purchase to edit or archive it.</p><div className="installment-list">{installmentItems.map((plan) => { const payments = context.installmentPayments.filter((payment) => payment.plan_id === plan.id); const next = payments.find((payment) => payment.status === "upcoming"); const percent = plan.total_cents ? plan.paid_cents / plan.total_cents * 100 : 0; return <article className="editable-record" {...editableProps(() => onEditInstallment(plan))} key={plan.id}><div className="installment-top"><span><strong>{plan.title}</strong><small>{plan.provider || (plan.installment_count === 1 ? "Pay-later purchase" : "Installment purchase")} · {plan.installment_count} {plan.installment_count === 1 ? "payment" : "payments"}{plan.auto_post ? " · Auto-pay" : ""}</small></span><b>{formatMoney(plan.total_cents - plan.paid_cents, context.currency)} left</b></div><div className="wide-progress"><i style={{ width: `${percent}%` }} /></div><div className="installment-bottom"><span>{Math.round(percent)}% paid</span>{next ? <span>Next: {formatMoney(next.amount_cents, context.currency)} on {shortDate(next.due_date)}</span> : <span>Complete</span>}</div>{next && plan.auto_post !== 1 && <div className="plan-actions"><button className="text-link" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPay(next.id); }}>Mark next payment paid →</button></div>}</article>})}{context.installmentPlans.length === 0 && <EmptyState title="No pay-later purchases" copy="Schedule one full future payment or split a purchase into as many payments as you need." />}</div><Pager page={visibleInstallmentPage} totalPages={installmentPages} total={context.installmentPlans.length} pageSize={pageSize} label="installment plans" onPage={setInstallmentPage} /></section></div>;
 }
 
 function GoalsPage({ context, onGoal, onSpare, onSweep, onEdit }: { context: Context; onGoal: () => void; onSpare: () => void; onSweep: () => void; onEdit: (record: Goal) => void }) {

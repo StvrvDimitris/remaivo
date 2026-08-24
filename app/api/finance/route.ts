@@ -58,6 +58,60 @@ async function categoryIdFor(userId: string, value: unknown, kind: "expense" | "
   return category?.id ?? null;
 }
 
+const transactionSortColumns: Record<string, string> = {
+  description: "t.description COLLATE NOCASE",
+  date: "t.date",
+  account: "COALESCE(a.name, '') COLLATE NOCASE",
+  amount: "t.amount_cents",
+};
+
+async function pagedTransactions(user: FinanceUser, request: Request) {
+  await ensureFinanceSchema();
+  const profile = await env.DB.prepare("SELECT setup_complete, timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
+  const today = financialToday(String(profile?.timezone || "UTC"));
+  if (!profile?.setup_complete) return { items: [], page: 1, pageSize: 25, total: 0, totalPages: 1, today };
+
+  await processAutomaticPlans(user.userId, today);
+  await processAutomaticInstallments(user.userId, today);
+
+  const params = new URL(request.url).searchParams;
+  const requestedFrom = calendarDate(params.get("from"));
+  const requestedTo = calendarDate(params.get("to"));
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
+  const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
+  const categoryId = text(params.get("categoryId"));
+  const search = text(params.get("search")).slice(0, 120).toLowerCase();
+  const sort = transactionSortColumns[text(params.get("sort"))] ? text(params.get("sort")) : "date";
+  const direction = text(params.get("direction")) === "asc" ? "ASC" : "DESC";
+  const requestedPage = Math.max(1, Math.min(100_000, Number(params.get("page")) || 1));
+  const pageSize = 25;
+
+  const where = ["t.user_id = ?", "t.status = 'posted'", "t.date >= ?", "t.date <= ?"];
+  const bindings: unknown[] = [user.userId, from, to];
+  if (categoryId) {
+    where.push("t.category_id = ?");
+    bindings.push(categoryId);
+  }
+  if (search) {
+    where.push("(instr(lower(t.description), ?) > 0 OR instr(lower(COALESCE(c.name, '')), ?) > 0 OR instr(lower(COALESCE(a.name, '')), ?) > 0)");
+    bindings.push(search, search, search);
+  }
+
+  const fromClause = "FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id AND a.user_id = t.user_id LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id";
+  const whereClause = `WHERE ${where.join(" AND ")}`;
+  const totalRow = await env.DB.prepare(`SELECT COUNT(*) AS total ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
+  const total = Number(totalRow?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const orderColumn = transactionSortColumns[sort];
+  const rows = await env.DB.prepare(
+    `SELECT t.* ${fromClause} ${whereClause} ORDER BY ${orderColumn} ${direction}, t.date DESC, t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`,
+  ).bind(...bindings, pageSize, (page - 1) * pageSize).all<Record<string, unknown>>();
+
+  return { items: rows.results, page, pageSize, total, totalPages, from, to, today };
+}
+
 function balanceStatements(userId: string, transaction: Record<string, unknown>, direction: 1 | -1, guard?: { id: string; status: string }) {
   const amount = Number(transaction.amount_cents) * direction;
   const type = String(transaction.type);
@@ -160,10 +214,25 @@ async function snapshot(user: FinanceUser) {
 
   await processAutomaticPlans(user.userId, today);
   await processAutomaticInstallments(user.userId, today);
+  const monthStart = `${today.slice(0, 7)}-01`;
   const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
-    env.DB.prepare("SELECT * FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC").bind(user.userId),
+    env.DB.prepare(`WITH recent AS (
+      SELECT id FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC LIMIT 4
+    ), latest_snapshots AS (
+      SELECT account_id, MAX(snapshot_date) AS snapshot_date FROM investment_valuation_snapshots WHERE user_id = ? GROUP BY account_id
+    )
+    SELECT t.* FROM transactions t
+    WHERE t.user_id = ? AND t.status = 'posted' AND (
+      t.date >= ?
+      OR t.id IN (SELECT id FROM recent)
+      OR EXISTS (
+        SELECT 1 FROM latest_snapshots s
+        WHERE t.date > s.snapshot_date AND (t.account_id = s.account_id OR t.destination_account_id = s.account_id)
+      )
+    )
+    ORDER BY t.date DESC, t.created_at DESC`).bind(user.userId, user.userId, user.userId, monthStart),
     env.DB.prepare("SELECT * FROM budget_rules WHERE user_id = ? AND period IN ('daily', 'weekly', 'monthly') ORDER BY CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 ELSE 3 END").bind(user.userId),
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
@@ -191,10 +260,11 @@ async function snapshot(user: FinanceUser) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await currentUser();
   if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
   try {
+    if (new URL(request.url).searchParams.get("view") === "transactions") return Response.json(await pagedTransactions(user, request));
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });

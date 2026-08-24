@@ -20,6 +20,8 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS idx_categories_user_kind ON categories(user_id, kind)`,
   `CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date)`,
   `CREATE INDEX IF NOT EXISTS idx_transactions_user_account ON transactions(user_id, account_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_transactions_user_status_date ON transactions(user_id, status, date)`,
+  `CREATE INDEX IF NOT EXISTS idx_transactions_user_status_category_date ON transactions(user_id, status, category_id, date)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_rules_user_period ON budget_rules(user_id, period)`,
   `CREATE INDEX IF NOT EXISTS idx_recurring_user_next ON recurring_plans(user_id, next_date)`,
   `CREATE INDEX IF NOT EXISTS idx_installment_plans_user_status ON installment_plans(user_id, status)`,

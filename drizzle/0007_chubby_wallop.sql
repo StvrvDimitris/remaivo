@@ -1,0 +1,2 @@
+CREATE INDEX `idx_transactions_user_status_date` ON `transactions` (`user_id`,`status`,`date`);--> statement-breakpoint
+CREATE INDEX `idx_transactions_user_status_category_date` ON `transactions` (`user_id`,`status`,`category_id`,`date`);

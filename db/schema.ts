@@ -78,6 +78,8 @@ export const transactions = sqliteTable("transactions", {
 }, (table) => [
   index("idx_transactions_user_date").on(table.userId, table.date),
   index("idx_transactions_user_account").on(table.userId, table.accountId),
+  index("idx_transactions_user_status_date").on(table.userId, table.status, table.date),
+  index("idx_transactions_user_status_category_date").on(table.userId, table.status, table.categoryId, table.date),
 ]);
 
 export const budgetRules = sqliteTable("budget_rules", {
