@@ -53,13 +53,6 @@ button { color: inherit; }
 .nav-item.active::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--lime); margin-left: auto; }
 .sidebar-bottom { margin-top: auto; }
 
-.mini-goal { margin: 0 7px 17px; padding: 14px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.05); border-radius: 12px; }
-.mini-goal-top { display: flex; justify-content: space-between; font-size: 12px; }
-.mini-goal-top strong { color: var(--lime); }
-.mini-goal-track { height: 5px; margin: 10px 0 8px; overflow: hidden; border-radius: 20px; background: rgba(255,255,255,.12); }
-.mini-goal-track span { display: block; width: 64%; height: 100%; background: var(--lime); }
-.mini-goal p { margin: 0; font-size: 10px; color: #9fb6ae; }
-
 .profile { margin-top: 14px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.1); display: flex; align-items: center; gap: 10px; }
 .avatar { width: 35px; height: 35px; display: grid; place-items: center; border-radius: 50%; background: #ebad88; color: #173a34; font-size: 11px; font-weight: 900; }
 .profile > span:nth-child(2) { display: grid; gap: 3px; flex: 1; }
@@ -497,7 +490,7 @@ button { color: inherit; }
 @media (max-width: 720px) {
   .app-shell { display: block; }
   .sidebar { width: 100%; height: 66px; position: fixed; z-index: 10; top: auto; bottom: 0; padding: 8px 6px; flex-direction: row; align-items: center; }
-  .brand-mark, .sidebar-bottom, .sidebar .mini-goal { display: none; }
+  .brand-mark, .sidebar-bottom { display: none; }
   .sidebar nav { width: 100%; display: flex; justify-content: space-between; }
   .sidebar nav .mobile-settings-nav { display: flex; }
   .nav-item { min-height: 48px; width: min(48px, 13vw); flex: 0 1 48px; padding: 0; }
