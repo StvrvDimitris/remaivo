@@ -29,32 +29,76 @@ export type BudgetProjectionInput = {
   spentBeforeToday: number;
   spentSinceResetBeforeToday?: number;
   spentToday: number;
+  weekStartIndex?: number;
+  weekDaysInMonth?: number;
+  spentBeforeWeek?: number;
+  spentThisWeek?: number;
   reservedMonth?: number;
+  reservedFromWeekStart?: number;
   reservedToday?: number;
   reservedRemainingWeek?: number;
 };
 
+export type AdaptivePeriodProjectionInput = {
+  monthlyBudget: number;
+  daysInMonth: number;
+  boundaryIndex: number;
+  periodDays: number;
+  spentBeforeBoundary: number;
+  spentInPeriod: number;
+  reservedFromBoundary?: number;
+};
+
+export function projectAdaptivePeriod(input: AdaptivePeriodProjectionInput) {
+  const boundaryIndex = Math.max(0, Math.min(input.daysInMonth - 1, input.boundaryIndex));
+  const daysRemaining = Math.max(1, input.daysInMonth - boundaryIndex);
+  const reservedFromBoundary = Math.max(0, input.reservedFromBoundary ?? 0);
+  const poolAtBoundary = Math.max(0, input.monthlyBudget - input.spentBeforeBoundary - reservedFromBoundary);
+  const projectedDays = splitCents(poolAtBoundary, daysRemaining);
+  const base = projectedDays.slice(0, Math.max(1, input.periodDays)).reduce((sum, value) => sum + value, 0);
+  return {
+    base,
+    remaining: base - input.spentInPeriod,
+    poolAtBoundary,
+    projectedDays,
+  };
+}
+
 export function projectBudgetPlan(input: BudgetProjectionInput) {
   const todayIndex = Math.max(0, Math.min(input.daysInMonth - 1, input.todayIndex));
-  const daysRemaining = Math.max(1, input.daysInMonth - todayIndex);
   const reservedMonth = Math.max(0, input.reservedMonth ?? 0);
   const monthlyRemaining = input.monthlyBudget - input.spentBeforeToday - input.spentToday - reservedMonth;
 
   if (input.mode === "adaptive") {
-    const poolAtStartOfToday = Math.max(0, input.monthlyBudget - input.spentBeforeToday - reservedMonth);
-    const projectedDays = splitCents(poolAtStartOfToday, daysRemaining);
-    const dailyBase = projectedDays[0] ?? 0;
-    const weeklyBase = projectedDays.slice(0, Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+    const daily = projectAdaptivePeriod({
+      monthlyBudget: input.monthlyBudget,
+      daysInMonth: input.daysInMonth,
+      boundaryIndex: todayIndex,
+      periodDays: 1,
+      spentBeforeBoundary: input.spentBeforeToday,
+      spentInPeriod: input.spentToday,
+      reservedFromBoundary: reservedMonth,
+    });
+    const weekly = projectAdaptivePeriod({
+      monthlyBudget: input.monthlyBudget,
+      daysInMonth: input.daysInMonth,
+      boundaryIndex: input.weekStartIndex ?? todayIndex,
+      periodDays: input.weekDaysInMonth ?? input.remainingWeekDays,
+      spentBeforeBoundary: input.spentBeforeWeek ?? input.spentBeforeToday,
+      spentInPeriod: input.spentThisWeek ?? input.spentToday,
+      reservedFromBoundary: input.reservedFromWeekStart ?? reservedMonth,
+    });
     return {
-      dailyBase,
+      dailyBase: daily.base,
       carry: 0,
-      dailyRemaining: dailyBase - input.spentToday,
-      weeklyBase,
-      weeklyRemaining: weeklyBase - input.spentToday,
+      dailyRemaining: daily.remaining,
+      weeklyBase: weekly.base,
+      weeklyRemaining: weekly.remaining,
       monthlyRemaining,
-      poolAtStartOfToday,
-      projectedMonthRemaining: projectedDays.reduce((sum, value) => sum + value, 0) - input.spentToday,
-      projectedDays,
+      poolAtStartOfToday: daily.poolAtBoundary,
+      poolAtStartOfWeek: weekly.poolAtBoundary,
+      projectedMonthRemaining: daily.projectedDays.reduce((sum, value) => sum + value, 0) - input.spentToday,
+      projectedDays: daily.projectedDays,
     };
   }
 

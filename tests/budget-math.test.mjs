@@ -38,6 +38,37 @@ test("adaptive base is frozen from the start-of-day pool and today's spending is
   assert.equal(result.projectedMonthRemaining, result.monthlyRemaining);
 });
 
+test("adaptive day recalculates from corrected history but not from today's spending", () => {
+  const common = {
+    monthlyBudget: 310000, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
+    mode: "adaptive",
+  };
+  const original = projectBudgetPlan({ ...common, spentBeforeToday: 200000, spentToday: 3000 });
+  const moreToday = projectBudgetPlan({ ...common, spentBeforeToday: 200000, spentToday: 9000 });
+  const correctedHistory = projectBudgetPlan({ ...common, spentBeforeToday: 190000, spentToday: 3000 });
+
+  assert.equal(original.dailyBase, moreToday.dailyBase);
+  assert.equal(moreToday.dailyRemaining, original.dailyRemaining - 6000);
+  assert.notEqual(correctedHistory.dailyBase, original.dailyBase);
+});
+
+test("adaptive week uses the previous-week cutoff while current-week spending only reduces remaining", () => {
+  const common = {
+    monthlyBudget: 310000, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
+    mode: "adaptive", spentBeforeToday: 195000, spentToday: 3000,
+    weekStartIndex: 16, weekDaysInMonth: 7, spentBeforeWeek: 160000,
+  };
+  const original = projectBudgetPlan({ ...common, spentThisWeek: 38000 });
+  const moreThisWeek = projectBudgetPlan({ ...common, spentThisWeek: 44000 });
+  const correctedEarlierWeek = projectBudgetPlan({ ...common, spentBeforeWeek: 150000, spentThisWeek: 38000 });
+
+  assert.equal(original.weeklyBase, 70000);
+  assert.equal(original.weeklyRemaining, 32000);
+  assert.equal(moreThisWeek.weeklyBase, original.weeklyBase);
+  assert.equal(moreThisWeek.weeklyRemaining, original.weeklyRemaining - 6000);
+  assert.notEqual(correctedEarlierWeek.weeklyBase, original.weeklyBase);
+});
+
 test("the current August 21 Remaivo figures reconcile from €382.19 and €11.88 posted", () => {
   const result = projectBudgetPlan({
     monthlyBudget: 38219, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
