@@ -93,16 +93,19 @@ button { color: inherit; }
 .card-heading h3 { margin: 0; font-size: 27px; letter-spacing: -.04em; }
 .card-heading button { background: transparent; border: 0; color: #8b9692; }
 .balance-breakdown { margin: 25px 0 18px; display: grid; gap: 14px; }
-.balance-breakdown > div { display: flex; align-items: center; gap: 11px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; }
+.balance-breakdown > div { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 11px; }
+.dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; }
 .dot.spending { background: var(--green); }
 .dot.savings { background: #8ebbc5; }
 .dot.investing { background: var(--coral); }
-.balance-breakdown span { flex: 1; display: flex; justify-content: space-between; }
+.balance-breakdown > div > span { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: baseline; column-gap: 12px; }
 .balance-breakdown p, .balance-breakdown strong { margin: 0; font-size: 11px; }
 .balance-breakdown p { color: var(--muted); }
-.balance-breakdown .investment-breakdown > span { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
-.investment-breakdown > span > small { grid-column: 2; font-size: 8px; font-weight: 900; text-align: right; }
+.balance-breakdown strong { white-space: nowrap; text-align: right; }
+.balance-breakdown .investment-breakdown > span { row-gap: 4px; }
+.investment-breakdown > span > small { min-width: 0; font-size: 8px; line-height: 1.25; white-space: nowrap; }
+.investment-snapshot-label { grid-column: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.investment-movement { grid-column: 2; font-weight: 900; text-align: right; }
 .positive { color: #2d8065 !important; }
 .negative { color: #b75545 !important; }
 .neutral { color: #74817d !important; }
