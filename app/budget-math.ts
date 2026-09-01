@@ -102,25 +102,30 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     };
   }
 
-  const allocations = splitCents(input.monthlyBudget, input.daysInMonth);
+  // Fixed Daily is deliberately a safe discretionary allowance: reserve every
+  // outstanding commitment in the month before creating its calendar slices.
+  // Weekly remains a due-date cash-flow view, so it keeps the gross slices and
+  // subtracts only commitments that fall inside the current week.
+  const discretionaryAllocations = splitCents(Math.max(0, input.monthlyBudget - reservedMonth), input.daysInMonth);
+  const grossAllocations = splitCents(input.monthlyBudget, input.daysInMonth);
   const resetStart = Math.max(0, Math.min(todayIndex, input.resetStartIndex ?? todayIndex));
-  const allocatedSinceReset = allocations.slice(resetStart, todayIndex).reduce((sum, value) => sum + value, 0);
+  const allocatedSinceReset = discretionaryAllocations.slice(resetStart, todayIndex).reduce((sum, value) => sum + value, 0);
   const carry = fixedCarryValue(
     allocatedSinceReset - (input.spentSinceResetBeforeToday ?? 0),
     input.carryMode ?? "reset",
     input.carryCap,
   );
-  const dailyBase = allocations[todayIndex] ?? 0;
-  const weeklyBase = allocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+  const dailyBase = discretionaryAllocations[todayIndex] ?? 0;
+  const weeklyBase = grossAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
   return {
     dailyBase,
     carry,
-    dailyRemaining: dailyBase + carry - input.spentToday - Math.max(0, input.reservedToday ?? 0),
+    dailyRemaining: dailyBase + carry - input.spentToday,
     weeklyBase,
     weeklyRemaining: weeklyBase + carry - input.spentToday - Math.max(0, input.reservedRemainingWeek ?? 0),
     monthlyRemaining,
     poolAtStartOfToday: input.monthlyBudget - input.spentBeforeToday - reservedMonth,
-    projectedMonthRemaining: allocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday - reservedMonth,
-    projectedDays: allocations.slice(todayIndex),
+    projectedMonthRemaining: discretionaryAllocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday,
+    projectedDays: discretionaryAllocations.slice(todayIndex),
   };
 }

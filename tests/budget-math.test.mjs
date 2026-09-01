@@ -93,6 +93,32 @@ test("adaptive reservations reduce the pool once and never become a second weekl
   assert.equal(result.monthlyRemaining, 107000);
 });
 
+test("fixed daily reserves the month while weekly subtracts only commitments due this week", () => {
+  const result = projectBudgetPlan({
+    monthlyBudget: 108077, daysInMonth: 30, todayIndex: 0, remainingWeekDays: 6,
+    mode: "fixed", carryMode: "stack_signed", resetStartIndex: 0,
+    spentBeforeToday: 0, spentSinceResetBeforeToday: 0, spentToday: 1980,
+    reservedMonth: 18860, reservedToday: 0, reservedRemainingWeek: 0,
+  });
+  assert.equal(result.dailyBase, 2974);
+  assert.equal(result.dailyRemaining, 994);
+  assert.equal(result.weeklyBase, 21618);
+  assert.equal(result.weeklyRemaining, 19638);
+  assert.equal(result.monthlyRemaining, 87237);
+});
+
+test("fixed weekly view subtracts commitments due inside the week without changing daily", () => {
+  const result = projectBudgetPlan({
+    monthlyBudget: 108077, daysInMonth: 30, todayIndex: 0, remainingWeekDays: 6,
+    mode: "fixed", carryMode: "reset", resetStartIndex: 0,
+    spentBeforeToday: 0, spentSinceResetBeforeToday: 0, spentToday: 0,
+    reservedMonth: 18860, reservedToday: 2100, reservedRemainingWeek: 2100,
+  });
+  assert.equal(result.dailyBase, 2974);
+  assert.equal(result.dailyRemaining, 2974);
+  assert.equal(result.weeklyRemaining, 19518);
+});
+
 test("daily and weekly reset boundaries only carry allocations earned inside that boundary", () => {
   const dailyReset = projectBudgetPlan({
     monthlyBudget: 310000, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
