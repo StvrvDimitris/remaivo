@@ -123,6 +123,31 @@ export const recurringPlans = sqliteTable("recurring_plans", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_recurring_user_next").on(table.userId, table.nextDate)]);
 
+export const expenseReserves = sqliteTable("expense_reserves", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  title: text("title").notNull(),
+  categoryId: text("category_id").notNull(),
+  targetCents: integer("target_cents").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("idx_expense_reserves_user_active").on(table.userId, table.active)]);
+
+export const expenseReservePeriods = sqliteTable("expense_reserve_periods", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  reserveId: text("reserve_id").notNull(),
+  categoryId: text("category_id").notNull(),
+  month: text("month").notNull(),
+  targetCents: integer("target_cents").notNull(),
+  status: text("status").notNull().default("open"),
+  finishedAt: text("finished_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("idx_expense_reserve_periods_reserve_month").on(table.reserveId, table.month),
+  index("idx_expense_reserve_periods_user_month").on(table.userId, table.month),
+]);
+
 export const installmentPlans = sqliteTable("installment_plans", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),

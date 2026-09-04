@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectBudgetPlan, splitCents } from "../app/budget-math.ts";
+import { outstandingReserve, projectBudgetPlan, splitCents } from "../app/budget-math.ts";
+
+test("a flexible reserve deducts only the unspent target and releases it when finished", () => {
+  assert.equal(outstandingReserve(17000, 12000), 5000);
+  assert.equal(outstandingReserve(17000, 15800), 1200);
+  assert.equal(outstandingReserve(17000, 18500), 0);
+  assert.equal(outstandingReserve(17000, 15800, "finished"), 0);
+});
 
 test("fixed allocations are immutable calendar-day slices that sum to the monthly budget", () => {
   const days = splitCents(310000, 31);

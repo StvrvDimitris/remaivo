@@ -293,6 +293,17 @@ async function processAutomaticInstallments(userId: string, today: string) {
   }
 }
 
+async function ensureCurrentReservePeriods(userId: string, today: string) {
+  const month = today.slice(0, 7);
+  const reserves = await env.DB.prepare(
+    "SELECT id, category_id, target_cents FROM expense_reserves WHERE user_id = ? AND active = 1 ORDER BY created_at",
+  ).bind(userId).all<{ id: string; category_id: string; target_cents: number }>();
+  if (!reserves.results.length) return;
+  await env.DB.batch(reserves.results.map((reserve) => env.DB.prepare(
+    "INSERT OR IGNORE INTO expense_reserve_periods (id, user_id, reserve_id, category_id, month, target_cents, status) VALUES (?, ?, ?, ?, ?, ?, 'open')",
+  ).bind(crypto.randomUUID(), userId, reserve.id, reserve.category_id, month, reserve.target_cents)));
+}
+
 async function snapshot(user: FinanceUser) {
   await ensureFinanceSchema();
   const profile = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
@@ -303,8 +314,9 @@ async function snapshot(user: FinanceUser) {
 
   await processAutomaticPlans(user.userId, today);
   await processAutomaticInstallments(user.userId, today);
+  await ensureCurrentReservePeriods(user.userId, today);
   const monthStart = `${today.slice(0, 7)}-01`;
-  const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
+  const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, reserves, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
     env.DB.prepare(`WITH recent AS (
@@ -326,6 +338,7 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? AND status != 'cancelled' ORDER BY due_date").bind(user.userId),
+    env.DB.prepare("SELECT r.*, p.id AS period_id, p.category_id AS period_category_id, p.month, p.target_cents AS period_target_cents, p.status, p.finished_at FROM expense_reserves r JOIN expense_reserve_periods p ON p.reserve_id = r.id AND p.user_id = r.user_id AND p.month = ? WHERE r.user_id = ? AND r.active = 1 ORDER BY r.created_at").bind(today.slice(0, 7), user.userId),
     env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
@@ -342,6 +355,7 @@ async function snapshot(user: FinanceUser) {
     recurring: recurring.results,
     installmentPlans: installmentPlans.results,
     installmentPayments: installmentPayments.results,
+    reserves: reserves.results,
     goals: goals.results,
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
@@ -536,6 +550,43 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, amount_cents = ?, account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, amount, payload.accountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
     } else if (action === "archiveRecurring") {
       await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
+    } else if (action === "addReserve") {
+      const title = text(payload.title);
+      const target = cents(payload.target);
+      const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
+      if (!title || !target || !categoryId) return Response.json({ error: "Name, expense category, and monthly estimate are required." }, { status: 400 });
+      const duplicate = await env.DB.prepare("SELECT id FROM expense_reserves WHERE user_id = ? AND category_id = ? AND active = 1").bind(user.userId, categoryId).first();
+      if (duplicate) return Response.json({ error: "That category already has an active flexible reserve." }, { status: 409 });
+      const reserveId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO expense_reserves (id, user_id, title, category_id, target_cents) VALUES (?, ?, ?, ?, ?)").bind(reserveId, user.userId, title, categoryId, target),
+        env.DB.prepare("INSERT INTO expense_reserve_periods (id, user_id, reserve_id, category_id, month, target_cents, status) VALUES (?, ?, ?, ?, ?, ?, 'open')").bind(crypto.randomUUID(), user.userId, reserveId, categoryId, actionToday.slice(0, 7), target),
+      ]);
+    } else if (action === "updateReserve") {
+      const reserveId = text(payload.reserveId);
+      const title = text(payload.title);
+      const target = cents(payload.target);
+      const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
+      if (!title || !target || !categoryId) return Response.json({ error: "Name, expense category, and monthly estimate are required." }, { status: 400 });
+      const duplicate = await env.DB.prepare("SELECT id FROM expense_reserves WHERE user_id = ? AND category_id = ? AND active = 1 AND id != ?").bind(user.userId, categoryId, reserveId).first();
+      if (duplicate) return Response.json({ error: "That category already has an active flexible reserve." }, { status: 409 });
+      const results = await env.DB.batch([
+        env.DB.prepare("UPDATE expense_reserves SET title = ?, category_id = ?, target_cents = ? WHERE id = ? AND user_id = ? AND active = 1").bind(title, categoryId, target, reserveId, user.userId),
+        env.DB.prepare("UPDATE expense_reserve_periods SET category_id = ?, target_cents = ? WHERE reserve_id = ? AND user_id = ? AND month = ? AND status = 'open'").bind(categoryId, target, reserveId, user.userId, actionToday.slice(0, 7)),
+      ]);
+      if (!Number(results[0].meta.changes)) return Response.json({ error: "That reserve is no longer active." }, { status: 404 });
+    } else if (action === "finishReserve" || action === "reopenReserve") {
+      const status = action === "finishReserve" ? "finished" : "open";
+      const result = await env.DB.prepare("UPDATE expense_reserve_periods SET status = ?, finished_at = ? WHERE reserve_id = ? AND user_id = ? AND month = ?").bind(status, status === "finished" ? new Date().toISOString() : null, text(payload.reserveId), user.userId, actionToday.slice(0, 7)).run();
+      if (!Number(result.meta.changes)) return Response.json({ error: "This month's reserve was not found." }, { status: 404 });
+    } else if (action === "archiveReserve") {
+      const reserveId = text(payload.reserveId);
+      const finishedAt = new Date().toISOString();
+      const results = await env.DB.batch([
+        env.DB.prepare("UPDATE expense_reserves SET active = 0 WHERE id = ? AND user_id = ? AND active = 1").bind(reserveId, user.userId),
+        env.DB.prepare("UPDATE expense_reserve_periods SET status = 'finished', finished_at = ? WHERE reserve_id = ? AND user_id = ? AND month = ? AND status = 'open'").bind(finishedAt, reserveId, user.userId, actionToday.slice(0, 7)),
+      ]);
+      if (!Number(results[0].meta.changes)) return Response.json({ error: "That reserve is no longer active." }, { status: 404 });
     } else if (action === "addInstallment") {
       const planId = crypto.randomUUID();
       const total = cents(payload.total);

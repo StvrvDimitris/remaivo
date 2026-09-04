@@ -17,6 +17,11 @@ export function fixedCarryValue(remainder: number, mode: FixedCarryMode, cap: nu
   return 0;
 }
 
+export function outstandingReserve(target: number, spent: number, status: "open" | "finished" = "open") {
+  if (status === "finished") return 0;
+  return Math.max(0, Math.trunc(target) - Math.max(0, Math.trunc(spent)));
+}
+
 export type BudgetProjectionInput = {
   monthlyBudget: number;
   daysInMonth: number;
