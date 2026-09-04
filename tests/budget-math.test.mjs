@@ -100,40 +100,41 @@ test("adaptive reservations reduce the pool once and never become a second weekl
   assert.equal(result.monthlyRemaining, 107000);
 });
 
-test("fixed daily and weekly use the same reserve-adjusted calendar slices", () => {
+test("fixed Daily protects all commitments while Weekly spreads only flexible reserves", () => {
   const result = projectBudgetPlan({
     monthlyBudget: 108077, daysInMonth: 30, todayIndex: 0, remainingWeekDays: 6,
     mode: "fixed", carryMode: "stack_signed", resetStartIndex: 0,
     spentBeforeToday: 0, spentSinceResetBeforeToday: 0, spentToday: 1980,
-    reservedMonth: 18860,
+    reservedMonth: 18860, weeklySpreadReserve: 10000, reservedRemainingWeek: 2100,
   });
   assert.equal(result.dailyBase, 2974);
   assert.equal(result.dailyRemaining, 994);
-  assert.equal(result.weeklyBase, 17844);
-  assert.equal(result.weeklyRemaining, 15864);
+  assert.equal(result.weeklyBase, 19620);
+  assert.equal(result.weeklyRemaining, 15540);
   assert.equal(result.monthlyRemaining, 87237);
 });
 
-test("the September 4 signed monthly carry example uses protected slices in Weekly", () => {
+test("the September 4 example spreads €308.28 of flexible reserves across Fixed Weekly", () => {
   const result = projectBudgetPlan({
     monthlyBudget: 108077, daysInMonth: 30, todayIndex: 3, remainingWeekDays: 3,
     mode: "fixed", carryMode: "stack_signed", resetStartIndex: 0,
     spentBeforeToday: 22852, spentSinceResetBeforeToday: 22852, spentToday: 1290,
-    reservedMonth: 49688,
+    reservedMonth: 49688, weeklySpreadReserve: 30828, reservedRemainingWeek: 0,
   });
   assert.equal(result.dailyBase, 1947);
   assert.equal(result.carry, -17011);
   assert.equal(result.dailyRemaining, -16354);
-  assert.equal(result.weeklyBase, 5841);
-  assert.equal(result.weeklyRemaining, -12460);
+  assert.equal(result.weeklyBase, 7725);
+  assert.equal(result.weeklyRemaining, -10576);
   assert.equal(result.monthlyRemaining, 34247);
 });
 
-test("every fixed carry mode applies to the same protected Daily and Weekly bases", () => {
+test("every fixed carry mode applies after the Weekly reserve-and-due-date split", () => {
   const common = {
     monthlyBudget: 310000, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
     mode: "fixed", resetStartIndex: 0, spentBeforeToday: 150000,
     spentSinceResetBeforeToday: 150000, spentToday: 3000, reservedMonth: 31000,
+    weeklySpreadReserve: 31000, reservedRemainingWeek: 0,
   };
   const reset = projectBudgetPlan({ ...common, carryMode: "reset" });
   const unused = projectBudgetPlan({ ...common, carryMode: "stack_unused" });
@@ -155,11 +156,28 @@ test("fixed overspending carries only in signed mode", () => {
     monthlyBudget: 310000, daysInMonth: 31, todayIndex: 20, remainingWeekDays: 3,
     mode: "fixed", resetStartIndex: 0, spentBeforeToday: 210000,
     spentSinceResetBeforeToday: 210000, spentToday: 3000, reservedMonth: 31000,
+    weeklySpreadReserve: 31000, reservedRemainingWeek: 0,
   };
   assert.equal(projectBudgetPlan({ ...common, carryMode: "reset" }).carry, 0);
   assert.equal(projectBudgetPlan({ ...common, carryMode: "stack_unused" }).carry, 0);
   assert.equal(projectBudgetPlan({ ...common, carryMode: "stack_capped", carryCap: 15000 }).carry, 0);
   assert.equal(projectBudgetPlan({ ...common, carryMode: "stack_signed" }).carry, -30000);
+});
+
+test("Fixed Weekly deducts dated plans in the current week instead of spreading them", () => {
+  const common = {
+    monthlyBudget: 300000, daysInMonth: 30, todayIndex: 0, remainingWeekDays: 7,
+    mode: "fixed", carryMode: "reset", resetStartIndex: 0,
+    spentBeforeToday: 0, spentSinceResetBeforeToday: 0, spentToday: 0,
+    reservedMonth: 60000, weeklySpreadReserve: 30000,
+  };
+  const noPlanDue = projectBudgetPlan({ ...common, reservedRemainingWeek: 0 });
+  const planDue = projectBudgetPlan({ ...common, reservedRemainingWeek: 10000 });
+  assert.equal(noPlanDue.dailyBase, 8000);
+  assert.equal(noPlanDue.weeklyBase, 63000);
+  assert.equal(noPlanDue.weeklyRemaining, 63000);
+  assert.equal(planDue.weeklyBase, noPlanDue.weeklyBase);
+  assert.equal(planDue.weeklyRemaining, 53000);
 });
 
 test("daily and weekly reset boundaries only carry allocations earned inside that boundary", () => {
@@ -183,7 +201,7 @@ test("daily and weekly reset boundaries only carry allocations earned inside tha
   assert.equal(monthlyReset.carry, 5000);
 });
 
-test("a fixed week crossing months uses each month's protected calendar slices", () => {
+test("a fixed week crossing months uses each month's flexible-reserve-adjusted slices", () => {
   const currentMonthTail = protectedCalendarWindow(310000, 31000, 31, 29, 2);
   const nextMonthHead = protectedCalendarWindow(300000, 60000, 30, 0, 3);
   assert.equal(currentMonthTail, 18000);

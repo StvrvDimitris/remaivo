@@ -50,6 +50,8 @@ export type BudgetProjectionInput = {
   spentThisWeek?: number;
   reservedMonth?: number;
   reservedFromWeekStart?: number;
+  weeklySpreadReserve?: number;
+  reservedRemainingWeek?: number;
 };
 
 export type AdaptivePeriodProjectionInput = {
@@ -115,10 +117,11 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     };
   }
 
-  // Fixed Daily and Weekly share one safe discretionary calendar: reserve every
-  // outstanding monthly commitment once, then slice only the remaining pool.
-  // Non-transaction commitments never become a second Weekly deduction.
+  // Fixed Daily protects every outstanding monthly commitment before slicing.
+  // Fixed Weekly spreads only undated flexible reserves across the month, then
+  // deducts dated payments and installments when they fall inside the week.
   const discretionaryAllocations = protectedCalendarAllocations(input.monthlyBudget, reservedMonth, input.daysInMonth);
+  const weeklyAllocations = protectedCalendarAllocations(input.monthlyBudget, Math.max(0, input.weeklySpreadReserve ?? 0), input.daysInMonth);
   const resetStart = Math.max(0, Math.min(todayIndex, input.resetStartIndex ?? todayIndex));
   const allocatedSinceReset = discretionaryAllocations.slice(resetStart, todayIndex).reduce((sum, value) => sum + value, 0);
   const carry = fixedCarryValue(
@@ -127,13 +130,13 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     input.carryCap,
   );
   const dailyBase = discretionaryAllocations[todayIndex] ?? 0;
-  const weeklyBase = discretionaryAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+  const weeklyBase = weeklyAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
   return {
     dailyBase,
     carry,
     dailyRemaining: dailyBase + carry - input.spentToday,
     weeklyBase,
-    weeklyRemaining: weeklyBase + carry - input.spentToday,
+    weeklyRemaining: weeklyBase + carry - input.spentToday - Math.max(0, input.reservedRemainingWeek ?? 0),
     monthlyRemaining,
     poolAtStartOfToday: input.monthlyBudget - input.spentBeforeToday - reservedMonth,
     projectedMonthRemaining: discretionaryAllocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday,
