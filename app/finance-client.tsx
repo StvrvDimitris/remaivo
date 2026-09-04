@@ -220,6 +220,9 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
   const boundary = ["daily", "weekly", "monthly"].includes(root.hard_reset) ? root.hard_reset : "monthly";
   const resetStart = boundary === "daily" ? today : boundary === "weekly" ? (periodStart(today, "weekly", weekStart) < monthStart ? monthStart : periodStart(today, "weekly", weekStart)) : monthStart;
   const spentSinceReset = counted.filter((transaction) => transaction.date >= resetStart && transaction.date < today).reduce((sum, transaction) => sum + transaction.amount_cents, 0);
+  const spentSinceWeeklyResetBeforeWeek = resetStart < currentMonthWeekStart
+    ? counted.filter((transaction) => transaction.date >= resetStart && transaction.date < currentMonthWeekStart).reduce((sum, transaction) => sum + transaction.amount_cents, 0)
+    : 0;
   const mode = root.calculation_mode === "adaptive" ? "adaptive" : "fixed";
   const carryMode = (["reset", "stack_unused", "stack_signed", "stack_capped"].includes(root.carry_mode) ? root.carry_mode : "reset") as FixedCarryMode;
   const projection = projectBudgetPlan({
@@ -238,6 +241,7 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
     weekDaysInMonth: daysBetween(currentMonthWeekStart, currentMonthWeekEnd),
     spentBeforeWeek,
     spentThisWeek,
+    spentSinceWeeklyResetBeforeWeek,
     reservedMonth,
     reservedFromWeekStart,
     weeklySpreadReserve: outstandingReserves,
@@ -261,7 +265,8 @@ function calculateBudgetResults(rules: BudgetRule[], transactions: Transaction[]
   }
 
   const monthly: BudgetResult = { ...inherited("monthly"), remaining: projection.monthlyRemaining, effective_base_cents: root.base_cents, current_base_cents: root.base_cents, carried_cents: 0, spent_cents: spentBeforeToday + spentToday, planned_cents: reservedMonth, window_start: monthStart, window_end: monthEnd, source_note: "Actual monthly funds after posted and reserved spending", unavailable: false };
-  const weekly: BudgetResult = { ...inherited("weekly"), source_type: "derived", parent_period: "monthly", remaining: weeklyRemaining, effective_base_cents: weeklyBase + projection.carry, current_base_cents: weeklyBase, carried_cents: projection.carry, spent_cents: mode === "adaptive" ? spentThisWeek : spentToday, planned_cents: weeklyPlanned, window_start: weekStartDate, window_end: weekEnd, remaining_days: daysBetween(today, weekEnd), source_note: mode === "adaptive" ? `Recalculated from transactions through last ${weekdayLabels[(weekStart + 6) % 7]}; this week’s spending only reduces what remains` : `Flexible reserves are spread through ${weekdayLabels[(weekStart + 6) % 7]}; dated plans are deducted when due, with carry from the ${boundary} reset boundary`, unavailable: false };
+  const weeklyCarry = mode === "fixed" ? (projection.weeklyCarry ?? 0) : projection.carry;
+  const weekly: BudgetResult = { ...inherited("weekly"), source_type: "derived", parent_period: "monthly", remaining: weeklyRemaining, effective_base_cents: weeklyBase + weeklyCarry, current_base_cents: weeklyBase, carried_cents: weeklyCarry, spent_cents: spentThisWeek, planned_cents: weeklyPlanned, window_start: weekStartDate, window_end: weekEnd, remaining_days: daysBetween(today, weekEnd), source_note: mode === "adaptive" ? `Recalculated from transactions through last ${weekdayLabels[(weekStart + 6) % 7]}; this week’s spending only reduces what remains` : `The week’s allocation stays fixed; carry comes only from completed weeks since the ${boundary} reset`, unavailable: false };
   const daily: BudgetResult = { ...inherited("daily"), source_type: "derived", parent_period: "monthly", remaining: projection.dailyRemaining, effective_base_cents: projection.dailyBase + projection.carry, current_base_cents: projection.dailyBase, carried_cents: projection.carry, spent_cents: spentToday, planned_cents: 0, window_start: today, window_end: tomorrow, remaining_days: 1, source_note: mode === "adaptive" ? "Recalculated from transactions through yesterday; today’s spending only reduces what remains" : `Safe discretionary calendar-day base after monthly commitments, with ${carryLabels[carryMode].toLowerCase()}`, unavailable: false };
   return [daily, weekly, monthly];
 }

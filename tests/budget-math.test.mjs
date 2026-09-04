@@ -119,14 +119,30 @@ test("the September 4 example spreads €308.28 of flexible reserves across Fixe
     monthlyBudget: 108077, daysInMonth: 30, todayIndex: 3, remainingWeekDays: 3,
     mode: "fixed", carryMode: "stack_signed", resetStartIndex: 0,
     spentBeforeToday: 22852, spentSinceResetBeforeToday: 22852, spentToday: 1290,
+    weekStartIndex: 0, weekDaysInMonth: 6, spentThisWeek: 24142,
     reservedMonth: 49688, weeklySpreadReserve: 30828, reservedRemainingWeek: 0,
   });
   assert.equal(result.dailyBase, 1947);
   assert.equal(result.carry, -17011);
   assert.equal(result.dailyRemaining, -16354);
-  assert.equal(result.weeklyBase, 7725);
-  assert.equal(result.weeklyRemaining, -10576);
+  assert.equal(result.weeklyBase, 15450);
+  assert.equal(result.weeklyCarry, 0);
+  assert.equal(result.weeklyRemaining, -8692);
   assert.equal(result.monthlyRemaining, 34247);
+});
+
+test("Fixed Weekly carries only completed weeks and keeps its full-week base", () => {
+  const result = projectBudgetPlan({
+    monthlyBudget: 310000, daysInMonth: 31, todayIndex: 18, remainingWeekDays: 5,
+    mode: "fixed", carryMode: "stack_signed", resetStartIndex: 0,
+    spentBeforeToday: 155000, spentSinceResetBeforeToday: 155000, spentToday: 5000,
+    weekStartIndex: 16, weekDaysInMonth: 7, spentThisWeek: 15000,
+    spentSinceWeeklyResetBeforeWeek: 145000, reservedMonth: 31000,
+    weeklySpreadReserve: 31000, reservedRemainingWeek: 0,
+  });
+  assert.equal(result.weeklyBase, 63000);
+  assert.equal(result.weeklyCarry, -1000);
+  assert.equal(result.weeklyRemaining, 47000);
 });
 
 test("every fixed carry mode applies after the Weekly reserve-and-due-date split", () => {

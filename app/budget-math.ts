@@ -48,6 +48,7 @@ export type BudgetProjectionInput = {
   weekDaysInMonth?: number;
   spentBeforeWeek?: number;
   spentThisWeek?: number;
+  spentSinceWeeklyResetBeforeWeek?: number;
   reservedMonth?: number;
   reservedFromWeekStart?: number;
   weeklySpreadReserve?: number;
@@ -106,6 +107,7 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     return {
       dailyBase: daily.base,
       carry: 0,
+      weeklyCarry: 0,
       dailyRemaining: daily.remaining,
       weeklyBase: weekly.base,
       weeklyRemaining: weekly.remaining,
@@ -130,13 +132,24 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     input.carryCap,
   );
   const dailyBase = discretionaryAllocations[todayIndex] ?? 0;
-  const weeklyBase = weeklyAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+  const weekStartIndex = Math.max(0, Math.min(todayIndex, input.weekStartIndex ?? todayIndex));
+  const weekDaysInMonth = Math.max(1, input.weekDaysInMonth ?? input.remainingWeekDays);
+  const weeklyBase = weeklyAllocations.slice(weekStartIndex, weekStartIndex + weekDaysInMonth).reduce((sum, value) => sum + value, 0);
+  const completedWeekAllocation = resetStart < weekStartIndex
+    ? weeklyAllocations.slice(resetStart, weekStartIndex).reduce((sum, value) => sum + value, 0)
+    : 0;
+  const weeklyCarry = input.weekStartIndex === undefined ? carry : fixedCarryValue(
+    completedWeekAllocation - (input.spentSinceWeeklyResetBeforeWeek ?? 0),
+    input.carryMode ?? "reset",
+    input.carryCap,
+  );
   return {
     dailyBase,
     carry,
     dailyRemaining: dailyBase + carry - input.spentToday,
     weeklyBase,
-    weeklyRemaining: weeklyBase + carry - input.spentToday - Math.max(0, input.reservedRemainingWeek ?? 0),
+    weeklyCarry,
+    weeklyRemaining: weeklyBase + weeklyCarry - (input.spentThisWeek ?? input.spentToday) - Math.max(0, input.reservedRemainingWeek ?? 0),
     monthlyRemaining,
     poolAtStartOfToday: input.monthlyBudget - input.spentBeforeToday - reservedMonth,
     projectedMonthRemaining: discretionaryAllocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday,
