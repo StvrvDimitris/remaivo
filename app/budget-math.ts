@@ -17,6 +17,16 @@ export function fixedCarryValue(remainder: number, mode: FixedCarryMode, cap: nu
   return 0;
 }
 
+export function protectedCalendarAllocations(monthlyBudget: number, reservedMonth: number, daysInMonth: number) {
+  return splitCents(Math.max(0, Math.trunc(monthlyBudget) - Math.max(0, Math.trunc(reservedMonth))), daysInMonth);
+}
+
+export function protectedCalendarWindow(monthlyBudget: number, reservedMonth: number, daysInMonth: number, startIndex: number, dayCount: number) {
+  const allocations = protectedCalendarAllocations(monthlyBudget, reservedMonth, daysInMonth);
+  const start = Math.max(0, Math.trunc(startIndex));
+  return allocations.slice(start, start + Math.max(0, Math.trunc(dayCount))).reduce((sum, value) => sum + value, 0);
+}
+
 export function outstandingReserve(target: number, spent: number, status: "open" | "finished" = "open") {
   if (status === "finished") return 0;
   return Math.max(0, Math.trunc(target) - Math.max(0, Math.trunc(spent)));
@@ -40,8 +50,6 @@ export type BudgetProjectionInput = {
   spentThisWeek?: number;
   reservedMonth?: number;
   reservedFromWeekStart?: number;
-  reservedToday?: number;
-  reservedRemainingWeek?: number;
 };
 
 export type AdaptivePeriodProjectionInput = {
@@ -107,12 +115,10 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     };
   }
 
-  // Fixed Daily is deliberately a safe discretionary allowance: reserve every
-  // outstanding commitment in the month before creating its calendar slices.
-  // Weekly remains a due-date cash-flow view, so it keeps the gross slices and
-  // subtracts only commitments that fall inside the current week.
-  const discretionaryAllocations = splitCents(Math.max(0, input.monthlyBudget - reservedMonth), input.daysInMonth);
-  const grossAllocations = splitCents(input.monthlyBudget, input.daysInMonth);
+  // Fixed Daily and Weekly share one safe discretionary calendar: reserve every
+  // outstanding monthly commitment once, then slice only the remaining pool.
+  // Non-transaction commitments never become a second Weekly deduction.
+  const discretionaryAllocations = protectedCalendarAllocations(input.monthlyBudget, reservedMonth, input.daysInMonth);
   const resetStart = Math.max(0, Math.min(todayIndex, input.resetStartIndex ?? todayIndex));
   const allocatedSinceReset = discretionaryAllocations.slice(resetStart, todayIndex).reduce((sum, value) => sum + value, 0);
   const carry = fixedCarryValue(
@@ -121,13 +127,13 @@ export function projectBudgetPlan(input: BudgetProjectionInput) {
     input.carryCap,
   );
   const dailyBase = discretionaryAllocations[todayIndex] ?? 0;
-  const weeklyBase = grossAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
+  const weeklyBase = discretionaryAllocations.slice(todayIndex, todayIndex + Math.max(1, input.remainingWeekDays)).reduce((sum, value) => sum + value, 0);
   return {
     dailyBase,
     carry,
     dailyRemaining: dailyBase + carry - input.spentToday,
     weeklyBase,
-    weeklyRemaining: weeklyBase + carry - input.spentToday - Math.max(0, input.reservedRemainingWeek ?? 0),
+    weeklyRemaining: weeklyBase + carry - input.spentToday,
     monthlyRemaining,
     poolAtStartOfToday: input.monthlyBudget - input.spentBeforeToday - reservedMonth,
     projectedMonthRemaining: discretionaryAllocations.slice(todayIndex).reduce((sum, value) => sum + value, 0) + carry - input.spentToday,
