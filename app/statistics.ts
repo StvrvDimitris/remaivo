@@ -14,6 +14,7 @@ export type StatisticsRow = {
   amount_cents: number;
   date: string;
   committed: number;
+  counts_monthly?: number;
   recurring_plan_id: string | null;
 };
 

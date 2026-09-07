@@ -5,6 +5,7 @@ export type ClassifiableTransaction = {
   type: string;
   amount_cents: number;
   committed?: number;
+  counts_monthly?: number;
 };
 
 export function reportingClass(type: string): ReportingClass {
@@ -37,6 +38,8 @@ export function budgetCountsTransaction(rule: {
   include_savings: number;
   include_investments: number;
 }, transaction: ClassifiableTransaction) {
+  // The monthly pool also supplies the daily and weekly budget views.
+  if (transaction.counts_monthly === 0) return false;
   const classification = reportingClass(transaction.type);
   if (classification === "spending") {
     if (transaction.type === "installment_payment" || Number(transaction.committed) === 1) return rule.include_committed === 1;

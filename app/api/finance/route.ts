@@ -460,7 +460,7 @@ export async function POST(request: Request) {
       const committed = bool(payload.committed);
       if (!amount || !text(payload.description)) return Response.json({ error: "Description and amount are required." }, { status: 400 });
       const isMovement = ["transfer", "saving", "investment"].includes(type);
-      const countsBudget = type === "expense" || type === "installment_payment" || type === "saving" || type === "investment";
+      const countsBudget = ["expense", "installment_payment", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget);
       let spare = 0;
       const profile = await env.DB.prepare("SELECT spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<{spare_multiplier:number; spare_destination_id:string | null}>();
       if (type === "expense" && bool(payload.useSpare) && profile?.spare_destination_id) {
@@ -505,7 +505,7 @@ export async function POST(request: Request) {
       const matchingAccounts = await env.DB.prepare("SELECT COUNT(*) AS total FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, accountId, moving ? destinationAccountId : accountId).first<{total:number}>();
       if (Number(matchingAccounts?.total || 0) !== (moving ? 2 : 1)) return Response.json({ error: "One of those accounts is not available." }, { status: 400 });
       const committed = type === "expense" && bool(payload.committed);
-      const countsBudget = ["expense", "saving", "investment"].includes(type);
+      const countsBudget = ["expense", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget, Number(original.counts_monthly) === 0);
       const profile = await env.DB.prepare("SELECT spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<{spare_multiplier:number; spare_destination_id:string | null}>();
       let spare = 0;
       if (type === "expense" && bool(payload.useSpare) && profile?.spare_destination_id) {
