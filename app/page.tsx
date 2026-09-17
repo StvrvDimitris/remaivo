@@ -1,5 +1,5 @@
 import { chatGPTSignInPath, chatGPTSignOutPath, getChatGPTUser } from "./chatgpt-auth";
-import { FinanceClient } from "./finance-client";
+import { RemaivoV3 as FinanceClient } from "./v3-client";
 
 export const dynamic = "force-dynamic";
 

@@ -57,3 +57,5 @@ export default function RootLayout({
     </html>
   );
 }
+
+import './v3.css';

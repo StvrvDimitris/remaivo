@@ -6,14 +6,15 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
-    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "test": "node --test --test-isolation=none tests/budget-math.test.mjs tests/budget-exclusion.test.mjs tests/reconciliation.test.mjs tests/investment-valuations.test.mjs tests/statistics.test.mjs tests/v3-integration.test.mjs",
     "test:budget": "node --test --test-isolation=none tests/budget-math.test.mjs",
     "test:investment": "node --test --test-isolation=none tests/investment-valuations.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test:v3": "node --test --test-isolation=none tests/v3-integration.test.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -46,5 +47,6 @@
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },
-  "type": "module"
+  "type": "module",
+  "packageManager": "pnpm@11.19.0"
 }

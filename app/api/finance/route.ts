@@ -1,3 +1,4 @@
+import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences } from "../../../db/v3";
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
@@ -73,8 +74,7 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
   const today = financialToday(String(profile?.timezone || "UTC"));
   if (!profile?.setup_complete) return { items: [], page: 1, pageSize: 25, total: 0, totalPages: 1, today };
 
-  await processAutomaticPlans(user.userId, today);
-  await processAutomaticInstallments(user.userId, today);
+  await reconcileV3(user.userId, today);
 
   const params = new URL(request.url).searchParams;
   const requestedFrom = calendarDate(params.get("from"));
@@ -133,8 +133,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
   const today = financialToday(String(profile?.timezone || "UTC"));
   if (!profile?.setup_complete) return { needsSetup: true, today };
 
-  await processAutomaticPlans(user.userId, today);
-  await processAutomaticInstallments(user.userId, today);
+  await reconcileV3(user.userId, today);
 
   const params = new URL(request.url).searchParams;
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -194,7 +193,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     rows: currentRows.results as StatisticsRow[],
     comparisonRows: comparisonRows.results as StatisticsRow[],
     filters,
-    budget: (budgetRows.results[0] as Parameters<typeof buildStatistics>[0]["budget"]) ?? null,
+    budget: null,
     budgetEligible,
     today,
     currency: String(profile.currency || "EUR"),
@@ -312,8 +311,7 @@ async function snapshot(user: FinanceUser) {
     return { needsSetup: true, user, today };
   }
 
-  await processAutomaticPlans(user.userId, today);
-  await processAutomaticInstallments(user.userId, today);
+  await reconcileV3(user.userId, today);
   await ensureCurrentReservePeriods(user.userId, today);
   const monthStart = `${today.slice(0, 7)}-01`;
   const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, reserves, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
@@ -360,6 +358,7 @@ async function snapshot(user: FinanceUser) {
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
     today,
+    v3: await v3Snapshot(user.userId, today),
   };
 }
 
@@ -368,6 +367,13 @@ export async function GET(request: Request) {
   if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
   try {
     const view = new URL(request.url).searchParams.get("view");
+    if (view === "backup") {
+      await ensureFinanceSchema();
+      await initializeV3(user.userId, financialToday('UTC'));
+      const saved = await env.DB.prepare('SELECT snapshot_json,created_at FROM v3_migrations WHERE user_id=?').bind(user.userId).first<{snapshot_json:string;created_at:string}>();
+      if(!saved) return Response.json({error:'Backup not available.'},{status:404});
+      return new Response(JSON.stringify({capturedAt:saved.created_at,tables:JSON.parse(saved.snapshot_json)},null,2),{headers:{'Content-Type':'application/json','Content-Disposition':'attachment; filename="remaivo-before-redesign.json"','Cache-Control':'private, no-store'}});
+    }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
     return Response.json(await snapshot(user));
@@ -388,6 +394,21 @@ export async function POST(request: Request) {
     const storedClock = action === "setup" ? null : await env.DB.prepare("SELECT timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<{timezone:string}>();
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
+    if (action !== "setup") await initializeV3(user.userId, actionToday);
+    if (["addTransaction", "correctTransaction", "updateTransaction"].includes(action) && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
+    if (["addRecurring","updateRecurring"].includes(action)) {
+      if(payload.frequency==='once'){payload.frequency='monthly';payload.endDate=payload.nextDate;}
+      const existing = action === "updateRecurring" ? await env.DB.prepare("SELECT type FROM recurring_plans WHERE id=? AND user_id=?").bind(payload.planId,user.userId).first<{type:string}>() : null;
+      const kind = existing?.type || String(payload.type);
+      if(!calendarDate(payload.nextDate)||!['daily','weekly','monthly','yearly'].includes(String(payload.frequency))||Number(payload.intervalCount)<1||Number(payload.intervalCount)>365||!cents(payload.amount)) return Response.json({error:'Enter a valid amount, date and repetition interval.'},{status:400});
+      if(!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(payload.accountId||'',user.userId).first()) return Response.json({error:'Choose an active payment account.'},{status:400});
+      if(["saving","investment"].includes(kind) && (!payload.destinationAccountId || payload.destinationAccountId===payload.accountId || !await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0").bind(payload.destinationAccountId,user.userId).first())) return Response.json({error:"Choose a different active destination account."},{status:400});
+    }
+    if (action.startsWith("v3")) {
+      await v3Action(user.userId, actionToday, action, payload);
+      await syncLedger(user.userId);
+      return Response.json(await snapshot(user));
+    }
     if (action === "setup") {
       const currency = text(payload.currency, "EUR").slice(0, 3).toUpperCase();
       const timezone = text(payload.timezone, "UTC");
@@ -460,6 +481,8 @@ export async function POST(request: Request) {
       const committed = bool(payload.committed);
       if (!amount || !text(payload.description)) return Response.json({ error: "Description and amount are required." }, { status: 400 });
       const isMovement = ["transfer", "saving", "investment"].includes(type);
+      if (!payload.accountId || !await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0").bind(payload.accountId,user.userId).first()) return Response.json({error:"Choose an active account."},{status:400});
+      if(isMovement && (!payload.destinationAccountId || payload.destinationAccountId === payload.accountId || !await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0").bind(payload.destinationAccountId,user.userId).first())) return Response.json({error:"Choose a different active destination account."},{status:400});
       const countsBudget = ["expense", "installment_payment", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget);
       let spare = 0;
       const profile = await env.DB.prepare("SELECT spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<{spare_multiplier:number; spare_destination_id:string | null}>();
@@ -527,6 +550,9 @@ export async function POST(request: Request) {
       ];
       if (oldSpare?.status === "pending") statements.push(env.DB.prepare("UPDATE spare_events SET status = 'cancelled' WHERE transaction_id = ? AND user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(original.id, user.userId, original.id, user.userId, correctionMarker));
       if (spare && profile?.spare_destination_id) statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare, original.id, user.userId, correctionMarker));
+      statements.push(env.DB.prepare('UPDATE v3_assignments SET transaction_id=?,amount_cents=CAST(amount_cents*MIN(1.0,?*1.0/?) AS INTEGER) WHERE transaction_id=? AND user_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,amount,original.amount_cents,original.id,user.userId,replacementId,'posted'));
+      statements.push(env.DB.prepare('UPDATE v3_occurrences SET paid_cents=paid_cents+?,amount_cents=amount_cents+?,transaction_id=CASE WHEN transaction_id=? THEN ? ELSE transaction_id END WHERE user_id=? AND id IN (SELECT occurrence_id FROM v3_payment_links WHERE transaction_id=? AND user_id=?) AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(amount-Number(original.amount_cents),amount-Number(original.amount_cents),original.id,replacementId,user.userId,original.id,user.userId,replacementId,'posted'));
+      statements.push(env.DB.prepare('UPDATE v3_payment_links SET transaction_id=? WHERE user_id=? AND transaction_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,user.userId,original.id,replacementId,'posted'));
       statements.push(env.DB.prepare("UPDATE transactions SET status = 'corrected' WHERE id = ? AND user_id = ? AND status = ?").bind(original.id, user.userId, correctionMarker));
       const results = await env.DB.batch(statements);
       if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction changed while you were editing it. Reopen it and try again." }, { status: 409 });
@@ -547,7 +573,8 @@ export async function POST(request: Request) {
       if (categoryKind && !categoryId) return Response.json({ error: `Choose an active ${categoryKind} category.` }, { status: 400 });
       const nextDate = text(payload.nextDate);
       const anchorDay = Math.max(1, Math.min(31, Math.round(Number(payload.anchorDay) || Number(nextDate.slice(8, 10)) || 1)));
-      await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, amount_cents = ?, account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, amount, payload.accountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
+      await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, amount_cents = ?, account_id = ?, destination_account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, auto_post = ?, committed = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, amount, payload.accountId || null, payload.destinationAccountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, payload.planId, user.userId).run();
+      await env.DB.prepare("DELETE FROM v3_occurrences WHERE user_id=? AND source_kind='recurring' AND source_id=? AND status='upcoming' AND paid_cents=0").bind(user.userId,payload.planId).run();
     } else if (action === "archiveRecurring") {
       await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
     } else if (action === "addReserve") {
@@ -611,7 +638,7 @@ export async function POST(request: Request) {
       if (!plan) return Response.json({ error: "That pay-later plan is no longer active." }, { status: 404 });
       const paid = await env.DB.prepare("SELECT COUNT(*) AS paid_count, COALESCE(SUM(amount_cents), 0) AS paid_cents FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'").bind(payload.planId, user.userId).first<{paid_count:number; paid_cents:number}>();
       const paidCount = Number(paid?.paid_count || 0);
-      const paidCents = Number(paid?.paid_cents || 0);
+      const paidCents = Number(plan.paid_cents || 0);
       if (paidCount >= 120) return Response.json({ error: "This plan has reached the 120-payment limit and cannot add another payment." }, { status: 409 });
       const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
       if (!categoryId) return Response.json({ error: "Choose an active expense category." }, { status: 400 });
@@ -644,8 +671,8 @@ export async function POST(request: Request) {
         env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
       ]);
     } else if (action === "payInstallment") {
-      const recorded = await recordInstallmentPayment(user.userId, text(payload.paymentId));
-      if (!recorded) return Response.json({ error: "Installment not found or already paid." }, { status: 404 });
+      await generateOccurrences(user.userId,actionToday);
+      await v3Action(user.userId,actionToday,"v3Settle",{id:"installment:"+text(payload.paymentId),date:actionToday});
     } else if (action === "updateBudget") {
       const calculationMode = text(payload.calculationMode) === "adaptive" ? "adaptive" : "fixed_split";
       const carryMode = calculationMode === "adaptive" ? "reset" : (["reset", "stack_unused", "stack_signed", "stack_capped"].includes(text(payload.carryMode)) ? text(payload.carryMode) : "reset");
@@ -664,6 +691,8 @@ export async function POST(request: Request) {
     } else if (action === "updateWeekStart") {
       const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
       await env.DB.prepare("UPDATE profiles SET week_start = ? WHERE user_id = ?").bind(weekStart, user.userId).run();
+      const current=await v3Snapshot(user.userId,actionToday);
+      await v3Action(user.userId,actionToday,"v3Configure",{...current.config,target:current.config.target/100,carryCap:current.config.carryCap/100,weekStart});
     } else if (action === "updateTimezone") {
       const timezone = text(payload.timezone);
       if (!validTimeZone(timezone)) return Response.json({ error: "Choose a valid financial timezone." }, { status: 400 });
@@ -697,6 +726,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unknown action." }, { status: 400 });
     }
 
+    await syncLedger(user.userId);
     return Response.json(await snapshot(user));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save your changes.";

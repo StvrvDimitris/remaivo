@@ -204,3 +204,5 @@ export const spareEvents = sqliteTable("spare_events", {
   status: text("status").notNull().default("pending"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_spare_events_user_status").on(table.userId, table.status)]);
+
+export * from './v3-schema';

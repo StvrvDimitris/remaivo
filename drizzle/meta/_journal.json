@@ -64,6 +64,20 @@
       "when": 1788516910766,
       "tag": "0008_rapid_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789631776513,
+      "tag": "0009_remaivo_v3",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789631923591,
+      "tag": "0010_payment_links",
+      "breakpoints": true
     }
   ]
 }

@@ -36,7 +36,7 @@ type StatisticsResult = {
     savedAndInvested: number; saving: number; investment: number; savingsRate: number | null;
     changes: { spending: AmountChange; income: AmountChange; netOperatingCashFlow: AmountChange; cashRemaining: AmountChange };
   };
-  categoryBreakdown: { id: string; label: string; color: string; amount: number; share: number; change: AmountChange }[];
+  categoryBreakdown: { id: string; label: string; color: string; amount: number; comparisonAmount: number; share: number; change: AmountChange }[];
   descriptionBreakdown: { description: string; amount: number; count: number; share: number }[];
   dailyTrend: { date: string; amount: number; cumulative: number; comparisonAmount: number; comparisonCumulative: number }[];
   weekdayBreakdown: { day: number; label: string; totalAmount: number; averagePerOccurrence: number; calendarOccurrences: number; transactionCount: number }[];

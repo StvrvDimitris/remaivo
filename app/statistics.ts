@@ -359,7 +359,7 @@ export function buildStatistics(input: {
       top5DescriptionShare: descriptionBreakdown.slice(0, 5).reduce((sum, item) => sum + item.share, 0),
     },
     budget,
-    budgetUnavailableReason: input.budgetEligible ? null : "Budget pace is only available for the current month without account, category, type, description, or recurring filters.",
+    budgetUnavailableReason: input.budgetEligible ? null : "Open Plan to review budget allocation and pacing.",
     insights: insights({ mode: input.filters.mode, allocation: categoryBreakdown, descriptions: descriptionBreakdown, weekday, budget, summary, comparisonSummary, currency: input.currency }),
   };
 }
