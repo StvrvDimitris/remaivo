@@ -1,4 +1,5 @@
 import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences } from "../../../db/v3";
+import { forecastHistory } from "../../../db/forecast";
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
@@ -376,6 +377,14 @@ export async function GET(request: Request) {
     }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
+    if (view === "forecast") {
+      const state = await snapshot(user);
+      if (!state.v3 || !state.profile) return Response.json({error:'Complete your setup before opening Forecast.'},{status:409});
+      const history = await forecastHistory(user.userId, state.today);
+      // Include older current-period activity for a long custom budget, without truncating its remaining allowance.
+      const transactions = [...new Map([...history.transactions, ...state.v3.transactions].map(t=>[t.id,t])).values()];
+      return Response.json({ ...history, transactions, today:state.today, currency:String(state.profile.currency), accounts:state.accounts, categories:state.categories, config:state.v3.config, current:state.v3.result, occurrences:state.v3.occurrences }, {headers:{'Cache-Control':'private, no-store'}});
+    }
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });

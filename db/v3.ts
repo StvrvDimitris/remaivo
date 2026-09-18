@@ -82,7 +82,7 @@ export async function currentPeriod(user:string,today:string){
 
 type PlanRow={id:string;title:string;type:string;amount_cents:number;next_date:string;frequency:string;interval_count:number;anchor_day:number;end_date:string|null;account_id:string|null;destination_account_id:string|null;category_id:string|null;committed:number;auto_post:number};
 export async function generateOccurrences(user:string,today:string){
- const plans=await rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user);const horizon=plusDays(today,370);const stmts:D1PreparedStatement[]=[];
+ const plans=await rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user);const horizon=plusDays(today,400);const stmts:D1PreparedStatement[]=[];
  for(const p of plans){let date=p.next_date;let n=0;while(date<horizon&&(!p.end_date||date<=p.end_date)){
    if(++n>2000)throw new Error('A schedule has too many missed occurrences. Move its next date forward to continue.');
    const oid='recurring:'+p.id+':'+date;
