@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const viewport: Viewport = {
-  themeColor: "#15372f",
+  themeColor: "#f6f7f9",
 };
 
 const title = "Remaivo — Know what's left";
@@ -59,3 +59,4 @@ export default function RootLayout({
 }
 
 import './v3.css';
+import './remaivo-theme.css';
