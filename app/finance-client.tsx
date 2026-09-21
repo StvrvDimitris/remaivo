@@ -59,7 +59,7 @@ export type EditTarget =
 const navItems: { id: PageName; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "⌂" },
   { id: "transactions", label: "Transactions", icon: "↕" },
-  { id: "statistics", label: "Statistics", icon: "⌁" },
+  { id: "statistics", label: "Insights", icon: "⌁" },
   { id: "accounts", label: "Accounts", icon: "◫" },
   { id: "budget", label: "Budget", icon: "◔" },
   { id: "plans", label: "Plans", icon: "↻" },
