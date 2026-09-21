@@ -1,5 +1,6 @@
 import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences } from "../../../db/v3";
 import { forecastHistory } from "../../../db/forecast";
+import { listForecastScenarios, removeForecastScenario, saveForecastScenario } from "../../../db/forecast-scenarios";
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
@@ -383,7 +384,7 @@ export async function GET(request: Request) {
       const history = await forecastHistory(user.userId, state.today);
       // Include older current-period activity for a long custom budget, without truncating its remaining allowance.
       const transactions = [...new Map([...history.transactions, ...state.v3.transactions].map(t=>[t.id,t])).values()];
-      return Response.json({ ...history, transactions, today:state.today, currency:String(state.profile.currency), accounts:state.accounts, categories:state.categories, config:state.v3.config, current:state.v3.result, occurrences:state.v3.occurrences }, {headers:{'Cache-Control':'private, no-store'}});
+      return Response.json({ ...history, transactions, scenarios:await listForecastScenarios(user.userId), today:state.today, currency:String(state.profile.currency), accounts:state.accounts, categories:state.categories, goals:state.goals, config:state.v3.config, current:state.v3.result, occurrences:state.v3.occurrences }, {headers:{'Cache-Control':'private, no-store'}});
     }
     return Response.json(await snapshot(user));
   } catch (error) {
@@ -404,6 +405,14 @@ export async function POST(request: Request) {
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
     if (action !== "setup") await initializeV3(user.userId, actionToday);
+    if(action==='saveForecastScenario'){
+      await saveForecastScenario(user.userId,actionToday,payload);
+      return Response.json({scenarios:await listForecastScenarios(user.userId)});
+    }
+    if(action==='deleteForecastScenario'){
+      await removeForecastScenario(user.userId,text(payload.id));
+      return Response.json({scenarios:await listForecastScenarios(user.userId)});
+    }
     if (["addTransaction", "correctTransaction", "updateTransaction"].includes(action) && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
     if (["addRecurring","updateRecurring"].includes(action)) {
       if(payload.frequency==='once'){payload.frequency='monthly';payload.endDate=payload.nextDate;}

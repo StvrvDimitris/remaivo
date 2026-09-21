@@ -205,4 +205,13 @@ export const spareEvents = sqliteTable("spare_events", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_spare_events_user_status").on(table.userId, table.status)]);
 
+export const forecastScenarios = sqliteTable("forecast_scenarios", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  name: text("name").notNull(),
+  eventsJson: text("events_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("idx_forecast_scenarios_user_updated").on(table.userId, table.updatedAt)]);
+
 export * from './v3-schema';

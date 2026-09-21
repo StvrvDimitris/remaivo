@@ -11,7 +11,7 @@ for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/v3-engine.ts','b
   fs.writeFileSync(path.join(scratch,dest+'.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 }
 const {buildBudget,plusDays}=await import(pathToFileURL(path.join(scratch,'budget.mjs')));
-const {buildForecast,forecastRange,cashAccounts}=await import(pathToFileURL(path.join(scratch,'forecast.mjs')));
+const {buildForecast,bestPurchaseDate,forecastRange,cashAccounts}=await import(pathToFileURL(path.join(scratch,'forecast.mjs')));
 const config={name:'Main',target:100000,period:'monthly',anchor:'2026-09-01',end:'2026-10-01',payday:25,allocation:'adaptive',carry:'none',carryCap:0,weights:[1,1,1,1,1,1,1],weekStart:1};
 const bank={id:'bank',name:'Bank',type:'bank',currency:'EUR',balance_cents:200000,include_spendable:1,archived:0};
 const savings={...bank,id:'savings',name:'Savings',type:'savings',balance_cents:50000,include_spendable:0};
@@ -88,6 +88,22 @@ test('Purchase simulations honor dates and account scope without mutating source
  assert.equal(buildForecast(data,{...opts,purchase:{...purchase,date:'2026-09-01'}}).purchaseActive,false);
  assert.equal(buildForecast(data,{...opts,purchase:{...purchase,accountId:'savings'}}).purchaseActive,false);
 });
+test('Saved multi-event scenarios stack safely, repeat annual costs and split installments without touching records',()=>{
+ const data=input(),before=JSON.stringify(data);const scenario={id:'move',name:'Moving home',created_at:'',updated_at:'',events:[
+  {id:'deposit',title:'Deposit',kind:'purchase',amount_cents:40000,date:'2026-09-20',account_id:'bank',installments:1,frequency:'once'},
+  {id:'bonus',title:'Bonus',kind:'income',amount_cents:15000,date:'2026-09-21',account_id:'bank',installments:1,frequency:'once'},
+  {id:'insurance',title:'Insurance',kind:'annual',amount_cents:12000,date:'2026-09-22',account_id:'bank',installments:1,frequency:'yearly'},
+  {id:'furniture',title:'Furniture',kind:'installment',amount_cents:5000,date:'2026-09-23',account_id:'bank',installments:3,frequency:'monthly'}
+ ]};
+ const base=buildForecast(data,{...opts,to:'2026-12-31'}),withScenario=buildForecast(data,{...opts,to:'2026-12-31',scenarios:[scenario]});
+ assert.equal(withScenario.summary.plan.closing,base.summary.plan.closing-40000+15000-12000-5000);assert.equal(withScenario.scenarioEvents,4);assert.equal(JSON.stringify(data),before);
+ const first=withScenario.rows.find(row=>row.date==='2026-09-20');assert.equal(first.events.find(event=>event.title.includes('Deposit')).amount,-40000);
+});
+test('Purchase timing chooses the date with the best remaining cash floor and returns buffer gap',()=>{
+ const rows=[{date:'2026-09-18',plan:1000,pace:1000,scheduled:1000,actual:1000,events:[]},{date:'2026-09-19',plan:500,pace:500,scheduled:500,actual:null,events:[]},{date:'2026-09-20',plan:2000,pace:2000,scheduled:2000,actual:null,events:[]}];
+ assert.deepEqual(bestPurchaseDate(rows,'plan','2026-09-18',400,300),{date:'2026-09-20',lowest:1600,headroom:1300});
+ assert.equal(bestPurchaseDate(rows,'plan','2026-09-18',0,0),null);
+});
 test('Buffer risk includes opening cash before a same-day salary and detects the lowest future day',()=>{
  const data=input({accounts:[{...bank,balance_cents:1000}],occurrences:[occurrence('salary',200000,{type:'income',due_date:'2026-09-18'})]});
  const f=buildForecast(data,{...opts,buffer:2000});assert.equal(f.summary.scheduled.lowest.balance,1000);assert.equal(f.summary.scheduled.firstBelow,'2026-09-18');assert.equal(f.summary.scheduled.headroom,-1000);
@@ -110,4 +126,11 @@ test('History query isolates owners, returns older-than-current-month records an
  globalThis.__forecastEnv={DB:{prepare:sql=>({bind:(...args)=>({all:async()=>({results:db.prepare(sql).all(...args)}),first:async()=>db.prepare(sql).get(...args)})})}};
  const {forecastHistory}=await import(pathToFileURL(path.join(scratch,'history.mjs')));
  const result=await forecastHistory('alice','2026-09-18');assert.deepEqual(result.transactions.map(t=>t.id),['a']);assert.deepEqual(result.templates.map(t=>t.id),['food']);assert.deepEqual(result.assignments.map(t=>t.transaction_id),['a']);assert.equal(result.firstRecordedDate,'2026-08-01');db.close();
+});
+test('Saved scenarios remain owned by their creator and reject missing accounts or invalid future dates',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE accounts(id TEXT,user_id TEXT,archived INTEGER); CREATE TABLE forecast_scenarios(id TEXT,user_id TEXT,name TEXT,events_json TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP); CREATE INDEX idx_forecast_scenarios_user_updated ON forecast_scenarios(user_id,updated_at)');db.exec("INSERT INTO accounts VALUES('cash','alice',0),('cash','bob',0)");
+ class Statement{constructor(sql,args=[]){this.sql=sql;this.args=args;}bind(...args){return new Statement(this.sql,args);}async all(){return {results:db.prepare(this.sql).all(...this.args)};}async run(){return {meta:{changes:db.prepare(this.sql).run(...this.args).changes}};}}
+ globalThis.__forecastEnv={DB:{prepare:sql=>new Statement(sql),batch:async statements=>Promise.all(statements.map(statement=>statement.all()))}};
+ const source=fs.readFileSync('db/forecast-scenarios.ts','utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__forecastEnv;').replace("'../app/v3-engine'","'./budget.mjs'");fs.writeFileSync(path.join(scratch,'scenarios.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
+ const scenarios=await import(pathToFileURL(path.join(scratch,'scenarios.mjs')));await scenarios.saveForecastScenario('alice','2026-09-18',{name:'Car repair',events:[{title:'Repair',kind:'annual',amount:'480',date:'2026-10-10',accountId:'cash',installments:1,frequency:'yearly'}]});assert.equal((await scenarios.listForecastScenarios('alice')).length,1);assert.equal((await scenarios.listForecastScenarios('bob')).length,0);await assert.rejects(scenarios.saveForecastScenario('alice','2026-09-18',{name:'Bad',events:[{title:'Old',kind:'purchase',amount:'10',date:'2026-09-01',accountId:'cash'}]}));await assert.rejects(scenarios.saveForecastScenario('alice','2026-09-18',{name:'Bad',events:[{title:'Missing',kind:'purchase',amount:'10',date:'2026-10-01',accountId:'missing'}]}));const id=(await scenarios.listForecastScenarios('alice'))[0].id;await assert.rejects(scenarios.removeForecastScenario('bob',id));await scenarios.removeForecastScenario('alice',id);assert.equal((await scenarios.listForecastScenarios('alice')).length,0);db.close();
 });

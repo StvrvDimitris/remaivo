@@ -9,13 +9,17 @@ export type ForecastData = {
   current: ReturnType<typeof buildBudget>; occurrences: Occurrence[];
   transactions: MoneyTransaction[]; templates: Bucket[]; assignments: Assignment[];
   firstRecordedDate: string; historyFrom: string;
+  scenarios?: SavedForecastScenario[]; goals?: {id:string;name:string;target_cents:number|null;contributed_cents:number;account_id:string|null;color:string}[];
 };
+export type ScenarioEvent = {id:string;title:string;kind:'purchase'|'income'|'annual'|'goal'|'installment';amount_cents:number;date:string;account_id:string;installments:number;frequency:'once'|'monthly'|'yearly'};
+export type SavedForecastScenario = {id:string;name:string;events:ScenarioEvent[];created_at:string;updated_at:string};
 export type ForecastOptions = {
   from: string; to: string; accountIds: string[]; estimateAccountId: string;
   buffer: number; lookback: number;
   purchase?: { amount: number; date: string; accountId: string };
+  scenarios?: SavedForecastScenario[];
 };
-export type ForecastEvent = { title: string; amount: number; kind: 'recorded'|'scheduled'|'estimate'|'purchase'; category: string; model?: 'plan'|'pace'; accountId?: string; overdue?: boolean; goalTransfer?: boolean };
+export type ForecastEvent = { title: string; amount: number; kind: 'recorded'|'scheduled'|'estimate'|'purchase'|'scenario'; category: string; model?: 'plan'|'pace'; accountId?: string; overdue?: boolean; goalTransfer?: boolean; scenarioId?:string };
 export type ForecastDay = { date: string; actual: number|null; plan: number; pace: number; scheduled: number; events: ForecastEvent[] };
 const maxDate = (...dates: string[]) => dates.reduce((a,b)=>a>b?a:b);
 const minDate = (...dates: string[]) => dates.reduce((a,b)=>a<b?a:b);
@@ -48,6 +52,19 @@ export function cashMovement(item: {type:string;account_id:string|null;destinati
   let net=selected.has(item.account_id||'')?(item.type==='income'?amount:-amount):0;
   if(['saving','investment','transfer'].includes(item.type)&&selected.has(item.destination_account_id||''))net+=amount;
   return net;
+}
+function scenarioDates(event:ScenarioEvent,to:string){
+  const count=event.kind==='installment'?event.installments:event.frequency==='once'?1:12;
+  const frequency=event.kind==='installment'?'monthly':event.frequency;
+  const dates:string[]=[];let date=event.date;
+  for(let i=0;i<count&&date<=to;i++){dates.push(date);date=frequency==='monthly'?addCalendarInterval(date,'monthly',1,Number(date.slice(8))):frequency==='yearly'?addCalendarInterval(date,'yearly',1,Number(date.slice(8))):plusDays(to,1);}
+  return dates;
+}
+export function bestPurchaseDate(rows:ForecastDay[],model:ForecastModel,today:string,amount:number,buffer=0){
+  const future=rows.filter(row=>row.date>=today);if(!future.length||amount<=0)return null;
+  let suffix=Infinity,best:{date:string;lowest:number}|null=null;
+  for(let i=future.length-1;i>=0;i--){suffix=Math.min(suffix,future[i][model]);const candidate={date:future[i].date,lowest:suffix-amount};if(!best||candidate.lowest>best.lowest)best=candidate;}
+  return best&&{...best,headroom:best.lowest-buffer};
 }
 
 export function buildForecast(data: ForecastData, options: ForecastOptions) {
@@ -116,6 +133,12 @@ export function buildForecast(data: ForecastData, options: ForecastOptions) {
   }}else for(const row of rows)for(const e of row.events.filter(e=>e.model==='plan'))row.events.push({...e,model:'pace'});
   // A goal transfer is a plan instruction rather than consumption inferred from shopping history.
   if(paceReady)for(const row of rows)for(const e of row.events.filter(e=>e.model==='plan'&&e.goalTransfer))row.events.push({...e,model:'pace'});
+  for(const scenario of options.scenarios||[])for(const event of scenario.events)for(const [index,date] of scenarioDates(event,to).entries()){
+    if(date<today)continue;
+    const installmentAmount=event.kind==='installment'?Math.floor(event.amount_cents/event.installments)+(index<event.amount_cents%event.installments?1:0):event.amount_cents;
+    const amount=cashMovement({type:event.kind==='income'?'income':event.kind==='goal'?'saving':'expense',account_id:event.account_id,destination_account_id:null},installmentAmount,selected);
+    if(amount)byDate.get(date)?.events.push({title:`${scenario.name} · ${event.title}`,amount,kind:'scenario',category:event.kind==='annual'?'Annual expense':event.kind==='goal'?'Goal contribution':event.kind==='installment'?'Installment':'Scenario',accountId:event.account_id,scenarioId:scenario.id});
+  }
   const purchase=options.purchase;
   const purchaseActive=Boolean(purchase&&Number.isSafeInteger(purchase.amount)&&purchase.amount>0&&validForecastDate(purchase.date)&&purchase.date>=today&&purchase.date<=to&&selected.has(purchase.accountId));
   if(purchaseActive&&purchase)byDate.get(purchase.date)?.events.push({title:'What-if purchase',amount:-purchase.amount,kind:'purchase',category:'What-if purchase',accountId:purchase.accountId});
@@ -123,7 +146,7 @@ export function buildForecast(data: ForecastData, options: ForecastOptions) {
   let actual=currentCash;
   for(let i=rows.length-1;i>=0;i--){const row=rows[i];if(row.date>today)continue;row.actual=actual;row.plan=row.pace=row.scheduled=actual;actual-=row.events.filter(e=>e.kind==='recorded').reduce((s,e)=>s+e.amount,0);}
   let plan=currentCash,pace=currentCash,baseline=currentCash;
-  for(const row of rows){if(row.date<today)continue;const common=row.events.filter(e=>e.kind==='scheduled'||e.kind==='purchase').reduce((s,e)=>s+e.amount,0);baseline+=common;plan+=common+row.events.filter(e=>e.model==='plan').reduce((s,e)=>s+e.amount,0);pace+=common+row.events.filter(e=>e.model==='pace').reduce((s,e)=>s+e.amount,0);row.plan=plan;row.pace=pace;row.scheduled=baseline;}
+  for(const row of rows){if(row.date<today)continue;const common=row.events.filter(e=>e.kind==='scheduled'||e.kind==='purchase'||e.kind==='scenario').reduce((s,e)=>s+e.amount,0);baseline+=common;plan+=common+row.events.filter(e=>e.model==='plan').reduce((s,e)=>s+e.amount,0);pace+=common+row.events.filter(e=>e.model==='pace').reduce((s,e)=>s+e.amount,0);row.plan=plan;row.pace=pace;row.scheduled=baseline;}
   const visible=rows.filter(r=>r.date>=from&&r.date<=to);
   const previous=byDate.get(plusDays(maxDate(from,today),-1));
   const opening=from<=today?currentCash:previous?.plan??currentCash;
@@ -132,8 +155,9 @@ export function buildForecast(data: ForecastData, options: ForecastOptions) {
     const start=from<=today?currentCash:previous?.[model]??currentCash;
     const lowest=future.reduce((low,r)=>r[model]<low.balance?{date:r.date,balance:r[model]}:low,{date:maxDate(from,today),balance:start});
     const below=future.filter(r=>r[model]<options.buffer);
-    const events=future.flatMap(r=>r.events.filter(e=>e.kind==='scheduled'||e.kind==='purchase'||e.model===model));
+    const events=future.flatMap(r=>r.events.filter(e=>e.kind==='scheduled'||e.kind==='purchase'||e.kind==='scenario'||e.model===model));
     return {closing:visible.at(-1)?.[model]??currentCash,lowest,headroom:lowest.balance-options.buffer,belowDays:below.length,firstBelow:start<options.buffer?maxDate(from,today):below[0]?.date??null,incoming:events.filter(e=>e.amount>0).reduce((s,e)=>s+e.amount,0),outgoing:-events.filter(e=>e.amount<0).reduce((s,e)=>s+e.amount,0),opening:start,hasFuture:future.length>0};
   };
-  return {rows:visible,currentCash,opening,summary:{plan:summarize('plan'),pace:summarize('pace'),scheduled:summarize('scheduled')},sampleDays,historyStart,paceReady,sampleCount:sample.filter(t=>selected.has(t.account_id||'')).length,allocationDetails,reservedWithoutMovement,futurePeriods,planDeficit,purchaseActive,overdueCount:scheduled.filter(o=>o.due_date<today&&cashMovement(o,o.amount_cents-o.paid_cents,selected)).length,hasIncome:scheduled.some(o=>o.type==='income'&&o.due_date<=to&&cashMovement(o,o.amount_cents-o.paid_cents,selected)>0)};
+  const scenarioEvents=(options.scenarios||[]).flatMap(s=>s.events).length;
+  return {rows:visible,currentCash,opening,summary:{plan:summarize('plan'),pace:summarize('pace'),scheduled:summarize('scheduled')},sampleDays,historyStart,paceReady,sampleCount:sample.filter(t=>selected.has(t.account_id||'')).length,allocationDetails,reservedWithoutMovement,futurePeriods,planDeficit,purchaseActive,scenarioEvents,overdueCount:scheduled.filter(o=>o.due_date<today&&cashMovement(o,o.amount_cents-o.paid_cents,selected)).length,hasIncome:scheduled.some(o=>o.type==='income'&&o.due_date<=to&&cashMovement(o,o.amount_cents-o.paid_cents,selected)>0)};
 }
