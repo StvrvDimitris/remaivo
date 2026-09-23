@@ -40,7 +40,34 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    if (response.status === 404 && /^\/_next\/static\/chunks\/[^/]+\.js$/.test(url.pathname)) {
+      // An open tab can keep an older HTML shell across a deployment while its
+      // fingerprinted JavaScript files have been replaced. This tiny module
+      // refreshes that tab from a unique URL once, so it receives the new shell.
+      return new Response(`(() => {
+        const key = 'remaivo-stale-chunk-retry';
+        const now = Date.now();
+        try {
+          const previous = Number(sessionStorage.getItem(key) || 0);
+          if (now - previous < 60000) {
+            const message = document.querySelector('.v3-loading p');
+            if (message) message.textContent = 'This page did not finish updating. Please refresh to try again.';
+            return;
+          }
+          sessionStorage.setItem(key, String(now));
+        } catch {}
+        const next = new URL(location.href);
+        next.searchParams.set('refresh', String(now));
+        location.replace(next.href);
+      })();`, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+    return response;
   },
 };
 
