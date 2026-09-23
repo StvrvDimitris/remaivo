@@ -59,12 +59,36 @@ const recurringUpgrades = [
   `ALTER TABLE recurring_plans ADD COLUMN anchor_day INTEGER`,
 ];
 
+const expectedObjects = statements.map((statement) => {
+  const name = statement.match(/^CREATE (?:UNIQUE )?(?:TABLE|INDEX) IF NOT EXISTS ([a-z_]+)/i)?.[1];
+  if (!name) throw new Error("Unrecognized finance schema statement.");
+  return name;
+});
+
+async function hasCurrentSchema() {
+  const result = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')").all<{ name: string }>();
+  const objects = new Set(result.results.map((row) => row.name));
+  if (!expectedObjects.every((name) => objects.has(name))) return false;
+  try {
+    // These columns were added after the initial schema. A zero-row query checks
+    // them without reading any user's finance data or writing to the database.
+    await env.DB.prepare(`SELECT p.timezone, r.anchor_day, b.source_type, b.parent_period,
+      b.calculation_mode, b.percentage_basis_points, b.hard_reset, b.include_everyday,
+      b.include_committed, b.include_savings, b.include_investments,
+      i.auto_post, t.replaces_transaction_id
+      FROM profiles p, recurring_plans r, budget_rules b, installment_plans i, transactions t LIMIT 0`).all();
+    return true;
+  } catch (error) {
+    if (error instanceof Error && /no such (?:column|table)/i.test(error.message)) return false;
+    throw error;
+  }
+}
+
 export function ensureFinanceSchema() {
   if (!schemaReady) {
-    schemaReady = (async () => {
-      console.info("[finance-load] base-schema:start");
+    const migration = (async () => {
+      if (await hasCurrentSchema()) return;
       await env.DB.batch(statements.map((statement) => env.DB.prepare(statement)));
-      console.info("[finance-load] base-schema:done");
       for (const statement of profileUpgrades) {
         try {
           await env.DB.prepare(statement).run();
@@ -80,7 +104,6 @@ export function ensureFinanceSchema() {
         }
       }
       await env.DB.prepare("UPDATE recurring_plans SET anchor_day = CAST(substr(next_date, 9, 2) AS INTEGER) WHERE anchor_day IS NULL OR anchor_day < 1 OR anchor_day > 31").run();
-      console.info("[finance-load] first-upgrades:done");
       let budgetColumnsAdded = false;
       for (const statement of budgetUpgrades) {
         try {
@@ -96,7 +119,6 @@ export function ensureFinanceSchema() {
       if (budgetColumnsAdded) {
         await env.DB.prepare("UPDATE budget_rules SET include_committed = 1, include_savings = 1, include_investments = 1 WHERE period = 'monthly'").run();
       }
-      console.info("[finance-load] budget-upgrades:done");
       for (const statement of installmentUpgrades) {
         try {
           await env.DB.prepare(statement).run();
@@ -112,8 +134,17 @@ export function ensureFinanceSchema() {
         }
       }
       await env.DB.prepare("PRAGMA optimize").run();
-      console.info("[finance-load] final-upgrades:done");
     })();
+    let timer: ReturnType<typeof setTimeout>;
+    schemaReady = Promise.race([
+      migration,
+      new Promise<void>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Database setup took too long. Please try again.")), 15000);
+      }),
+    ]).finally(() => clearTimeout(timer)).catch((error) => {
+      schemaReady = null;
+      throw error;
+    });
   }
   return schemaReady;
 }

@@ -82,19 +82,29 @@ export async function currentPeriod(user:string,today:string){
 
 type PlanRow={id:string;title:string;type:string;amount_cents:number;next_date:string;frequency:string;interval_count:number;anchor_day:number;end_date:string|null;account_id:string|null;destination_account_id:string|null;category_id:string|null;committed:number;auto_post:number};
 export async function generateOccurrences(user:string,today:string){
- const plans=await rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user);const horizon=plusDays(today,400);const stmts:D1PreparedStatement[]=[];
+ type StoredOccurrence=Pick<Occurrence,'id'|'source_kind'|'source_id'|'title'|'amount_cents'|'paid_cents'|'account_id'|'destination_account_id'|'category_id'|'committed'|'auto_post'|'status'>;
+ const [plans,existing]=await Promise.all([
+  rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user),
+  rows<StoredOccurrence>('SELECT id,source_kind,source_id,title,amount_cents,paid_cents,account_id,destination_account_id,category_id,committed,auto_post,status FROM v3_occurrences WHERE user_id=?',user),
+ ]);
+ const byId=new Map(existing.map(o=>[o.id,o]));const horizon=plusDays(today,400);const stmts:D1PreparedStatement[]=[];
  for(const p of plans){let date=p.next_date;let n=0;while(date<horizon&&(!p.end_date||date<=p.end_date)){
    if(++n>2000)throw new Error('A schedule has too many missed occurrences. Move its next date forward to continue.');
-   const oid='recurring:'+p.id+':'+date;
-   stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,destination_account_id,category_id,committed,auto_post) VALUES(?,?,'recurring',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.amount_cents ELSE v3_occurrences.amount_cents END,account_id=excluded.account_id,destination_account_id=excluded.destination_account_id,category_id=excluded.category_id,committed=excluded.committed,auto_post=excluded.auto_post`).bind(oid,user,p.id,date,date,p.title,p.type,p.amount_cents,p.account_id,p.destination_account_id,p.category_id,p.committed,p.auto_post));
+   const oid='recurring:'+p.id+':'+date;const saved=byId.get(oid);
+   if(!saved||saved.title!==p.title||(saved.paid_cents===0&&saved.amount_cents!==p.amount_cents)||saved.account_id!==p.account_id||saved.destination_account_id!==p.destination_account_id||saved.category_id!==p.category_id||saved.committed!==p.committed||saved.auto_post!==p.auto_post)
+    stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,destination_account_id,category_id,committed,auto_post) VALUES(?,?,'recurring',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.amount_cents ELSE v3_occurrences.amount_cents END,account_id=excluded.account_id,destination_account_id=excluded.destination_account_id,category_id=excluded.category_id,committed=excluded.committed,auto_post=excluded.auto_post`).bind(oid,user,p.id,date,date,p.title,p.type,p.amount_cents,p.account_id,p.destination_account_id,p.category_id,p.committed,p.auto_post));
    date=addCalendarInterval(date,p.frequency,p.interval_count,p.anchor_day);
  }}
  const payments=await rows<{id:string;plan_id:string;due_date:string;amount_cents:number;title:string;payment_account_id:string;category_id:string;auto_post:number}>("SELECT ip.*,p.title,p.payment_account_id,p.category_id,p.auto_post FROM installment_payments ip JOIN installment_plans p ON p.id=ip.plan_id AND p.user_id=ip.user_id WHERE ip.user_id=? AND ip.status='upcoming' AND p.status='active'",user);
- for(const p of payments)stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,category_id,committed,auto_post) VALUES(?,?,'installment',?,?,?,?,?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=excluded.amount_cents,account_id=excluded.account_id,category_id=excluded.category_id,auto_post=excluded.auto_post`).bind('installment:'+p.id,user,p.id,p.due_date,p.due_date,p.title,'installment_payment',p.amount_cents,p.payment_account_id,p.category_id,p.auto_post));
+ for(const p of payments){const oid='installment:'+p.id;const saved=byId.get(oid);
+  if(!saved||saved.title!==p.title||saved.amount_cents!==p.amount_cents||saved.account_id!==p.payment_account_id||saved.category_id!==p.category_id||saved.auto_post!==p.auto_post)
+   stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,category_id,committed,auto_post) VALUES(?,?,'installment',?,?,?,?,?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=excluded.amount_cents,account_id=excluded.account_id,category_id=excluded.category_id,auto_post=excluded.auto_post`).bind(oid,user,p.id,p.due_date,p.due_date,p.title,'installment_payment',p.amount_cents,p.payment_account_id,p.category_id,p.auto_post));
+ }
  for(let i=0;i<stmts.length;i+=80)await env.DB.batch(stmts.slice(i,i+80));
- await env.DB.batch([
- env.DB.prepare("UPDATE v3_occurrences SET status='cancelled' WHERE user_id=? AND status IN ('upcoming','partial') AND source_kind='recurring' AND NOT EXISTS(SELECT 1 FROM recurring_plans p WHERE p.id=v3_occurrences.source_id AND p.active=1 AND p.user_id=?)").bind(user,user),
- env.DB.prepare("UPDATE v3_occurrences SET status='cancelled' WHERE user_id=? AND status IN ('upcoming','partial') AND source_kind='installment' AND NOT EXISTS(SELECT 1 FROM installment_payments p WHERE p.id=v3_occurrences.source_id AND p.status='upcoming' AND p.user_id=?)").bind(user,user)]);
+ const activePlans=new Set(plans.map(p=>p.id));const activePayments=new Set(payments.map(p=>p.id));const cancellations:D1PreparedStatement[]=[];
+ if(existing.some(o=>o.source_kind==='recurring'&&['upcoming','partial'].includes(o.status)&&!activePlans.has(o.source_id)))cancellations.push(env.DB.prepare("UPDATE v3_occurrences SET status='cancelled' WHERE user_id=? AND status IN ('upcoming','partial') AND source_kind='recurring' AND NOT EXISTS(SELECT 1 FROM recurring_plans p WHERE p.id=v3_occurrences.source_id AND p.active=1 AND p.user_id=?)").bind(user,user));
+ if(existing.some(o=>o.source_kind==='installment'&&['upcoming','partial'].includes(o.status)&&!activePayments.has(o.source_id)))cancellations.push(env.DB.prepare("UPDATE v3_occurrences SET status='cancelled' WHERE user_id=? AND status IN ('upcoming','partial') AND source_kind='installment' AND NOT EXISTS(SELECT 1 FROM installment_payments p WHERE p.id=v3_occurrences.source_id AND p.status='upcoming' AND p.user_id=?)").bind(user,user));
+ if(cancellations.length)await env.DB.batch(cancellations);
 }
 
 export async function settleOccurrence(user:string,oid:string,date:string,amountInput?:number,matchId?:string){
@@ -124,17 +134,12 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
 
 async function advancePlan(user:string,planId:string){const plan=await env.DB.prepare('SELECT * FROM recurring_plans WHERE id=? AND user_id=?').bind(planId,user).first<PlanRow>();if(!plan)return;let date=plan.next_date;for(let i=0;i<2000;i++){const o=await env.DB.prepare('SELECT status FROM v3_occurrences WHERE user_id=? AND source_kind=? AND source_id=? AND scheduled_date=?').bind(user,'recurring',planId,date).first<{status:string}>();if(!o||!['paid','skipped'].includes(o.status))break;date=addCalendarInterval(date,plan.frequency,plan.interval_count,plan.anchor_day);}await env.DB.prepare('UPDATE recurring_plans SET next_date=?,active=CASE WHEN end_date IS NOT NULL AND end_date<? THEN 0 ELSE active END WHERE id=? AND user_id=?').bind(date,date,planId,user).run();}
 export async function reconcileV3(user:string,today:string){
- console.info('[finance-load] v3-initialize:start');
  await initializeV3(user,today);
- console.info('[finance-load] v3-initialize:done');
  await generateOccurrences(user,today);
- console.info('[finance-load] occurrences:done');
  const live=new Set((await rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user)).map(a=>a.id));
  const due=await rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today);
- console.info('[finance-load] auto-post:pending',due.length);
  for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);}
  if(due.length)await syncLedger(user);
- console.info('[finance-load] auto-post:done');
 }
 
 export async function v3Snapshot(user:string,today:string){

@@ -16,6 +16,7 @@ function Icon({name}:{name:string}){const paths:Record<string,string>={home:'M3 
 
 export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string}){
  const [data,setData]=useState<Snapshot|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);const [page,setPage]=useState<Page>('overview');const [panel,setPanel]=useState<Panel|null>(null);const [modal,setModal]=useState<ModalName>(null);const [edit,setEdit]=useState<EditTarget|null>(null);const [valuation,setValuation]=useState<Account|null>(null);const [notice,setNotice]=useState('');
+ const loadingRef=useRef(false);
  const dialogOpen=Boolean(panel||modal||edit||valuation);
  useEffect(()=>{
   if(!dialogOpen)return;
@@ -33,7 +34,19 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   document.addEventListener('keydown',keydown);
   return()=>{document.body.style.overflow=previousOverflow;document.removeEventListener('keydown',keydown);if(dialog)previousFocus?.focus();};
  },[dialogOpen]);
- const load=useCallback(async()=>{try{const r=await fetch('/api/finance');const next=await r.json() as Snapshot;if(!r.ok)throw new Error(next.error||'Unable to load your money.');setData(next);setError('');}catch(e){setError(e instanceof Error?e.message:'Unable to connect.');}},[]);
+ const load=useCallback(async()=>{
+  if(loadingRef.current)return;
+  loadingRef.current=true;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),20000);
+  try{
+   const r=await fetch('/api/finance',{signal:controller.signal});
+   const next=await r.json() as Snapshot;
+   if(!r.ok)throw new Error(next.error||'Unable to load your money.');
+   setData(next);setError('');
+  }catch(e){setError(controller.signal.aborted?'Your workspace is taking too long to load. Please try again.':e instanceof Error?e.message:'Unable to connect.');}
+  finally{clearTimeout(timeout);loadingRef.current=false;}
+ },[]);
  useEffect(()=>{void load();const timer=setInterval(()=>{if(document.visibilityState==='visible')void load();},60000);const visible=()=>{if(document.visibilityState==='visible')void load();};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible);};},[load]);
  useEffect(()=>{const value=new URL(window.location.href).searchParams.get('view');const legacy:Record<string,Page>={transactions:'activity',budget:'plan',plans:'plan',forecast:'statistics'};if(value&&[...nav.map(n=>n[0]),'goals'].includes(legacy[value]||value))setPage((legacy[value]||value) as Page);},[]);
  function navigate(next:Page){setPage(next);window.scrollTo({top:0,behavior:'instant'});const url=new URL(window.location.href);url.searchParams.set('view',next);window.history.replaceState({},'',url);}
