@@ -62,7 +62,9 @@ const recurringUpgrades = [
 export function ensureFinanceSchema() {
   if (!schemaReady) {
     schemaReady = (async () => {
+      console.info("[finance-load] base-schema:start");
       await env.DB.batch(statements.map((statement) => env.DB.prepare(statement)));
+      console.info("[finance-load] base-schema:done");
       for (const statement of profileUpgrades) {
         try {
           await env.DB.prepare(statement).run();
@@ -78,6 +80,7 @@ export function ensureFinanceSchema() {
         }
       }
       await env.DB.prepare("UPDATE recurring_plans SET anchor_day = CAST(substr(next_date, 9, 2) AS INTEGER) WHERE anchor_day IS NULL OR anchor_day < 1 OR anchor_day > 31").run();
+      console.info("[finance-load] first-upgrades:done");
       let budgetColumnsAdded = false;
       for (const statement of budgetUpgrades) {
         try {
@@ -93,6 +96,7 @@ export function ensureFinanceSchema() {
       if (budgetColumnsAdded) {
         await env.DB.prepare("UPDATE budget_rules SET include_committed = 1, include_savings = 1, include_investments = 1 WHERE period = 'monthly'").run();
       }
+      console.info("[finance-load] budget-upgrades:done");
       for (const statement of installmentUpgrades) {
         try {
           await env.DB.prepare(statement).run();
@@ -108,6 +112,7 @@ export function ensureFinanceSchema() {
         }
       }
       await env.DB.prepare("PRAGMA optimize").run();
+      console.info("[finance-load] final-upgrades:done");
     })();
   }
   return schemaReady;

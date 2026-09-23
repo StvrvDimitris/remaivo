@@ -123,7 +123,19 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
 }
 
 async function advancePlan(user:string,planId:string){const plan=await env.DB.prepare('SELECT * FROM recurring_plans WHERE id=? AND user_id=?').bind(planId,user).first<PlanRow>();if(!plan)return;let date=plan.next_date;for(let i=0;i<2000;i++){const o=await env.DB.prepare('SELECT status FROM v3_occurrences WHERE user_id=? AND source_kind=? AND source_id=? AND scheduled_date=?').bind(user,'recurring',planId,date).first<{status:string}>();if(!o||!['paid','skipped'].includes(o.status))break;date=addCalendarInterval(date,plan.frequency,plan.interval_count,plan.anchor_day);}await env.DB.prepare('UPDATE recurring_plans SET next_date=?,active=CASE WHEN end_date IS NOT NULL AND end_date<? THEN 0 ELSE active END WHERE id=? AND user_id=?').bind(date,date,planId,user).run();}
-export async function reconcileV3(user:string,today:string){await initializeV3(user,today);await generateOccurrences(user,today);const live=new Set((await rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user)).map(a=>a.id));const due=await rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today);for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);} if(due.length)await syncLedger(user); }
+export async function reconcileV3(user:string,today:string){
+ console.info('[finance-load] v3-initialize:start');
+ await initializeV3(user,today);
+ console.info('[finance-load] v3-initialize:done');
+ await generateOccurrences(user,today);
+ console.info('[finance-load] occurrences:done');
+ const live=new Set((await rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user)).map(a=>a.id));
+ const due=await rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today);
+ console.info('[finance-load] auto-post:pending',due.length);
+ for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);}
+ if(due.length)await syncLedger(user);
+ console.info('[finance-load] auto-post:done');
+}
 
 export async function v3Snapshot(user:string,today:string){
  const {period,config}=await currentPeriod(user,today);

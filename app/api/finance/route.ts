@@ -306,15 +306,21 @@ async function ensureCurrentReservePeriods(userId: string, today: string) {
 }
 
 async function snapshot(user: FinanceUser) {
+  console.info("[finance-load] schema:start");
   await ensureFinanceSchema();
+  console.info("[finance-load] schema:done");
   const profile = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
+  console.info("[finance-load] profile:done");
   const today = financialToday(String(profile?.timezone || "UTC"));
   if (!profile?.setup_complete) {
     return { needsSetup: true, user, today };
   }
 
+  console.info("[finance-load] reconcile:start");
   await reconcileV3(user.userId, today);
+  console.info("[finance-load] reconcile:done");
   await ensureCurrentReservePeriods(user.userId, today);
+  console.info("[finance-load] reserves:done");
   const monthStart = `${today.slice(0, 7)}-01`;
   const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, reserves, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
@@ -343,6 +349,10 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
   ]);
+  console.info("[finance-load] snapshot-batch:done");
+
+  const v3 = await v3Snapshot(user.userId, today);
+  console.info("[finance-load] v3-snapshot:done");
 
   return {
     needsSetup: false,
@@ -360,7 +370,7 @@ async function snapshot(user: FinanceUser) {
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
     today,
-    v3: await v3Snapshot(user.userId, today),
+    v3,
   };
 }
 
