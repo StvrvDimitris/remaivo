@@ -26,6 +26,8 @@ export type PlanEndForecastInput = {
   start: string; end: string; today: string;
   target: number; spent: number;
   transactions: MoneyTransaction[]; occurrences: Occurrence[];
+  buckets: (Pick<Bucket,'id'|'kind'|'category_id'|'destination_id'|'released'> & {spent:number;planned:number;extra:number})[];
+  allocationByTx?: Record<string,{bucket:string;amount:number}[]>;
   firstRecordedDate?: string;
 };
 export type PlanEndForecast = {
@@ -33,6 +35,7 @@ export type PlanEndForecast = {
   variableDaily: number | null;
   variableRemaining: number | null;
   scheduledRemaining: number;
+  bucketExtra: number;
   futureDays: number;
   sampleDays: number;
   activeDays: number;
@@ -56,6 +59,9 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
     today<end&&['upcoming','partial'].includes(o.status)&&o.committed===1&&o.due_date<end&&
     ['expense','fee','installment_payment','saving','investment'].includes(o.type)
   ).reduce((sum,o)=>sum+Math.max(0,o.amount_cents-o.paid_cents),0);
+  // `extra` is already net of bucket spending and scheduled payments in
+  // buildBudget, so each remaining allowance is added only once.
+  const bucketExtra=today<end?input.buckets.reduce((sum,b)=>sum+(b.released?0:Math.max(0,b.extra)),0):0;
   const earliest=input.firstRecordedDate||input.transactions.reduce((date,t)=>t.date<date?t.date:date,today);
   const historyStart=plusDays(today,-28)>earliest?plusDays(today,-28):earliest;
   const sampleDays=Math.max(0,Math.min(28,daysApart(historyStart,today)));
@@ -65,11 +71,21 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
       !['expense','fee'].includes(t.type)||t.committed===1||
       t.recurring_plan_id||t.installment_plan_id)continue;
     const index=daysApart(historyStart,t.date);
-    if(index>=0&&index<sampleDays)totals[index]+=Math.max(0,t.amount_cents);
+    if(index>=0&&index<sampleDays){
+      const allocations=input.allocationByTx?.[t.id];
+      const matchesBucket=input.buckets.some(b=>
+        Boolean(b.category_id&&b.category_id===t.category_id)||
+        Boolean(b.kind==='goal'&&b.destination_id&&b.destination_id===t.destination_account_id)
+      );
+      // Use the exact current-period split when available. For older periods,
+      // category/destination links identify spending governed by a bucket.
+      const variable=allocations?allocations.filter(a=>a.bucket==='everyday').reduce((sum,a)=>sum+a.amount,0):matchesBucket?0:t.amount_cents;
+      totals[index]+=Math.max(0,Math.min(t.amount_cents,variable));
+    }
   }
   const activeDays=totals.filter(amount=>amount>0).length;
-  if(!futureDays)return {projected:spent+scheduledRemaining,variableDaily:0,variableRemaining:0,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays:0,confidence:sampleDays>=14?'medium':'low'};
-  if(sampleDays<7)return {projected:null,variableDaily:null,variableRemaining:null,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays:0,confidence:'insufficient'};
+  if(!futureDays)return {projected:spent+scheduledRemaining+bucketExtra,variableDaily:0,variableRemaining:0,scheduledRemaining,bucketExtra,futureDays,sampleDays,activeDays,spikeDays:0,confidence:sampleDays>=14?'medium':'low'};
+  if(sampleDays<7)return {projected:null,variableDaily:null,variableRemaining:null,scheduledRemaining,bucketExtra,futureDays,sampleDays,activeDays,spikeDays:0,confidence:'insufficient'};
   const middle=median(totals);
   const mad=median(totals.map(amount=>Math.abs(amount-middle)));
   const targetDaily=target/totalDays;
@@ -90,7 +106,7 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
   const variableDaily=Math.round(weighted/weightSum);
   const variableRemaining=Math.round(weighted/weightSum*futureDays);
   const confidence=sampleDays>=21&&activeDays>=8?'high':sampleDays>=14&&activeDays>=4?'medium':'low';
-  return {projected:spent+scheduledRemaining+variableRemaining,variableDaily,variableRemaining,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays,confidence};
+  return {projected:spent+scheduledRemaining+bucketExtra+variableRemaining,variableDaily,variableRemaining,scheduledRemaining,bucketExtra,futureDays,sampleDays,activeDays,spikeDays,confidence};
 }
 export const weekBeginning = (date: string, first: number) => plusDays(date,-((new Date(date+'T12:00:00Z').getUTCDay()-first+7)%7));
 export function periodFor(config: BudgetConfig, today: string) {

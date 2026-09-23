@@ -43,7 +43,7 @@ test('Budget pace uses the active period, including today, across nonmonthly bou
  assert.equal(engine.planPace({start:'2026-09-20',end:'2026-09-27',today:'2026-09-22',target:0,spent:25000}),null);
 });
 test('Plan-end trend gives recent variable spending more weight without moving the actual total',()=>{
- const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:25000,firstRecordedDate:'2026-08-01',occurrences:[]};
+ const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:25000,firstRecordedDate:'2026-08-01',occurrences:[],buckets:[]};
  const old=engine.planEndForecast({...common,transactions:[tx('old',2000,{date:'2026-08-22'})]});
  const recent=engine.planEndForecast({...common,transactions:[tx('recent',2000,{date:'2026-09-17'})]});
  const weekOld=engine.planEndForecast({...common,transactions:[tx('week-old',2000,{date:'2026-09-10'})]});
@@ -55,20 +55,47 @@ test('Plan-end trend gives recent variable spending more weight without moving t
 });
 test('A one-off spike remains in actual spending but is capped in the projected daily habit',()=>{
  const gym=tx('gym',18000,{date:'2026-09-17'});
- const result=engine.planEndForecast({start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:18000,firstRecordedDate:'2026-09-08',transactions:[gym],occurrences:[]});
+ const result=engine.planEndForecast({start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:18000,firstRecordedDate:'2026-09-08',transactions:[gym],occurrences:[],buckets:[]});
  assert.equal(result.sampleDays,10);assert.equal(result.activeDays,1);assert.equal(result.spikeDays,1);
  assert.equal(result.confidence,'low');assert.ok(result.variableDaily>0);
  assert.ok(result.variableDaily<1800); // The €180 day is not projected as €18 per calendar day.
  assert.equal(result.projected,18000+result.variableRemaining);
 });
 test('The zero-MAD fallback preserves a recurring weekly shop while softening an isolated large day',()=>{
- const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,firstRecordedDate:'2026-08-01',occurrences:[]};
+ const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,firstRecordedDate:'2026-08-01',occurrences:[],buckets:[]};
  const shopDates=['2026-08-27','2026-09-03','2026-09-10','2026-09-17'];
  const groceries=engine.planEndForecast({...common,spent:60000,transactions:shopDates.map((date,i)=>tx(`shop-${i}`,15000,{date}))});
  assert.equal(groceries.sampleDays,28);assert.equal(groceries.activeDays,4);
  assert.equal(groceries.spikeDays,0);assert.ok(groceries.variableDaily>0);
  const mixed=engine.planEndForecast({...common,spent:26000,transactions:[...shopDates.map((date,i)=>tx(`small-${i}`,2000,{date})),tx('one-off gym',18000,{date:'2026-09-16'})]});
  assert.equal(mixed.spikeDays,1);assert.ok(mixed.variableDaily<groceries.variableDaily);
+});
+test('Released, active and overspent buckets add only unspent allowance while keeping every actual charge',()=>{
+ const today='2026-09-18',start='2026-09-01',end='2026-10-01';
+ const fuel={...bucket,id:'fuel',name:'Fuel',category_id:'fuel',target_cents:15800,released:1};
+ const food={...bucket,id:'food',name:'Food',category_id:'food',target_cents:30000,released:0};
+ const goal={...bucket,id:'goal',name:'Savings milestone',kind:'goal',category_id:null,destination_id:'savings',target_cents:10000,released:0};
+ const over={...bucket,id:'over',name:'Already overspent',category_id:'other',target_cents:10000,released:0};
+ const fuelTx=tx('fuel-charge',15800,{date:'2026-09-17',category_id:'fuel'});
+ const foodTx=tx('food-shop',5000,{date:'2026-09-10',category_id:'food'});
+ const everydayTx=tx('coffee',1000,{date:'2026-09-15'});
+ const splitTx=tx('split',10000,{date:'2026-09-16'});
+ const overTx=tx('above allowance',15000,{date:'2026-09-12',category_id:'other'});
+ const foodPlan=occurrence('food-plan',5000,{category_id:'food',due_date:'2026-09-25'});
+ const transactions=[fuelTx,foodTx,everydayTx,splitTx,overTx];
+ const result=engine.buildBudget({...base,today,start,end,config:{...config,target:110000},funding:110000,transactions,buckets:[fuel,food,goal,over],occurrences:[foodPlan],assignments:[{transaction_id:'split',bucket_id:'food',amount_cents:6000}]});
+ const forecast=engine.planEndForecast({start,end,today,target:110000,spent:result.totalSpent,firstRecordedDate:'2026-08-01',transactions:[...transactions,tx('older food',2500,{date:'2026-08-28',category_id:'food'})],occurrences:[foodPlan],buckets:result.buckets,allocationByTx:result.allocationByTx});
+ assert.equal(result.totalSpent,46800);assert.equal(forecast.scheduledRemaining,5000);
+ assert.equal(result.buckets.find(b=>b.id==='fuel').extra,0);
+ assert.equal(result.buckets.find(b=>b.id==='food').extra,14000);
+ assert.equal(result.buckets.find(b=>b.id==='goal').extra,10000);
+ assert.equal(result.buckets.find(b=>b.id==='over').extra,0);
+ assert.equal(result.buckets.find(b=>b.id==='over').deficit,5000);
+ assert.equal(forecast.bucketExtra,24000);
+ assert.equal(forecast.activeDays,2); // Coffee and the everyday portion of the split only.
+ assert.equal(forecast.projected,46800+5000+24000+forecast.variableRemaining);
+ const flexibleOnly=engine.planEndForecast({start,end,today,target:110000,spent:46800,firstRecordedDate:'2026-08-01',transactions:[everydayTx,tx('split everyday portion',4000,{date:'2026-09-16'})],occurrences:[foodPlan],buckets:result.buckets});
+ assert.equal(forecast.variableDaily,flexibleOnly.variableDaily);
 });
 test('Plan-end trend counts only unpaid committed schedules, and linked payments only as actuals',()=>{
  const recurring=occurrence('rent',10000,{date:'2026-09-19',due_date:'2026-09-19',paid_cents:6000,status:'partial',transaction_id:'rent-paid'});
@@ -78,13 +105,13 @@ test('Plan-end trend counts only unpaid committed schedules, and linked payments
   tx('ordinary',1000,{date:'2026-09-17'}),
   tx('committed',3000,{date:'2026-09-16',committed:1}),
   tx('today',4000,{date:'2026-09-18'})
- ],occurrences:[recurring,overdue,occurrence('optional',9999,{committed:0}),occurrence('income',9999,{type:'income'}),occurrence('transfer',9999,{type:'transfer'}),occurrence('paid',9999,{status:'paid'}),occurrence('later',9999,{due_date:'2026-09-22'})]});
+ ],occurrences:[recurring,overdue,occurrence('optional',9999,{committed:0}),occurrence('income',9999,{type:'income'}),occurrence('transfer',9999,{type:'transfer'}),occurrence('paid',9999,{status:'paid'}),occurrence('later',9999,{due_date:'2026-09-22'})],buckets:[]});
  assert.equal(result.futureDays,2);assert.equal(result.activeDays,1);
  assert.equal(result.scheduledRemaining,6000);
  assert.equal(result.projected,14000+6000+result.variableRemaining);
 });
 test('Short history is marked insufficient and the plan forecast ends at the custom boundary',()=>{
- const common={start:'2026-09-17',end:'2026-09-20',target:30000,spent:5000,firstRecordedDate:'2026-09-17',transactions:[tx('today',5000,{date:'2026-09-18'})],occurrences:[occurrence('bill',2000,{due_date:'2026-09-19'})]};
+ const common={start:'2026-09-17',end:'2026-09-20',target:30000,spent:5000,firstRecordedDate:'2026-09-17',transactions:[tx('today',5000,{date:'2026-09-18'})],occurrences:[occurrence('bill',2000,{due_date:'2026-09-19'})],buckets:[]};
  const sparse=engine.planEndForecast({...common,today:'2026-09-18'});
  assert.equal(sparse.sampleDays,1);assert.equal(sparse.confidence,'insufficient');assert.equal(sparse.projected,null);assert.equal(sparse.scheduledRemaining,2000);assert.equal(sparse.futureDays,1);
  const finalDay=engine.planEndForecast({...common,today:'2026-09-19'});
