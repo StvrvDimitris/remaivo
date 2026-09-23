@@ -24,6 +24,15 @@ function money(cents: number, currency: string) {
   }).format(cents / 100);
 }
 
+function moneyExact(cents: number, currency: string) {
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
 function fullDate(value: string) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
@@ -50,7 +59,7 @@ export function BudgetPace({ plan, currency, onConfigure }: { plan: CurrentPlan;
       <div className="plan-pace-details"><div><small>{pace.remaining < 0 ? "Above target" : "Target left"}</small><strong>{money(Math.abs(pace.remaining), currency)}</strong></div><div><small>Compared with even pace</small><strong className={position === "above" ? "is-over" : ""}>{position === "on" ? "On pace" : `${money(Math.abs(pace.paceDifference), currency)} ${position}`}</strong><span>{money(pace.expectedSpent, currency)} expected by today</span></div><div><small>At the same daily rate</small><strong>{pace.elapsedDays >= Math.min(3, pace.totalDays) && pace.projected !== null ? money(pace.projected, currency) : "—"}</strong><span>{pace.elapsedDays >= Math.min(3, pace.totalDays) ? "Straight-line estimate" : "Available after a few days"}</span></div></div>
       {forecast && <div className="plan-pace-forecast">
         <div className="plan-pace-forecast-result"><small>RECENT-TREND ESTIMATE</small><strong className={forecast.projected !== null && forecast.projected > plan.target ? "is-over" : ""}>{forecast.projected === null ? "Building a baseline" : money(forecast.projected, currency)}</strong><span>{forecast.projected === null ? "Available after 7 observed days" : forecast.confidence === "low" ? "Early estimate at plan end" : "Projected at plan end"}</span></div>
-        <div className="plan-pace-forecast-explain">{forecast.projected === null ? <p>Keep recording activity. The estimate needs a week of observed days, including days without spending.</p> : <><p>{money(plan.spent, currency)} already spent + {money(forecast.scheduledRemaining, currency)} unpaid scheduled + {money(forecast.bucketExtra, currency)} left in buckets + {money(forecast.variableRemaining ?? 0, currency)} at the recent everyday pace.</p><p>Based on {forecast.sampleDays} completed days, with newer days weighted more heavily. {forecast.spikeDays > 0 ? `${forecast.spikeDays} unusually high ${forecast.spikeDays === 1 ? "day was" : "days were"} softened.` : "Scheduled payments are counted once."}</p></>}</div>
+        <div className="plan-pace-forecast-explain">{forecast.projected === null ? <p>Keep recording activity. The estimate needs a week of observed days, including days without spending.</p> : <><p>{moneyExact(plan.spent, currency)} already spent + {moneyExact(forecast.scheduledRemaining, currency)} unpaid scheduled + {moneyExact(forecast.bucketExtra, currency)} left in buckets + {moneyExact(forecast.variableRemaining ?? 0, currency)} at the recent everyday pace.</p><p>Based on {forecast.sampleDays} completed days, with newer days weighted more heavily. {forecast.spikeDays > 0 ? `${forecast.spikeDays} unusually high ${forecast.spikeDays === 1 ? "day was" : "days were"} softened.` : "Scheduled payments are counted once."}</p></>}</div>
       </div>}
       <p className="plan-pace-note">This estimate assumes unreleased bucket protection will be used. Releasing protection removes that bucket’s remainder; separately scheduled payments still count. Only spending outside buckets enters the 7-day half-life trend, which looks back up to 28 completed days.</p>
     </> : <p className="plan-pace-empty">Set a spending target in Plan to see how your current period is tracking.</p>}
