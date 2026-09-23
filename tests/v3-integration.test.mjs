@@ -42,6 +42,15 @@ test('Budget pace uses the active period, including today, across nonmonthly bou
  assert.equal(engine.planPace({start:'2026-09-20',end:'2026-09-27',today:'2026-09-27',target:70000,spent:25000}).elapsedDays,7);
  assert.equal(engine.planPace({start:'2026-09-20',end:'2026-09-27',today:'2026-09-22',target:0,spent:25000}),null);
 });
+test('A €1,100 plan target stays separate from €1,081 of funded cash',()=>{
+ const result=engine.buildBudget({...base,config:{...config,target:110000},funding:108100});
+ assert.equal(result.target,110000);
+ assert.equal(result.funding,108100);
+ assert.equal(result.unfunded,1900);
+ const pace=engine.planPace({start:result.start,end:result.end,today:base.today,target:result.target,spent:result.totalSpent});
+ assert.equal(pace.remaining,110000);
+ assert.equal(pace.expectedSpent,Math.round(110000*17/30));
+});
 test('Protected spending and commitments overlap once; released money, splits and deficits conserve money',()=>{
  let r=engine.buildBudget({...base,buckets:[bucket],transactions:[tx('food',5000,{category_id:'groceries'}),tx('fun',3000)],occurrences:[occurrence('foodplan',7000,{category_id:'groceries'}),occurrence('bill',10000)]});
  assert.equal(r.buckets[0].extra,8000);assert.equal(r.available,67000);assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);

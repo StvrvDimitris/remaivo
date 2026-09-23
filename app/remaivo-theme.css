@@ -470,11 +470,16 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .plan-pace-heading h2 { font: 600 1.125rem/1.3 var(--font-geist-sans, "Segoe UI"), sans-serif; letter-spacing: -.025em; overflow-wrap: anywhere; }
 .plan-pace-heading small, .plan-pace-note { color: #727a89; font-size: .8125rem; line-height: 1.5; }
 .plan-pace-heading small { display: block; margin-top: 5px; }
+.plan-pace-heading-actions { display: flex; align-items: center; gap: 12px; flex: none; }
+.plan-pace-edit { padding: 5px 0; border: 0; background: transparent; color: #365bd6; font: inherit; font-size: .75rem; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.plan-pace-edit:hover { text-decoration: underline; text-underline-offset: 3px; }
+.plan-pace-edit:focus-visible { outline: 2px solid #365bd6; outline-offset: 3px; border-radius: 2px; }
 .plan-pace-status { flex: none; padding: 5px 10px; border-radius: 999px; background: #edf2ff; color: #365bd6; font-size: .75rem; font-weight: 600; }
 .plan-pace-status.above { background: #fff0eb; color: #a74f38; }
-.plan-pace-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 21px; }
+.plan-pace-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 6px; }
 .plan-pace-total strong { color: #252d3d; font-size: clamp(1.75rem, 3vw, 2.25rem); font-weight: 550; letter-spacing: -.05em; line-height: 1.1; }
 .plan-pace-total span { color: #727a89; font-size: .875rem; }
+.v3-app .plan-pace-funding { margin: 0 0 21px; color: #697180; font-size: .8125rem; line-height: 1.5; }
 .plan-pace-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 24px; }
 .plan-pace-bars > div { min-width: 0; }
 .plan-pace-bars span { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: #697180; font-size: .8125rem; }
@@ -504,5 +509,6 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 }
 @media (max-width: 430px) {
   .plan-pace-heading { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .plan-pace-heading-actions { width: 100%; justify-content: space-between; }
   .plan-pace-bars { grid-template-columns: 1fr; gap: 16px; }
 }
