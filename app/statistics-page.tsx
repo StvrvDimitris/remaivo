@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { StatisticsMode } from "./transaction-classification";
+import { planPace, plusDays } from "./v3-engine";
 
 type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
 export type AnalyticsPeriod = "today" | "week" | "month" | "year" | "last7" | "last30" | "custom";
@@ -27,6 +28,7 @@ type AnalyticsContext = {
   currency: string;
   profile: { week_start: number };
 };
+type CurrentPlan = { name: string; start: string; end: string; target: number; spent: number; today: string };
 
 type AmountChange = { amount: number; percent: number | null };
 type StatisticsResult = {
@@ -139,7 +141,7 @@ function Change({ value, comparisonValue, comparison, currency, inverse = false 
   return <small className={good ? "stat-positive" : "stat-negative"}>{movement} · comparison {money(comparisonValue, currency)}</small>;
 }
 
-export function StatisticsPage({ context, revision }: { context: AnalyticsContext; revision: number }) {
+export function StatisticsPage({ context, revision, currentPlan }: { context: AnalyticsContext; revision: number; currentPlan?: CurrentPlan }) {
   const [filters, setFilters] = useAnalyticsFilters(context);
   const [result, setResult] = useState<StatisticsResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -181,6 +183,7 @@ export function StatisticsPage({ context, revision }: { context: AnalyticsContex
     {result && <div className={loading ? "statistics-results is-loading" : "statistics-results"}>
       <section className="stat-summary-grid">{cards.map((card) => <article key={card.label}><p>{card.label.toUpperCase()}</p><strong>{money(card.value, context.currency)}</strong><Change value={card.change} comparisonValue={card.value - card.change.amount} comparison={filters.comparison} currency={context.currency} inverse={card.inverse} /></article>)}</section>
       <section className="allocation-strip"><div><p>SAVED & INVESTED</p><strong>{money(result.summary.savedAndInvested, context.currency)}</strong><small>{money(result.summary.saving, context.currency)} saved · {money(result.summary.investment, context.currency)} invested</small></div><div><p>SAVINGS RATE</p><strong>{result.summary.savingsRate === null ? "—" : `${result.summary.savingsRate.toFixed(1)}%`}</strong><small>of income allocated to savings and investments</small></div></section>
+      {currentPlan && <BudgetPace plan={currentPlan} currency={context.currency} />}
       <section className="stat-two-column"><article className="stat-panel allocation-panel"><div className="stat-panel-heading"><div><p>{filters.mode === "income" ? "INCOME SOURCES" : filters.mode === "cashflow" ? "CASH FLOW COMPOSITION" : "SPENDING ALLOCATION"}</p><h2>What is consuming the period?</h2></div><div className="mini-toggle"><button className={filters.composition === "amount" ? "active" : ""} onClick={() => setFilters({ composition: "amount" })}>Amount</button><button className={filters.composition === "percent" ? "active" : ""} onClick={() => setFilters({ composition: "percent" })}>%</button></div></div><div className="ranked-bars">{result.categoryBreakdown.map((item) => <button key={item.id} type="button" disabled={filters.mode === "cashflow" || item.id === "uncategorized"} onClick={() => setFilters({ categoryId: item.id })}><span className="ranked-label"><i style={{ background: item.color }} /><b>{item.label}</b><em>{filters.composition === "percent" ? `${item.share.toFixed(1)}%` : money(item.amount, context.currency)}</em></span><span className="ranked-track"><i style={{ width: `${item.amount / maxAllocation * 100}%`, background: item.color }} /></span><small>{filters.comparison === "none" ? `${item.share.toFixed(1)}% of total` : `${item.change.percent === null ? `${item.change.amount > 0 ? "+" : ""}${money(item.change.amount, context.currency)}` : `${item.change.percent > 0 ? "+" : ""}${item.change.percent.toFixed(1)}%`} · comparison ${money(item.comparisonAmount, context.currency)}`}</small></button>)}{result.categoryBreakdown.length === 0 && <p className="empty-mini">No qualifying activity in this period.</p>}</div></article>
         <article className="stat-panel"><div className="stat-panel-heading"><div><p>DESCRIPTION BREAKDOWN</p><h2>Where amounts repeat</h2></div></div><div className="description-list">{result.descriptionBreakdown.map((item, index) => <div key={`${item.description}-${index}`}><span><b>{item.description}</b><small>{item.count} transaction{item.count === 1 ? "" : "s"}</small></span><span><strong>{money(item.amount, context.currency)}</strong><small>{item.share.toFixed(1)}%</small></span></div>)}{result.descriptionBreakdown.length === 0 && <p className="empty-mini">No descriptions to rank.</p>}</div></article></section>
       <section className="stat-panel trend-panel"><div className="stat-panel-heading"><div><p>PERIOD TREND</p><h2>{filters.trend === "daily" ? "Daily movement" : "Cumulative movement"}</h2></div><div className="mini-toggle"><button className={filters.trend === "daily" ? "active" : ""} onClick={() => setFilters({ trend: "daily" })}>Daily</button><button className={filters.trend === "cumulative" ? "active" : ""} onClick={() => setFilters({ trend: "cumulative" })}>Cumulative</button></div></div><div className="trend-chart" aria-label="Period trend">{result.dailyTrend.map((item) => { const value = filters.trend === "daily" ? item.amount : item.cumulative; const comparison = filters.trend === "daily" ? item.comparisonAmount : item.comparisonCumulative; return <div key={item.date} title={`${shortDate(item.date)}: ${money(value, context.currency)}`}><span className="trend-bar current" style={{ height: `${Math.max(value ? 4 : 0, Math.abs(value) / maxTrend * 100)}%` }} />{filters.comparison !== "none" && <span className="trend-bar comparison" style={{ height: `${Math.max(comparison ? 3 : 0, Math.abs(comparison) / maxTrend * 100)}%` }} />}<small>{result.dailyTrend.length <= 12 || item.date.endsWith("-01") ? shortDate(item.date) : ""}</small></div>})}</div></section>
@@ -189,4 +192,20 @@ export function StatisticsPage({ context, revision }: { context: AnalyticsContex
       <section className="stat-two-column"><article className="stat-panel concentration-panel"><div className="stat-panel-heading"><div><p>CONCENTRATION</p><h2>How focused is the activity?</h2></div></div><div className="concentration-grid"><div><strong>{result.concentration.top3CategoryShare.toFixed(0)}%</strong><small>Top 3 categories / sources</small></div><div><strong>{result.concentration.top5DescriptionShare.toFixed(0)}%</strong><small>Top 5 descriptions</small></div></div></article><article className="stat-panel insight-panel"><div className="stat-panel-heading"><div><p>STRONGEST SIGNALS</p><h2>Useful observations only</h2></div></div>{result.insights.length ? <ol>{result.insights.map((item, index) => <li key={`${item.kind}-${index}`}><span>{index + 1}</span><p>{item.text}</p></li>)}</ol> : <p className="empty-mini">No material pattern clears the insight threshold yet.</p>}</article></section>
     </div>}
   </div>;
+}
+
+function BudgetPace({ plan, currency }: { plan: CurrentPlan; currency: string }) {
+  const pace = planPace(plan);
+  const fullDate = (value: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(parseDate(value));
+  const period = `${fullDate(plan.start)} – ${fullDate(plusDays(plan.end, -1))}`;
+  const position = pace ? pace.paceDifference > 0 ? "above" : pace.paceDifference < 0 ? "below" : "on" : "unset";
+  return <section className="stat-panel plan-pace-panel" aria-labelledby="plan-pace-heading">
+    <div className="stat-panel-heading plan-pace-heading"><div><p>CURRENT PLAN</p><h2 id="plan-pace-heading">Budget pace</h2><small>{plan.name} · {period}</small></div>{pace && <span className={`plan-pace-status ${position}`}>{position === "on" ? "On even pace" : `${position === "above" ? "Above" : "Below"} even pace`}</span>}</div>
+    {pace ? <>
+      <div className="plan-pace-total"><strong>{money(plan.spent, currency)}</strong><span>used of {money(plan.target, currency)} target</span></div>
+      <div className="plan-pace-bars" aria-label="Plan use compared with elapsed time"><div><span>Target used <b>{pace.usedRatio.toFixed(0)}%</b></span><progress max="100" value={Math.min(100, pace.usedRatio)} /></div><div><span>Period elapsed <b>{pace.elapsedRatio.toFixed(0)}%</b></span><progress max="100" value={pace.elapsedRatio} /></div></div>
+      <div className="plan-pace-details"><div><small>{pace.remaining < 0 ? "Above target" : "Target left"}</small><strong>{money(Math.abs(pace.remaining), currency)}</strong></div><div><small>Compared with even pace</small><strong className={position === "above" ? "is-over" : ""}>{position === "on" ? "On pace" : `${money(Math.abs(pace.paceDifference), currency)} ${position}`}</strong><span>{money(pace.expectedSpent, currency)} expected by today</span></div><div><small>At the same daily rate</small><strong>{pace.elapsedDays >= Math.min(3, pace.totalDays) && pace.projected !== null ? money(pace.projected, currency) : "—"}</strong><span>{pace.elapsedDays >= Math.min(3, pace.totalDays) ? "Straight-line estimate" : "Available after a few days"}</span></div></div>
+      <p className="plan-pace-note">Uses posted activity counted by Plan, including counted savings and investments. Unpaid plans enter when recorded. Insights filters do not change this current-plan view.</p>
+    </> : <p className="plan-pace-empty">Set a spending target in Plan to see how your current period is tracking.</p>}
+  </section>;
 }

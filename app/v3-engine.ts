@@ -8,6 +8,20 @@ export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; s
 export type Assignment = { transaction_id: string; bucket_id: string; amount_cents: number };
 export const plusDays = (date: string, days: number) => new Date(new Date(date+'T12:00:00Z').valueOf()+days*86400000).toISOString().slice(0,10);
 export const daysApart = (a: string,b: string) => Math.round((new Date(b+'T12:00:00Z').valueOf()-new Date(a+'T12:00:00Z').valueOf())/86400000);
+export function planPace(input:{start:string;end:string;today:string;target:number;spent:number}){
+  const totalDays=daysApart(input.start,input.end);
+  if(!Number.isFinite(totalDays)||totalDays<=0||!Number.isFinite(input.target)||input.target<=0||!Number.isFinite(input.spent)||input.spent<0)return null;
+  const elapsedDays=Math.max(0,Math.min(totalDays,daysApart(input.start,plusDays(input.today,1))));
+  const expectedSpent=Math.round(input.target*elapsedDays/totalDays);
+  return {
+    totalDays,elapsedDays,expectedSpent,
+    remaining:input.target-input.spent,
+    usedRatio:input.spent/input.target*100,
+    elapsedRatio:elapsedDays/totalDays*100,
+    paceDifference:input.spent-expectedSpent,
+    projected:elapsedDays>0?Math.round(input.spent*totalDays/elapsedDays):null,
+  };
+}
 export const weekBeginning = (date: string, first: number) => plusDays(date,-((new Date(date+'T12:00:00Z').getUTCDay()-first+7)%7));
 export function periodFor(config: BudgetConfig, today: string) {
   if(config.period==='custom') return {start:config.anchor,end:config.end};
