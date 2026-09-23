@@ -144,12 +144,14 @@ export async function reconcileV3(user:string,today:string){
 
 export async function v3Snapshot(user:string,today:string){
  const {period,config}=await currentPeriod(user,today);
- const [accounts,transactions,buckets,occurrences,assignments,events,migration]=await Promise.all([
+ const [accounts,transactions,trendTransactions,firstRecorded,buckets,occurrences,assignments,events,migration]=await Promise.all([
  rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=?',user),rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?",user,period.start_date,period.end_date),
+ rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id",user,plusDays(today,-28),today),
+ env.DB.prepare("SELECT date FROM transactions WHERE user_id=? AND status='posted' AND date<=? ORDER BY date LIMIT 1").bind(user,today).first<{date:string}>(),
  rows<Bucket>('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid',user,period.id),
  rows<Occurrence>('SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN (\'upcoming\',\'partial\')) ORDER BY due_date,id',user,period.start_date),rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user),rows<{id:string;kind:string;detail:string;created_at:string}>('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20',user),env.DB.prepare('SELECT created_at,summary_json FROM v3_migrations WHERE user_id=?').bind(user).first<{created_at:string;summary_json:string}>()]);
  const result=buildBudget({today,start:period.start_date,end:period.end_date,config,funding:period.funding_cents,accounts,transactions,buckets,occurrences,assignments});
- return {periodId:period.id,config,result,occurrences,transactions,events,migration:{createdAt:migration?.created_at,counts:JSON.parse(migration?.summary_json||'{}')},forecast:forecastCash(accounts,occurrences,today)};
+ return {periodId:period.id,config,result,occurrences,transactions,trendTransactions,firstRecordedDate:firstRecorded?.date??today,events,migration:{createdAt:migration?.created_at,counts:JSON.parse(migration?.summary_json||'{}')},forecast:forecastCash(accounts,occurrences,today)};
 }
 
 export async function v3Action(user:string,today:string,action:string,p:Record<string,unknown>){

@@ -42,6 +42,56 @@ test('Budget pace uses the active period, including today, across nonmonthly bou
  assert.equal(engine.planPace({start:'2026-09-20',end:'2026-09-27',today:'2026-09-27',target:70000,spent:25000}).elapsedDays,7);
  assert.equal(engine.planPace({start:'2026-09-20',end:'2026-09-27',today:'2026-09-22',target:0,spent:25000}),null);
 });
+test('Plan-end trend gives recent variable spending more weight without moving the actual total',()=>{
+ const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:25000,firstRecordedDate:'2026-08-01',occurrences:[]};
+ const old=engine.planEndForecast({...common,transactions:[tx('old',2000,{date:'2026-08-22'})]});
+ const recent=engine.planEndForecast({...common,transactions:[tx('recent',2000,{date:'2026-09-17'})]});
+ const weekOld=engine.planEndForecast({...common,transactions:[tx('week-old',2000,{date:'2026-09-10'})]});
+ assert.equal(old.sampleDays,28);assert.equal(recent.sampleDays,28);
+ assert.equal(recent.futureDays,12);assert.ok(recent.variableDaily>old.variableDaily);
+ assert.ok(Math.abs(recent.variableDaily-2*weekOld.variableDaily)<=1); // Seven days halves a day's contribution.
+ assert.equal(recent.projected,common.spent+recent.variableRemaining);
+ assert.equal(old.projected,common.spent+old.variableRemaining);
+});
+test('A one-off spike remains in actual spending but is capped in the projected daily habit',()=>{
+ const gym=tx('gym',18000,{date:'2026-09-17'});
+ const result=engine.planEndForecast({start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,spent:18000,firstRecordedDate:'2026-09-08',transactions:[gym],occurrences:[]});
+ assert.equal(result.sampleDays,10);assert.equal(result.activeDays,1);assert.equal(result.spikeDays,1);
+ assert.equal(result.confidence,'low');assert.ok(result.variableDaily>0);
+ assert.ok(result.variableDaily<1800); // The €180 day is not projected as €18 per calendar day.
+ assert.equal(result.projected,18000+result.variableRemaining);
+});
+test('The zero-MAD fallback preserves a recurring weekly shop while softening an isolated large day',()=>{
+ const common={start:'2026-09-01',end:'2026-10-01',today:'2026-09-18',target:110000,firstRecordedDate:'2026-08-01',occurrences:[]};
+ const shopDates=['2026-08-27','2026-09-03','2026-09-10','2026-09-17'];
+ const groceries=engine.planEndForecast({...common,spent:60000,transactions:shopDates.map((date,i)=>tx(`shop-${i}`,15000,{date}))});
+ assert.equal(groceries.sampleDays,28);assert.equal(groceries.activeDays,4);
+ assert.equal(groceries.spikeDays,0);assert.ok(groceries.variableDaily>0);
+ const mixed=engine.planEndForecast({...common,spent:26000,transactions:[...shopDates.map((date,i)=>tx(`small-${i}`,2000,{date})),tx('one-off gym',18000,{date:'2026-09-16'})]});
+ assert.equal(mixed.spikeDays,1);assert.ok(mixed.variableDaily<groceries.variableDaily);
+});
+test('Plan-end trend counts only unpaid committed schedules, and linked payments only as actuals',()=>{
+ const recurring=occurrence('rent',10000,{date:'2026-09-19',due_date:'2026-09-19',paid_cents:6000,status:'partial',transaction_id:'rent-paid'});
+ const overdue=occurrence('overdue',2000,{due_date:'2026-08-29'});
+ const result=engine.planEndForecast({start:'2026-09-14',end:'2026-09-21',today:'2026-09-18',target:70000,spent:14000,firstRecordedDate:'2026-09-01',transactions:[
+  tx('rent-paid',6000,{date:'2026-09-17',recurring_plan_id:'rent'}),
+  tx('ordinary',1000,{date:'2026-09-17'}),
+  tx('committed',3000,{date:'2026-09-16',committed:1}),
+  tx('today',4000,{date:'2026-09-18'})
+ ],occurrences:[recurring,overdue,occurrence('optional',9999,{committed:0}),occurrence('income',9999,{type:'income'}),occurrence('transfer',9999,{type:'transfer'}),occurrence('paid',9999,{status:'paid'}),occurrence('later',9999,{due_date:'2026-09-22'})]});
+ assert.equal(result.futureDays,2);assert.equal(result.activeDays,1);
+ assert.equal(result.scheduledRemaining,6000);
+ assert.equal(result.projected,14000+6000+result.variableRemaining);
+});
+test('Short history is marked insufficient and the plan forecast ends at the custom boundary',()=>{
+ const common={start:'2026-09-17',end:'2026-09-20',target:30000,spent:5000,firstRecordedDate:'2026-09-17',transactions:[tx('today',5000,{date:'2026-09-18'})],occurrences:[occurrence('bill',2000,{due_date:'2026-09-19'})]};
+ const sparse=engine.planEndForecast({...common,today:'2026-09-18'});
+ assert.equal(sparse.sampleDays,1);assert.equal(sparse.confidence,'insufficient');assert.equal(sparse.projected,null);assert.equal(sparse.scheduledRemaining,2000);assert.equal(sparse.futureDays,1);
+ const finalDay=engine.planEndForecast({...common,today:'2026-09-19'});
+ assert.equal(finalDay.futureDays,0);assert.equal(finalDay.projected,7000);
+ const ended=engine.planEndForecast({...common,today:'2026-09-20'});
+ assert.equal(ended.futureDays,0);assert.equal(ended.scheduledRemaining,0);assert.equal(ended.projected,5000);
+});
 test('A €1,100 plan target stays separate from €1,081 of funded cash',()=>{
  const result=engine.buildBudget({...base,config:{...config,target:110000},funding:108100});
  assert.equal(result.target,110000);

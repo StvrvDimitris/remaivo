@@ -22,6 +22,76 @@ export function planPace(input:{start:string;end:string;today:string;target:numb
     projected:elapsedDays>0?Math.round(input.spent*totalDays/elapsedDays):null,
   };
 }
+export type PlanEndForecastInput = {
+  start: string; end: string; today: string;
+  target: number; spent: number;
+  transactions: MoneyTransaction[]; occurrences: Occurrence[];
+  firstRecordedDate?: string;
+};
+export type PlanEndForecast = {
+  projected: number | null;
+  variableDaily: number | null;
+  variableRemaining: number | null;
+  scheduledRemaining: number;
+  futureDays: number;
+  sampleDays: number;
+  activeDays: number;
+  spikeDays: number;
+  confidence: 'insufficient' | 'low' | 'medium' | 'high';
+};
+const median = (values:number[]) => {
+  const sorted=[...values].sort((a,b)=>a-b);
+  const middle=Math.floor(sorted.length/2);
+  return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;
+};
+export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null {
+  const {start,end,today,target,spent}=input;
+  const totalDays=daysApart(start,end);
+  if(!Number.isFinite(totalDays)||totalDays<=0||!Number.isSafeInteger(target)||target<=0||!Number.isSafeInteger(spent)||spent<0)return null;
+  const firstFuture=plusDays(today,1)>start?plusDays(today,1):start;
+  const futureDays=Math.max(0,daysApart(firstFuture,end));
+  // Open installments and recurring payments are represented by their unpaid
+  // remainder. Their linked, already-posted installments are in `spent`.
+  const scheduledRemaining=input.occurrences.filter(o=>
+    today<end&&['upcoming','partial'].includes(o.status)&&o.committed===1&&o.due_date<end&&
+    ['expense','fee','installment_payment','saving','investment'].includes(o.type)
+  ).reduce((sum,o)=>sum+Math.max(0,o.amount_cents-o.paid_cents),0);
+  const earliest=input.firstRecordedDate||input.transactions.reduce((date,t)=>t.date<date?t.date:date,today);
+  const historyStart=plusDays(today,-28)>earliest?plusDays(today,-28):earliest;
+  const sampleDays=Math.max(0,Math.min(28,daysApart(historyStart,today)));
+  const totals=Array.from({length:sampleDays},()=>0);
+  for(const t of input.transactions){
+    if(t.date<historyStart||t.date>=today||!consumesBudget(t)||
+      !['expense','fee'].includes(t.type)||t.committed===1||
+      t.recurring_plan_id||t.installment_plan_id)continue;
+    const index=daysApart(historyStart,t.date);
+    if(index>=0&&index<sampleDays)totals[index]+=Math.max(0,t.amount_cents);
+  }
+  const activeDays=totals.filter(amount=>amount>0).length;
+  if(!futureDays)return {projected:spent+scheduledRemaining,variableDaily:0,variableRemaining:0,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays:0,confidence:sampleDays>=14?'medium':'low'};
+  if(sampleDays<7)return {projected:null,variableDaily:null,variableRemaining:null,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays:0,confidence:'insufficient'};
+  const middle=median(totals);
+  const mad=median(totals.map(amount=>Math.abs(amount-middle)));
+  const targetDaily=target/totalDays;
+  // With many zero-spend days, both median and MAD can be zero. Use the
+  // typical positive day when at least three spending days establish a pattern;
+  // otherwise fall back to the plan's daily target. High days are capped,
+  // never removed, and remain fully included in recorded spending.
+  const positiveScale=activeDays>=3?2*median(totals.filter(amount=>amount>0)):0;
+  const cap=mad>0?Math.max(middle+3*1.4826*mad,2*targetDaily):Math.max(2*middle,2*targetDaily,positiveScale);
+  const spikeDays=totals.filter(amount=>amount>cap).length;
+  let weighted=0,weightSum=0;
+  totals.forEach((amount,index)=>{
+    const daysAgo=sampleDays-1-index;
+    const weight=Math.pow(0.5,daysAgo/7);
+    weighted+=Math.min(amount,cap)*weight;
+    weightSum+=weight;
+  });
+  const variableDaily=Math.round(weighted/weightSum);
+  const variableRemaining=Math.round(weighted/weightSum*futureDays);
+  const confidence=sampleDays>=21&&activeDays>=8?'high':sampleDays>=14&&activeDays>=4?'medium':'low';
+  return {projected:spent+scheduledRemaining+variableRemaining,variableDaily,variableRemaining,scheduledRemaining,futureDays,sampleDays,activeDays,spikeDays,confidence};
+}
 export const weekBeginning = (date: string, first: number) => plusDays(date,-((new Date(date+'T12:00:00Z').getUTCDay()-first+7)%7));
 export function periodFor(config: BudgetConfig, today: string) {
   if(config.period==='custom') return {start:config.anchor,end:config.end};

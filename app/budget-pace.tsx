@@ -1,6 +1,6 @@
 "use client";
 
-import { planPace, plusDays, type BudgetConfig } from "./v3-engine";
+import { planEndForecast, planPace, plusDays, type BudgetConfig, type MoneyTransaction, type Occurrence } from "./v3-engine";
 
 type CurrentPlan = {
   name: string;
@@ -11,6 +11,9 @@ type CurrentPlan = {
   funding: number;
   spent: number;
   today: string;
+  transactions: MoneyTransaction[];
+  occurrences: Occurrence[];
+  firstRecordedDate: string;
 };
 
 const periodLabels: Record<CurrentPlan["period"], string> = {
@@ -40,6 +43,7 @@ function fullDate(value: string) {
 
 export function BudgetPace({ plan, currency, onConfigure }: { plan: CurrentPlan; currency: string; onConfigure: () => void }) {
   const pace = planPace(plan);
+  const forecast = planEndForecast(plan);
   const position = pace ? pace.paceDifference > 0 ? "above" : pace.paceDifference < 0 ? "below" : "on" : "unset";
   const period = `${fullDate(plan.start)} – ${fullDate(plusDays(plan.end, -1))}`;
   return <section className="stat-panel plan-pace-panel" aria-labelledby="plan-pace-heading">
@@ -52,7 +56,11 @@ export function BudgetPace({ plan, currency, onConfigure }: { plan: CurrentPlan;
       <p className="plan-pace-funding">Funded from recorded cash: {money(plan.funding, currency)}. Pace follows the {money(plan.target, currency)} target set in Plan.</p>
       <div className="plan-pace-bars" aria-label="Plan use compared with elapsed time"><div><span>Target used <b>{pace.usedRatio.toFixed(0)}%</b></span><progress max="100" value={Math.min(100, pace.usedRatio)} /></div><div><span>Period elapsed <b>{pace.elapsedRatio.toFixed(0)}%</b></span><progress max="100" value={pace.elapsedRatio} /></div></div>
       <div className="plan-pace-details"><div><small>{pace.remaining < 0 ? "Above target" : "Target left"}</small><strong>{money(Math.abs(pace.remaining), currency)}</strong></div><div><small>Compared with even pace</small><strong className={position === "above" ? "is-over" : ""}>{position === "on" ? "On pace" : `${money(Math.abs(pace.paceDifference), currency)} ${position}`}</strong><span>{money(pace.expectedSpent, currency)} expected by today</span></div><div><small>At the same daily rate</small><strong>{pace.elapsedDays >= Math.min(3, pace.totalDays) && pace.projected !== null ? money(pace.projected, currency) : "—"}</strong><span>{pace.elapsedDays >= Math.min(3, pace.totalDays) ? "Straight-line estimate" : "Available after a few days"}</span></div></div>
-      <p className="plan-pace-note">Uses posted activity counted by Plan, including counted savings and investments. Unpaid plans enter when recorded.</p>
+      {forecast && <div className="plan-pace-forecast">
+        <div className="plan-pace-forecast-result"><small>RECENT-TREND ESTIMATE</small><strong className={forecast.projected !== null && forecast.projected > plan.target ? "is-over" : ""}>{forecast.projected === null ? "Building a baseline" : money(forecast.projected, currency)}</strong><span>{forecast.projected === null ? "Available after 7 observed days" : forecast.confidence === "low" ? "Early estimate at plan end" : "Projected at plan end"}</span></div>
+        <div className="plan-pace-forecast-explain">{forecast.projected === null ? <p>Keep recording activity. The estimate needs a week of observed days, including days without spending.</p> : <><p>{money(plan.spent, currency)} already spent + {money(forecast.scheduledRemaining, currency)} unpaid scheduled + {money(forecast.variableRemaining ?? 0, currency)} at the recent variable pace.</p><p>Based on {forecast.sampleDays} completed days, with newer days weighted more heavily. {forecast.spikeDays > 0 ? `${forecast.spikeDays} unusually high ${forecast.spikeDays === 1 ? "day was" : "days were"} softened.` : "Scheduled payments are counted once."}</p></>}</div>
+      </div>}
+      <p className="plan-pace-note">Estimates use posted activity counted by Plan, including counted savings and investments. The recent trend weights days with a 7-day half-life and looks back up to 28 days.</p>
     </> : <p className="plan-pace-empty">Set a spending target in Plan to see how your current period is tracking.</p>}
   </section>;
 }
