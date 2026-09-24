@@ -16,8 +16,8 @@ function Icon({name}:{name:string}){const paths:Record<string,string>={home:'M3 
 
 function DataExportCard(){
  return <section className="v3-card v3-data-export"><div className="v3-section-head"><div><span className="v3-eyebrow">YOUR DATA</span><h2>Export your data</h2></div></div>
-  <p>Download a current, complete copy of your Remaivo data in one JSON file. It includes your accounts, activity, plans, goals, settings and history.</p>
-  <div className="v3-data-export-actions"><a className="v3-primary" href="/api/finance?view=export">Download JSON backup</a><span>This file contains private financial information. Store it somewhere safe.</span></div>
+  <p>Download your current Remaivo data in one JSON file. It includes accounts, activity, plans, goals, settings and history, without the old migration snapshot.</p>
+  <div className="v3-data-export-actions"><a className="v3-primary" href="/api/finance?view=export">Download JSON export</a><span>This file contains private financial information. Store it somewhere safe.</span></div>
  </section>;
 }
 export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string}){

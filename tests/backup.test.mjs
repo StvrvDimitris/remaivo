@@ -10,7 +10,7 @@ const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
   'transactions', 'budget_rules', 'recurring_plans', 'expense_reserves',
   'expense_reserve_periods', 'installment_plans', 'installment_payments',
-  'goals', 'spare_events', 'forecast_scenarios', 'v3_migrations',
+  'goals', 'spare_events', 'forecast_scenarios',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
   'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_ledger_entries',
   'v3_opening_anchors', 'v3_payment_links',
@@ -119,7 +119,7 @@ function rowsFor(user) {
   ]));
 }
 
-test('JSON export includes current records from all 25 tables and only the signed-in owner', async () => {
+test('JSON export includes current records without the migration snapshot or another owner', async () => {
   freshDatabase();
   seed('alice', 'ALICE');
   seed('bob', 'BOB');
@@ -130,10 +130,11 @@ test('JSON export includes current records from all 25 tables and only the signe
   const bobBefore = JSON.parse(JSON.stringify(rowsFor('bob')));
   const backup = JSON.parse(JSON.stringify(await exportBackup('alice')));
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 1);
+  assert.equal(backup.version, 2);
   assert.equal(backup.ownerId, 'alice');
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(Object.keys(backup.tables).sort(), [...tables].sort());
+  assert.equal(Object.hasOwn(backup.tables, 'v3_migrations'), false);
   for (const table of tables) {
     assert.ok(backup.tables[table]?.length, `${table} must be included`);
     assert.deepEqual(backup.tables[table].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), before[table]);
