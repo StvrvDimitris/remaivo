@@ -1,9 +1,6 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 interface RemaivoEnvironment {
   DB: D1Database;
-  REMAIVO_PURGE_TOKEN?: string;
-  REMAIVO_OWNER_USER_ID?: string;
-  REMAIVO_PURGE_OTHER_USER_ID?: string;
   ASSETS: Fetcher;
   IMAGES: {
     input(stream: ReadableStream): {
