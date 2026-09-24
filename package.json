@@ -9,13 +9,12 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "node --test --test-isolation=none tests/budget-math.test.mjs tests/budget-exclusion.test.mjs tests/reconciliation.test.mjs tests/investment-valuations.test.mjs tests/statistics.test.mjs tests/v3-integration.test.mjs tests/forecast.test.mjs tests/schema-ensure.test.mjs tests/backup.test.mjs",
-    "test:budget": "node --test --test-isolation=none tests/budget-math.test.mjs",
+    "test": "node --test --test-isolation=none tests/reconciliation.test.mjs tests/investment-valuations.test.mjs tests/statistics.test.mjs tests/v3-integration.test.mjs tests/schema-ensure.test.mjs tests/backup.test.mjs tests/setup.test.mjs",
     "test:investment": "node --test --test-isolation=none tests/investment-valuations.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern work",
     "db:generate": "drizzle-kit generate",
     "test:v3": "node --test --test-isolation=none tests/v3-integration.test.mjs",
-    "test:forecast": "node --test --test-isolation=none tests/forecast.test.mjs"
+    "test:setup": "node --test --test-isolation=none tests/setup.test.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

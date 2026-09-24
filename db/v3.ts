@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { addCalendarInterval } from '../app/finance-dates';
-import { buildBudget, consumesBudget, periodFor, plusDays, forecastCash, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
+import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 
 export const v3Schema = [
 `CREATE TABLE IF NOT EXISTS v3_payment_links (transaction_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, occurrence_id TEXT NOT NULL)`,
@@ -28,7 +28,8 @@ const oldTables=['accounts','transactions','recurring_plans','installment_plans'
 
 export async function initializeV3(user:string,today:string){
  await ensureV3Schema();
- if(await env.DB.prepare('SELECT user_id FROM v3_migrations WHERE user_id=?').bind(user).first())return;
+ // New accounts already have a current Plan version. Only existing accounts need migration.
+ if(await env.DB.prepare('SELECT id FROM v3_versions WHERE user_id=? LIMIT 1').bind(user).first())return;
  const backup:Record<string,unknown[]>={};for(const table of oldTables)backup[table]=await rows(`SELECT * FROM ${table} WHERE user_id=?`,user);
  const rules=backup.budget_rules as {period:string;base_cents:number}[];const profile=(backup.profiles[0]||{}) as {week_start?:number};
  const config:BudgetConfig={name:'Main plan',target:rules.find(r=>r.period==='monthly')?.base_cents||0,period:'monthly',anchor:today.slice(0,7)+'-01',end:plusDays(today,30),payday:1,allocation:'adaptive',carry:'none',carryCap:0,weights:[1,1,1,1,1,1.4,1.4],weekStart:profile.week_start??1};
@@ -144,14 +145,14 @@ export async function reconcileV3(user:string,today:string){
 
 export async function v3Snapshot(user:string,today:string){
  const {period,config}=await currentPeriod(user,today);
- const [accounts,transactions,trendTransactions,firstRecorded,buckets,occurrences,assignments,events,migration]=await Promise.all([
+ const [accounts,transactions,trendTransactions,firstRecorded,buckets,occurrences,assignments,events]=await Promise.all([
  rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=?',user),rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?",user,period.start_date,period.end_date),
  rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id",user,plusDays(today,-28),today),
  env.DB.prepare("SELECT date FROM transactions WHERE user_id=? AND status='posted' AND date<=? ORDER BY date LIMIT 1").bind(user,today).first<{date:string}>(),
  rows<Bucket>('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid',user,period.id),
- rows<Occurrence>('SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN (\'upcoming\',\'partial\')) ORDER BY due_date,id',user,period.start_date),rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user),rows<{id:string;kind:string;detail:string;created_at:string}>('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20',user),env.DB.prepare('SELECT created_at,summary_json FROM v3_migrations WHERE user_id=?').bind(user).first<{created_at:string;summary_json:string}>()]);
+ rows<Occurrence>('SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN (\'upcoming\',\'partial\')) ORDER BY due_date,id',user,period.start_date),rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user),rows<{id:string;kind:string;detail:string;created_at:string}>('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20',user)]);
  const result=buildBudget({today,start:period.start_date,end:period.end_date,config,funding:period.funding_cents,accounts,transactions,buckets,occurrences,assignments});
- return {periodId:period.id,config,result,occurrences,transactions,trendTransactions,firstRecordedDate:firstRecorded?.date??today,events,migration:{createdAt:migration?.created_at,counts:JSON.parse(migration?.summary_json||'{}')},forecast:forecastCash(accounts,occurrences,today)};
+ return {periodId:period.id,config,result,occurrences,transactions,trendTransactions,firstRecordedDate:firstRecorded?.date??today,events};
 }
 
 export async function v3Action(user:string,today:string,action:string,p:Record<string,unknown>){

@@ -176,11 +176,3 @@ export function buildBudget(input:EngineInput) {
   const spendable=input.accounts.filter(a=>!a.archived&&a.include_spendable&&a.type!=='investment').reduce((s,a)=>s+a.balance_cents,0);
   return {start,end,funding,target:config.target,unfunded:Math.max(0,config.target-funding),totalSpent,everydaySpent,commitmentSpent,upcoming,protectedRemaining,actualRemaining,everydayAllocation,available,buckets,daily,weekly,weekStart:ws,weekEnd:we,spendable,cashShortfall:Math.max(0,actualRemaining-spendable),allocationByTx,occurrenceBucket,dates,slices};
 }
-export function forecastCash(accounts:MoneyAccount[],occurrences:Occurrence[],today:string,days=45,scenario=0,scenarioDate=today) {
-  const selected=new Set(accounts.filter(a=>a.archived!==1&&a.include_spendable===1&&a.type!=='investment').map(a=>a.id));
-  let balance=accounts.filter(a=>selected.has(a.id)).reduce((a,b)=>a+b.balance_cents,0);const opening=balance;
-  const rows=[];for(let i=0;i<days;i++){const date=plusDays(today,i);const items=occurrences.filter(o=>['upcoming','partial'].includes(o.status)&&(o.due_date===date||(i===0&&o.due_date<today)));let incoming=0,outgoing=0;
-    for(const o of items){const amount=Math.max(0,o.amount_cents-o.paid_cents);if(o.type==='income'){if(selected.has(o.account_id||''))incoming+=amount;}else{if(selected.has(o.account_id||''))outgoing+=amount;if(['saving','investment','transfer'].includes(o.type)&&selected.has(o.destination_account_id||''))incoming+=amount;}}
-    if(date===scenarioDate)outgoing+=Math.max(0,scenario);balance+=incoming-outgoing;rows.push({date,incoming,outgoing,balance});}
-  return {opening,closing:balance,lowest:rows.reduce((a,b)=>b.balance<a.balance?b:a,rows[0]),rows};
-}

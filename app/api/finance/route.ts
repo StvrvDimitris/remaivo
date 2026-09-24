@@ -1,11 +1,10 @@
-import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences } from "../../../db/v3";
+import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger } from "../../../db/v3";
 import { exportBackup } from "../../../db/backup";
-import { forecastHistory } from "../../../db/forecast";
-import { listForecastScenarios, removeForecastScenario, saveForecastScenario } from "../../../db/forecast-scenarios";
+import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
-import { addCalendarInterval, financialToday, scheduledOccurrencesThrough, validTimeZone } from "../../finance-dates";
+import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
 import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
 import type { StatisticsMode } from "../../transaction-classification";
 
@@ -13,18 +12,6 @@ export const dynamic = "force-dynamic";
 
 type FinanceUser = { userId: string; displayName: string; email: string };
 type JsonObject = Record<string, unknown>;
-
-const defaultCategories = [
-  ["Groceries", "expense", "#d8ead7", "basket"],
-  ["Eating out", "expense", "#f5ddcf", "cup"],
-  ["Transport", "expense", "#d9e9ec", "car"],
-  ["Home & bills", "expense", "#eadfcb", "home"],
-  ["Shopping", "expense", "#ead9e6", "bag"],
-  ["Health", "expense", "#d8e7df", "heart"],
-  ["Entertainment", "expense", "#e6e0f2", "spark"],
-  ["Salary", "income", "#d8ead7", "briefcase"],
-  ["Other income", "income", "#d9e9ec", "plus"],
-] as const;
 
 async function currentUser(): Promise<FinanceUser | null> {
   const user = await getChatGPTUser();
@@ -185,20 +172,14 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
   };
 
-  const statements = [
+  const [currentRows, comparisonRows] = await env.DB.batch([
     prepareRows(from, to),
     comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color FROM transactions t WHERE 0"),
-    env.DB.prepare("SELECT base_cents, include_everyday, include_committed, include_savings, include_investments, active FROM budget_rules WHERE user_id = ? AND period = 'monthly'").bind(user.userId),
-  ];
-  const [currentRows, comparisonRows, budgetRows] = await env.DB.batch(statements);
-  const budgetEligible = from === monthStart && to === today && !filters.accountId && !filters.categoryId && !filters.transactionType && !filters.origin && !filters.description;
+  ]);
   return buildStatistics({
     rows: currentRows.results as StatisticsRow[],
     comparisonRows: comparisonRows.results as StatisticsRow[],
     filters,
-    budget: null,
-    budgetEligible,
-    today,
     currency: String(profile.currency || "EUR"),
   });
 }
@@ -221,91 +202,6 @@ function balanceStatements(userId: string, transaction: Record<string, unknown>,
   return [guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
 }
 
-async function processAutomaticPlans(userId: string, today: string) {
-  let reconciledPlans = 0;
-  while (true) {
-    const plans = await env.DB.prepare(
-      "SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 AND auto_post = 1 AND next_date <= ? ORDER BY next_date LIMIT 100",
-    ).bind(userId, today).all<Record<string, unknown>>();
-    if (!plans.results.length) return;
-
-    for (const plan of plans.results) {
-      reconciledPlans += 1;
-      if (reconciledPlans > 50_000) throw new Error("Automatic recurring reconciliation exceeded its safety limit.");
-      const schedule = scheduledOccurrencesThrough(
-        String(plan.next_date),
-        String(plan.frequency),
-        Number(plan.interval_count) || 1,
-        today,
-        plan.end_date ? String(plan.end_date) : null,
-        Number(plan.anchor_day) || Number(String(plan.next_date).slice(8, 10)),
-      );
-
-      for (const scheduledDate of schedule.occurrences) {
-        const transactionId = crypto.randomUUID();
-        const amount = Number(plan.amount_cents);
-        const type = String(plan.type);
-        const committed = Number(plan.committed) === 1;
-        const transaction = { type, amount_cents: amount, account_id: plan.account_id, destination_account_id: plan.destination_account_id };
-        await env.DB.batch([
-          env.DB.prepare(
-            "INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, recurring_plan_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ? WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND recurring_plan_id = ? AND date = ? AND status = 'posted')",
-          ).bind(transactionId, userId, plan.account_id, plan.destination_account_id, plan.category_id, type, plan.title, amount, scheduledDate, committed ? 1 : 0, committed ? 0 : 1, committed ? 0 : 1, plan.id, userId, plan.id, scheduledDate),
-          ...balanceStatements(userId, transaction, 1, { id: transactionId, status: "posted" }),
-        ]);
-      }
-
-      await env.DB.prepare("UPDATE recurring_plans SET next_date = ?, active = CASE WHEN ? = 1 THEN 0 ELSE active END WHERE id = ? AND user_id = ?")
-        .bind(schedule.nextDate, schedule.ended ? 1 : 0, plan.id, userId).run();
-    }
-  }
-}
-
-async function recordInstallmentPayment(userId: string, paymentId: string) {
-  const payment = await env.DB.prepare(
-    "SELECT ip.*, p.title, p.payment_account_id, p.category_id, p.include_daily_weekly FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.id = ? AND ip.user_id = ? AND ip.status = 'upcoming' AND p.status = 'active'",
-  ).bind(paymentId, userId).first<Record<string, unknown>>();
-  if (!payment) return false;
-
-  const transactionId = crypto.randomUUID();
-  const amount = Number(payment.amount_cents);
-  const planId = String(payment.plan_id);
-  const includeDailyWeekly = Number(payment.include_daily_weekly) === 1 ? 1 : 0;
-  const results = await env.DB.batch([
-    env.DB.prepare("UPDATE installment_payments SET status = 'paid', paid_transaction_id = ? WHERE id = ? AND user_id = ? AND status = 'upcoming'").bind(transactionId, paymentId, userId),
-    env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) SELECT ?, ?, ?, ?, 'installment_payment', ?, ?, ?, 1, ?, ?, 1, 1, ? WHERE EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(transactionId, userId, payment.payment_account_id, payment.category_id, payment.title, amount, payment.due_date, includeDailyWeekly, includeDailyWeekly, planId, paymentId, userId, transactionId),
-    env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM installment_payments WHERE id = ? AND user_id = ? AND paid_transaction_id = ?)").bind(amount, payment.payment_account_id, userId, paymentId, userId, transactionId),
-    env.DB.prepare("UPDATE installment_plans SET paid_cents = COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0), status = CASE WHEN COALESCE((SELECT SUM(amount_cents) FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'paid'), 0) >= total_cents THEN 'complete' ELSE 'active' END WHERE id = ? AND user_id = ?").bind(planId, userId, planId, userId, planId, userId),
-  ]);
-  return Number(results[0].meta.changes) > 0;
-}
-
-async function processAutomaticInstallments(userId: string, today: string) {
-  let reconciledPayments = 0;
-  while (true) {
-    const due = await env.DB.prepare(
-      "SELECT ip.id FROM installment_payments ip JOIN installment_plans p ON p.id = ip.plan_id WHERE ip.user_id = ? AND ip.status = 'upcoming' AND ip.due_date <= ? AND p.status = 'active' AND p.auto_post = 1 ORDER BY ip.due_date LIMIT 100",
-    ).bind(userId, today).all<Record<string, unknown>>();
-    if (!due.results.length) return;
-    for (const payment of due.results) {
-      reconciledPayments += 1;
-      if (reconciledPayments > 50_000) throw new Error("Automatic installment reconciliation exceeded its safety limit.");
-      await recordInstallmentPayment(userId, String(payment.id));
-    }
-  }
-}
-
-async function ensureCurrentReservePeriods(userId: string, today: string) {
-  const month = today.slice(0, 7);
-  const reserves = await env.DB.prepare(
-    "SELECT id, category_id, target_cents FROM expense_reserves WHERE user_id = ? AND active = 1 ORDER BY created_at",
-  ).bind(userId).all<{ id: string; category_id: string; target_cents: number }>();
-  if (!reserves.results.length) return;
-  await env.DB.batch(reserves.results.map((reserve) => env.DB.prepare(
-    "INSERT OR IGNORE INTO expense_reserve_periods (id, user_id, reserve_id, category_id, month, target_cents, status) VALUES (?, ?, ?, ?, ?, ?, 'open')",
-  ).bind(crypto.randomUUID(), userId, reserve.id, reserve.category_id, month, reserve.target_cents)));
-}
-
 async function snapshot(user: FinanceUser) {
   await ensureFinanceSchema();
   const profile = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
@@ -315,9 +211,8 @@ async function snapshot(user: FinanceUser) {
   }
 
   await reconcileV3(user.userId, today);
-  await ensureCurrentReservePeriods(user.userId, today);
   const monthStart = `${today.slice(0, 7)}-01`;
-  const [accounts, categories, transactions, budgets, recurring, installmentPlans, installmentPayments, reserves, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
+  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
     env.DB.prepare(`WITH recent AS (
@@ -335,11 +230,9 @@ async function snapshot(user: FinanceUser) {
       )
     )
     ORDER BY t.date DESC, t.created_at DESC`).bind(user.userId, user.userId, user.userId, monthStart),
-    env.DB.prepare("SELECT * FROM budget_rules WHERE user_id = ? AND period IN ('daily', 'weekly', 'monthly') ORDER BY CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 ELSE 3 END").bind(user.userId),
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? AND status != 'cancelled' ORDER BY due_date").bind(user.userId),
-    env.DB.prepare("SELECT r.*, p.id AS period_id, p.category_id AS period_category_id, p.month, p.target_cents AS period_target_cents, p.status, p.finished_at FROM expense_reserves r JOIN expense_reserve_periods p ON p.reserve_id = r.id AND p.user_id = r.user_id AND p.month = ? WHERE r.user_id = ? AND r.active = 1 ORDER BY r.created_at").bind(today.slice(0, 7), user.userId),
     env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
@@ -353,11 +246,9 @@ async function snapshot(user: FinanceUser) {
     accounts: accounts.results,
     categories: categories.results,
     transactions: transactions.results,
-    budgets: budgets.results,
     recurring: recurring.results,
     installmentPlans: installmentPlans.results,
     installmentPayments: installmentPayments.results,
-    reserves: reserves.results,
     goals: goals.results,
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
@@ -381,23 +272,8 @@ export async function GET(request: Request) {
         "X-Content-Type-Options": "nosniff",
       } });
     }
-    if (view === "backup") {
-      await ensureFinanceSchema();
-      await initializeV3(user.userId, financialToday('UTC'));
-      const saved = await env.DB.prepare('SELECT snapshot_json,created_at FROM v3_migrations WHERE user_id=?').bind(user.userId).first<{snapshot_json:string;created_at:string}>();
-      if(!saved) return Response.json({error:'Backup not available.'},{status:404});
-      return new Response(JSON.stringify({capturedAt:saved.created_at,tables:JSON.parse(saved.snapshot_json)},null,2),{headers:{'Content-Type':'application/json','Content-Disposition':'attachment; filename="remaivo-before-redesign.json"','Cache-Control':'private, no-store'}});
-    }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
-    if (view === "forecast") {
-      const state = await snapshot(user);
-      if (!state.v3 || !state.profile) return Response.json({error:'Complete your setup before opening Forecast.'},{status:409});
-      const history = await forecastHistory(user.userId, state.today);
-      // Include older current-period activity for a long custom budget, without truncating its remaining allowance.
-      const transactions = [...new Map([...history.transactions, ...state.v3.transactions].map(t=>[t.id,t])).values()];
-      return Response.json({ ...history, transactions, scenarios:await listForecastScenarios(user.userId), today:state.today, currency:String(state.profile.currency), accounts:state.accounts, categories:state.categories, goals:state.goals, config:state.v3.config, current:state.v3.result, occurrences:state.v3.occurrences }, {headers:{'Cache-Control':'private, no-store'}});
-    }
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });
@@ -417,14 +293,6 @@ export async function POST(request: Request) {
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
     if (action !== "setup") await initializeV3(user.userId, actionToday);
-    if(action==='saveForecastScenario'){
-      await saveForecastScenario(user.userId,actionToday,payload);
-      return Response.json({scenarios:await listForecastScenarios(user.userId)});
-    }
-    if(action==='deleteForecastScenario'){
-      await removeForecastScenario(user.userId,text(payload.id));
-      return Response.json({scenarios:await listForecastScenarios(user.userId)});
-    }
     if (["addTransaction", "correctTransaction", "updateTransaction"].includes(action) && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
     if (["addRecurring","updateRecurring"].includes(action)) {
       if(payload.frequency==='once'){payload.frequency='monthly';payload.endDate=payload.nextDate;}
@@ -440,33 +308,7 @@ export async function POST(request: Request) {
       return Response.json(await snapshot(user));
     }
     if (action === "setup") {
-      const currency = text(payload.currency, "EUR").slice(0, 3).toUpperCase();
-      const timezone = text(payload.timezone, "UTC");
-      if (!validTimeZone(timezone)) return Response.json({ error: "Choose a valid financial timezone." }, { status: 400 });
-      const today = text(payload.startDate, financialToday(timezone));
-      const inputAccounts = Array.isArray(payload.accounts) ? payload.accounts as JsonObject[] : [];
-      if (!inputAccounts.length) return Response.json({ error: "Add at least one account." }, { status: 400 });
-
-      const statements = [
-        env.DB.prepare("INSERT INTO profiles (user_id, currency, week_start, timezone, setup_complete) VALUES (?, ?, ?, ?, 1) ON CONFLICT(user_id) DO UPDATE SET currency = excluded.currency, week_start = excluded.week_start, timezone = excluded.timezone, setup_complete = 1").bind(user.userId, currency, Number(payload.weekStart) || 1, timezone),
-      ];
-      for (const account of inputAccounts) {
-        const id = crypto.randomUUID();
-        const amount = cents(account.balance);
-        const signedAmount = text(account.type) === "credit" ? -amount : amount;
-        statements.push(env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_cents, balance_cents, credit_limit_cents, color, include_spendable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, text(account.name, "My account"), text(account.type, "bank"), currency, signedAmount, signedAmount, cents(account.creditLimit) || null, text(account.color, "#1f5b4e"), bool(account.includeSpendable, !["savings", "investment", "credit"].includes(text(account.type))) ? 1 : 0));
-      }
-      for (const [name, kind, color, icon] of defaultCategories) {
-        statements.push(env.DB.prepare("INSERT OR IGNORE INTO categories (id, user_id, name, kind, color, icon) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, name, kind, color, icon));
-      }
-      const budgetInput = (payload.budgets ?? {}) as JsonObject;
-      const budgetMode = text(payload.budgetMode) === "fixed_split" ? "fixed_split" : "adaptive";
-      const setupCarry = budgetMode === "adaptive" ? "reset" : (["reset", "stack_unused", "stack_signed", "stack_capped"].includes(text(payload.carryMode)) ? text(payload.carryMode) : "reset");
-      const setupReset = ["daily", "weekly", "monthly"].includes(text(payload.resetBoundary)) ? text(payload.resetBoundary) : "monthly";
-      for (const period of ["daily", "weekly", "monthly"]) {
-        statements.push(env.DB.prepare("INSERT OR REPLACE INTO budget_rules (id, user_id, period, base_cents, carry_mode, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, 1, 1, 1, 1)").bind(crypto.randomUUID(), user.userId, period, cents(budgetInput.monthly), setupCarry, today, period === "monthly" ? "manual" : "derived", period === "monthly" ? null : "monthly", budgetMode, setupReset));
-      }
-      await env.DB.batch(statements);
+      await createCurrentPlan(user.userId, payload);
     } else if (action === "addAccount") {
       const amount = cents(payload.balance);
       const type = text(payload.type, "bank");
@@ -607,43 +449,6 @@ export async function POST(request: Request) {
       await env.DB.prepare("DELETE FROM v3_occurrences WHERE user_id=? AND source_kind='recurring' AND source_id=? AND status='upcoming' AND paid_cents=0").bind(user.userId,payload.planId).run();
     } else if (action === "archiveRecurring") {
       await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
-    } else if (action === "addReserve") {
-      const title = text(payload.title);
-      const target = cents(payload.target);
-      const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
-      if (!title || !target || !categoryId) return Response.json({ error: "Name, expense category, and monthly estimate are required." }, { status: 400 });
-      const duplicate = await env.DB.prepare("SELECT id FROM expense_reserves WHERE user_id = ? AND category_id = ? AND active = 1").bind(user.userId, categoryId).first();
-      if (duplicate) return Response.json({ error: "That category already has an active flexible reserve." }, { status: 409 });
-      const reserveId = crypto.randomUUID();
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO expense_reserves (id, user_id, title, category_id, target_cents) VALUES (?, ?, ?, ?, ?)").bind(reserveId, user.userId, title, categoryId, target),
-        env.DB.prepare("INSERT INTO expense_reserve_periods (id, user_id, reserve_id, category_id, month, target_cents, status) VALUES (?, ?, ?, ?, ?, ?, 'open')").bind(crypto.randomUUID(), user.userId, reserveId, categoryId, actionToday.slice(0, 7), target),
-      ]);
-    } else if (action === "updateReserve") {
-      const reserveId = text(payload.reserveId);
-      const title = text(payload.title);
-      const target = cents(payload.target);
-      const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
-      if (!title || !target || !categoryId) return Response.json({ error: "Name, expense category, and monthly estimate are required." }, { status: 400 });
-      const duplicate = await env.DB.prepare("SELECT id FROM expense_reserves WHERE user_id = ? AND category_id = ? AND active = 1 AND id != ?").bind(user.userId, categoryId, reserveId).first();
-      if (duplicate) return Response.json({ error: "That category already has an active flexible reserve." }, { status: 409 });
-      const results = await env.DB.batch([
-        env.DB.prepare("UPDATE expense_reserves SET title = ?, category_id = ?, target_cents = ? WHERE id = ? AND user_id = ? AND active = 1").bind(title, categoryId, target, reserveId, user.userId),
-        env.DB.prepare("UPDATE expense_reserve_periods SET category_id = ?, target_cents = ? WHERE reserve_id = ? AND user_id = ? AND month = ? AND status = 'open'").bind(categoryId, target, reserveId, user.userId, actionToday.slice(0, 7)),
-      ]);
-      if (!Number(results[0].meta.changes)) return Response.json({ error: "That reserve is no longer active." }, { status: 404 });
-    } else if (action === "finishReserve" || action === "reopenReserve") {
-      const status = action === "finishReserve" ? "finished" : "open";
-      const result = await env.DB.prepare("UPDATE expense_reserve_periods SET status = ?, finished_at = ? WHERE reserve_id = ? AND user_id = ? AND month = ?").bind(status, status === "finished" ? new Date().toISOString() : null, text(payload.reserveId), user.userId, actionToday.slice(0, 7)).run();
-      if (!Number(result.meta.changes)) return Response.json({ error: "This month's reserve was not found." }, { status: 404 });
-    } else if (action === "archiveReserve") {
-      const reserveId = text(payload.reserveId);
-      const finishedAt = new Date().toISOString();
-      const results = await env.DB.batch([
-        env.DB.prepare("UPDATE expense_reserves SET active = 0 WHERE id = ? AND user_id = ? AND active = 1").bind(reserveId, user.userId),
-        env.DB.prepare("UPDATE expense_reserve_periods SET status = 'finished', finished_at = ? WHERE reserve_id = ? AND user_id = ? AND month = ? AND status = 'open'").bind(finishedAt, reserveId, user.userId, actionToday.slice(0, 7)),
-      ]);
-      if (!Number(results[0].meta.changes)) return Response.json({ error: "That reserve is no longer active." }, { status: 404 });
     } else if (action === "addInstallment") {
       const planId = crypto.randomUUID();
       const total = cents(payload.total);
@@ -700,24 +505,6 @@ export async function POST(request: Request) {
         env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
         env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
       ]);
-    } else if (action === "payInstallment") {
-      await generateOccurrences(user.userId,actionToday);
-      await v3Action(user.userId,actionToday,"v3Settle",{id:"installment:"+text(payload.paymentId),date:actionToday});
-    } else if (action === "updateBudget") {
-      const calculationMode = text(payload.calculationMode) === "adaptive" ? "adaptive" : "fixed_split";
-      const carryMode = calculationMode === "adaptive" ? "reset" : (["reset", "stack_unused", "stack_signed", "stack_capped"].includes(text(payload.carryMode)) ? text(payload.carryMode) : "reset");
-      const hardReset = ["daily", "weekly", "monthly"].includes(text(payload.hardReset)) ? text(payload.hardReset) : "monthly";
-      const values = {
-        base: cents(payload.base),
-        cap: cents(payload.carryCap) || null,
-        anchor: text(payload.anchorDate, actionToday),
-        everyday: bool(payload.includeEveryday, true) ? 1 : 0,
-        committed: bool(payload.includeCommitted) ? 1 : 0,
-        savings: bool(payload.includeSavings) ? 1 : 0,
-        investments: bool(payload.includeInvestments) ? 1 : 0,
-      };
-      const statements = ["daily", "weekly", "monthly"].map((period) => env.DB.prepare("INSERT INTO budget_rules (id, user_id, period, base_cents, carry_mode, carry_cap_cents, anchor_date, source_type, parent_period, calculation_mode, percentage_basis_points, hard_reset, include_everyday, include_committed, include_savings, include_investments, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, ?, ?, ?, ?, 1) ON CONFLICT(user_id, period) DO UPDATE SET base_cents = excluded.base_cents, carry_mode = excluded.carry_mode, carry_cap_cents = excluded.carry_cap_cents, anchor_date = excluded.anchor_date, source_type = excluded.source_type, parent_period = excluded.parent_period, calculation_mode = excluded.calculation_mode, percentage_basis_points = 10000, hard_reset = excluded.hard_reset, include_everyday = excluded.include_everyday, include_committed = excluded.include_committed, include_savings = excluded.include_savings, include_investments = excluded.include_investments, active = 1").bind(crypto.randomUUID(), user.userId, period, values.base, carryMode, values.cap, values.anchor, period === "monthly" ? "manual" : "derived", period === "monthly" ? null : "monthly", calculationMode, hardReset, values.everyday, values.committed, values.savings, values.investments));
-      await env.DB.batch(statements);
     } else if (action === "updateWeekStart") {
       const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
       await env.DB.prepare("UPDATE profiles SET week_start = ? WHERE user_id = ?").bind(weekStart, user.userId).run();

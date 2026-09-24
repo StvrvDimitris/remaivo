@@ -1,4 +1,4 @@
-import { budgetCountsTransaction, includedInMode, operatingCashEffect, reportingClass, type StatisticsMode } from "./transaction-classification.ts";
+import { includedInMode, operatingCashEffect, reportingClass, type StatisticsMode } from "./transaction-classification.ts";
 
 export type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
 
@@ -16,15 +16,6 @@ export type StatisticsRow = {
   committed: number;
   counts_monthly?: number;
   recurring_plan_id: string | null;
-};
-
-export type StatisticsBudgetRule = {
-  base_cents: number;
-  include_everyday: number;
-  include_committed: number;
-  include_savings: number;
-  include_investments: number;
-  active: number;
 };
 
 export type StatisticsFilters = {
@@ -265,35 +256,11 @@ function transactionStats(rows: StatisticsRow[], filters: StatisticsFilters) {
   };
 }
 
-function budgetPace(rows: StatisticsRow[], budget: StatisticsBudgetRule | null, eligible: boolean, today: string) {
-  if (!eligible || !budget || budget.active !== 1 || budget.base_cents <= 0) return null;
-  const spent = rows.filter((row) => budgetCountsTransaction(budget, row)).reduce((sum, row) => sum + round(row.amount_cents), 0);
-  const todayDate = parseCalendar(today);
-  const elapsedDays = todayDate.getUTCDate();
-  const totalDays = daysInMonth(todayDate.getUTCFullYear(), todayDate.getUTCMonth());
-  const expected = budget.base_cents * elapsedDays / totalDays;
-  const projected = elapsedDays ? spent / elapsedDays * totalDays : spent;
-  return {
-    budget: budget.base_cents,
-    spent,
-    remaining: budget.base_cents - spent,
-    elapsedRatio: elapsedDays / totalDays * 100,
-    usedRatio: spent / budget.base_cents * 100,
-    expectedSpend: expected,
-    paceDifference: spent - expected,
-    projected,
-    projectedDifference: projected - budget.base_cents,
-    elapsedDays,
-    totalDays,
-  };
-}
-
 function insights(input: {
   mode: StatisticsMode;
   allocation: ReturnType<typeof allocation>;
   descriptions: ReturnType<typeof descriptions>;
   weekday: ReturnType<typeof weekdayBreakdown>;
-  budget: ReturnType<typeof budgetPace>;
   summary: ReturnType<typeof totals>;
   comparisonSummary: ReturnType<typeof totals>;
   currency: string;
@@ -311,7 +278,6 @@ function insights(input: {
   if (weekend >= 5000 && weekendShare >= 40) candidates.push({ score: weekend * weekendShare / 100, kind: "timing", text: `${weekendShare.toFixed(0)}% of ${input.mode === "income" ? "income" : "activity"} occurred on weekends.` });
   const topDescription = input.descriptions[0];
   if (topDescription && topDescription.amount >= 5000 && topDescription.share >= 20) candidates.push({ score: topDescription.amount * topDescription.share / 100, kind: "description", text: `${topDescription.description} was the largest description at ${topDescription.share.toFixed(0)}% across ${topDescription.count} transaction${topDescription.count === 1 ? "" : "s"}.` });
-  if (input.budget && Math.abs(input.budget.projectedDifference) >= Math.max(2000, input.budget.budget * .05)) candidates.push({ score: Math.abs(input.budget.projectedDifference) * 2, kind: "budget", text: `At the current run rate, spending is projected to finish ${money(input.budget.projectedDifference)} ${input.budget.projectedDifference > 0 ? "above" : "below"} budget.` });
   if (input.summary.savingsRate !== null && input.comparisonSummary.savingsRate !== null) {
     const movement = input.summary.savingsRate - input.comparisonSummary.savingsRate;
     if (Math.abs(movement) >= 5) candidates.push({ score: Math.abs(movement) * 1000, kind: "saving", text: `Savings rate ${movement > 0 ? "improved" : "fell"} by ${Math.abs(movement).toFixed(1)} percentage points.` });
@@ -323,9 +289,6 @@ export function buildStatistics(input: {
   rows: StatisticsRow[];
   comparisonRows: StatisticsRow[];
   filters: StatisticsFilters;
-  budget: StatisticsBudgetRule | null;
-  budgetEligible: boolean;
-  today: string;
   currency: string;
 }) {
   const summary = totals(input.rows);
@@ -333,7 +296,6 @@ export function buildStatistics(input: {
   const categoryBreakdown = allocation(input.rows, input.comparisonRows, input.filters.mode);
   const descriptionBreakdown = descriptions(input.rows, input.filters.mode);
   const weekday = weekdayBreakdown(input.rows, input.filters);
-  const budget = budgetPace(input.rows, input.budget, input.budgetEligible, input.today);
   return {
     filters: input.filters,
     summary: {
@@ -358,8 +320,6 @@ export function buildStatistics(input: {
       topDescriptionShare: descriptionBreakdown[0]?.share ?? 0,
       top5DescriptionShare: descriptionBreakdown.slice(0, 5).reduce((sum, item) => sum + item.share, 0),
     },
-    budget,
-    budgetUnavailableReason: input.budgetEligible ? null : "Open Plan to review budget allocation and pacing.",
-    insights: insights({ mode: input.filters.mode, allocation: categoryBreakdown, descriptions: descriptionBreakdown, weekday, budget, summary, comparisonSummary, currency: input.currency }),
+    insights: insights({ mode: input.filters.mode, allocation: categoryBreakdown, descriptions: descriptionBreakdown, weekday, summary, comparisonSummary, currency: input.currency }),
   };
 }

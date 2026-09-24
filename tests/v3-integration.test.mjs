@@ -135,9 +135,8 @@ test('Protected spending and commitments overlap once; released money, splits an
  r=engine.buildBudget({...base,buckets:[bucket],transactions:[tx('mixed',25000)],assignments:[{transaction_id:'mixed',bucket_id:'food',amount_cents:15000}]});assert.equal(r.everydaySpent,10000);assert.equal(r.available,70000);
  r=engine.buildBudget({...base,buckets:[bucket],transactions:[tx('food',30000,{category_id:'groceries'}),tx('old',20000,{status:'corrected'}),tx('excluded',10000,{counts_monthly:0})]});assert.equal(r.buckets[0].deficit,10000);assert.equal(r.available,70000);
 });
-test('Daily and weekly use one pool; future income is only in forecast, transfers conserve cash',()=>{
+test('Daily and weekly guidance use one pool',()=>{
  for(const mode of ['adaptive','even','weighted'])for(const carry of ['none','positive','signed','capped']){const r=engine.buildBudget({...base,config:{...config,allocation:mode,carry,carryCap:10000},transactions:[tx('food',6000)]});assert.equal(r.available,94000);assert.equal(r.daily.spent,6000);assert.equal(r.weekly.spent,6000);}
- const f=engine.forecastCash([account,{...account,id:'other'}],[occurrence('transfer',1000,{type:'transfer',destination_account_id:'other'}),occurrence('salary',10000,{type:'income'})],base.today);assert.equal(f.closing,210000);
 });
 test('Migration preserves accounts, balances and original history, starts fresh allocations, and is repeatable',async()=>{
  const backupPath=path.resolve('../pre-v3-data-backup.json');
