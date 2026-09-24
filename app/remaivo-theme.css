@@ -462,6 +462,15 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
   .v3-app .settings-row { flex-wrap: wrap; }
   .v3-app .section-heading { flex-wrap: wrap; gap: 12px; }
 }
+@media (min-width: 761px) and (max-width: 900px) {
+  .v3-bucket-table { overflow: visible; }
+  .v3-bucket-labels { display: none; }
+  .v3-bucket-row { min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 6px; text-align: left; }
+  .v3-bucket-row > span:first-child { grid-column: 1 / -1; }
+  .v3-bucket-row > :not(:first-child) { min-width: 0; overflow-wrap: anywhere; }
+  .v3-bucket-row > [data-label]::before { content: attr(data-label); display: block; color: #7b8290; font-size: .75rem; font-weight: 400; margin-bottom: 4px; }
+  .v3-bucket-row > [data-label="Remaining"] { color: #365bd6; }
+}
 @media (max-width: 370px) {
   .v3-workspace { padding-left: 14px; padding-right: 14px; }
   .v3-topbar h1 { font-size: 1.375rem; }
