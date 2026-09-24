@@ -14,6 +14,7 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS installment_payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan_id TEXT NOT NULL, sequence INTEGER NOT NULL, due_date TEXT NOT NULL, amount_cents INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'upcoming', paid_transaction_id TEXT)`,
   `CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, target_cents INTEGER, contributed_cents INTEGER NOT NULL DEFAULT 0, account_id TEXT, color TEXT NOT NULL DEFAULT '#dff35f', archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS spare_events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, transaction_id TEXT NOT NULL, destination_account_id TEXT, base_cents INTEGER NOT NULL, multiplied_cents INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS forecast_scenarios (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, events_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS idx_accounts_user_active ON accounts(user_id, archived)`,
   `CREATE INDEX IF NOT EXISTS idx_investment_snapshots_user_account_date ON investment_valuation_snapshots(user_id, account_id, snapshot_date)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_user_name_kind ON categories(user_id, name, kind)`,
@@ -29,6 +30,7 @@ const statements = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_installment_payments_plan_sequence ON installment_payments(plan_id, sequence)`,
   `CREATE INDEX IF NOT EXISTS idx_goals_user_kind ON goals(user_id, kind)`,
   `CREATE INDEX IF NOT EXISTS idx_spare_events_user_status ON spare_events(user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_forecast_scenarios_user_updated ON forecast_scenarios(user_id, updated_at)`,
 ];
 
 const budgetUpgrades = [

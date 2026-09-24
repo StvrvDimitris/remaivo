@@ -1,4 +1,5 @@
-import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences } from "../../../db/v3";
+import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger, generateOccurrences, ensureV3Schema } from "../../../db/v3";
+import { exportBackup } from "../../../db/backup";
 import { forecastHistory } from "../../../db/forecast";
 import { listForecastScenarios, removeForecastScenario, saveForecastScenario } from "../../../db/forecast-scenarios";
 import { env } from "cloudflare:workers";
@@ -370,6 +371,18 @@ export async function GET(request: Request) {
   if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
   try {
     const view = new URL(request.url).searchParams.get("view");
+    if (view === "export") {
+      await ensureFinanceSchema();
+      await ensureV3Schema();
+      const backup = await exportBackup(user.userId);
+      const date = backup.exportedAt.slice(0, 10);
+      return new Response(JSON.stringify(backup, null, 2), { headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="remaivo-backup-${date}.json"`,
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      } });
+    }
     if (view === "backup") {
       await ensureFinanceSchema();
       await initializeV3(user.userId, financialToday('UTC'));
