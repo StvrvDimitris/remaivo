@@ -202,18 +202,15 @@ function balanceStatements(userId: string, transaction: Record<string, unknown>,
   return [guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
 }
 
-async function snapshot(user: FinanceUser, mark?: (stage: string) => void) {
+async function snapshot(user: FinanceUser) {
   await ensureFinanceSchema();
-  mark?.("schema");
   const profile = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
-  mark?.("profile");
   const today = financialToday(String(profile?.timezone || "UTC"));
   if (!profile?.setup_complete) {
     return { needsSetup: true, user, today };
   }
 
   await reconcileV3(user.userId, today);
-  mark?.("reconcile");
   const monthStart = `${today.slice(0, 7)}-01`;
   const [mainRows, v3] = await Promise.all([env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
@@ -240,7 +237,6 @@ async function snapshot(user: FinanceUser, mark?: (stage: string) => void) {
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
   ]), v3Snapshot(user.userId, today)]);
-  mark?.("read models");
   const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = mainRows;
 
   return {
@@ -262,7 +258,6 @@ async function snapshot(user: FinanceUser, mark?: (stage: string) => void) {
 }
 
 export async function GET(request: Request) {
-  const startedAt = performance.now();
   const user = await currentUser();
   if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
   try {
@@ -279,21 +274,6 @@ export async function GET(request: Request) {
     }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
-    if (new URL(request.url).searchParams.get("__perf") === "1") {
-      const stages: Array<{ stage: string; ms: number }> = [];
-      let previous = startedAt;
-      const mark = (stage: string) => {
-        const now = performance.now();
-        stages.push({ stage, ms: Math.round(now - previous) });
-        previous = now;
-      };
-      mark("auth");
-      const result = await snapshot(user, mark);
-      const response = Response.json(result);
-      mark("serialize");
-      console.log("remaivo-snapshot-timing", JSON.stringify(stages));
-      return response;
-    }
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });
