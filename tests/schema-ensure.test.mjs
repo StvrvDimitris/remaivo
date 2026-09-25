@@ -42,6 +42,30 @@ const source = fs.readFileSync('db/ensure.ts', 'utf8').replace('import { env } f
 fs.writeFileSync(path.join(scratch, 'ensure.mjs'), ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 const moduleUrl = pathToFileURL(path.join(scratch, 'ensure.mjs')).href;
 
+test('migrations leave only the current finance tables and columns', () => {
+  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all().map(row => row.name);
+  assert.deepEqual(tables, [
+    'accounts', 'categories', 'goals', 'installment_payments',
+    'installment_plans', 'investment_valuation_snapshots', 'profiles',
+    'recurring_plans', 'spare_events', 'transactions', 'v3_assignments',
+    'v3_bucket_periods', 'v3_bucket_templates', 'v3_events',
+    'v3_occurrences', 'v3_payment_links', 'v3_periods', 'v3_versions',
+  ]);
+  for (const [table, removed] of Object.entries({
+    profiles: ['spare_sweep_mode', 'spare_threshold_cents'],
+    accounts: ['opening_balance_cents', 'icon'],
+    categories: ['icon'],
+    transactions: ['counts_daily', 'counts_weekly', 'counts_general'],
+    installment_plans: ['include_daily_weekly'],
+    installment_payments: ['paid_transaction_id'],
+    spare_events: ['destination_account_id', 'base_cents'],
+  })) {
+    const columns = new Set(sqlite.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
+    assert.ok(removed.every(name => !columns.has(name)), table);
+  }
+});
+
 test('a cold Worker reads an existing schema without replaying migrations', async () => {
   await (await import(`${moduleUrl}?first`)).ensureFinanceSchema();
   writes = 0;

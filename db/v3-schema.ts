@@ -1,13 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-export const v3_migrations=sqliteTable('v3_migrations',{
- user_id: text('user_id').primaryKey(),
- created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
- snapshot_json: text('snapshot_json').notNull(),
- summary_json: text('summary_json').notNull()
-});
-
 export const v3_versions=sqliteTable('v3_versions',{
  id: text('id').primaryKey(),
  user_id: text('user_id').notNull(),
@@ -91,21 +84,6 @@ export const v3_events=sqliteTable('v3_events',{
  kind: text('kind').notNull(),
  detail: text('detail').notNull(),
  created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
-});
-
-export const v3_ledger_entries=sqliteTable('v3_ledger_entries',{
- id: text('id').primaryKey(),
- user_id: text('user_id').notNull(),
- transaction_id: text('transaction_id').notNull(),
- account_id: text('account_id').notNull(),
- amount_cents: integer('amount_cents').notNull()
-});
-
-export const v3_opening_anchors=sqliteTable('v3_opening_anchors',{
- id: text('id').primaryKey(),
- user_id: text('user_id').notNull(),
- account_id: text('account_id').notNull(),
- amount_cents: integer('amount_cents').notNull()
 });
 
 export const v3_payment_links=sqliteTable('v3_payment_links',{transaction_id:text('transaction_id').primaryKey(),user_id:text('user_id').notNull(),occurrence_id:text('occurrence_id').notNull()});

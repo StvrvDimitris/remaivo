@@ -85,6 +85,13 @@
       "when": 1789973181181,
       "tag": "0011_empty_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790317614911,
+      "tag": "0012_easy_puck",
+      "breakpoints": true
     }
   ]
 }
