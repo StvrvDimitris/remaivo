@@ -10,9 +10,14 @@ const id=()=>crypto.randomUUID();
 const event=(user:string,kind:string,detail:string)=>env.DB.prepare('INSERT INTO v3_events (id,user_id,kind,detail) VALUES (?,?,?,?)').bind(id(),user,kind,detail);
 
 export async function currentPeriod(user:string,today:string){
- const version=await env.DB.prepare('SELECT * FROM v3_versions WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC,created_at DESC,rowid DESC LIMIT 1').bind(user,today).first<{id:string;config_json:string}>();if(!version)throw new Error('Your plan is not ready yet. Refresh to continue.');
+ const [version,coveringPeriod]=await Promise.all([
+   env.DB.prepare('SELECT * FROM v3_versions WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC,created_at DESC,rowid DESC LIMIT 1').bind(user,today).first<{id:string;config_json:string}>(),
+   env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date<=? AND end_date>? ORDER BY start_date DESC,end_date DESC LIMIT 1').bind(user,today,today).first<{id:string;start_date:string;end_date:string;version_id:string;funding_cents:number}>(),
+ ]);if(!version)throw new Error('Your plan is not ready yet. Refresh to continue.');
  const desired=JSON.parse(version.config_json) as BudgetConfig;const bounds=periodFor(desired,today);
- let period=await env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date=? AND end_date=?').bind(user,bounds.start,bounds.end).first<{id:string;start_date:string;end_date:string;version_id:string;funding_cents:number}>();
+ let period=coveringPeriod?.start_date===bounds.start&&coveringPeriod.end_date===bounds.end
+   ? coveringPeriod
+   : await env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date=? AND end_date=?').bind(user,bounds.start,bounds.end).first<{id:string;start_date:string;end_date:string;version_id:string;funding_cents:number}>();
  if(!period){
    const accounts=await rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=? AND archived=0',user);
    const actuals=await rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? AND date<=?",user,bounds.start,bounds.end,today);
@@ -33,15 +38,16 @@ export async function currentPeriod(user:string,today:string){
    }await env.DB.batch(stmts);period=await env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date=? AND end_date=?').bind(user,bounds.start,bounds.end).first();
  }
  if(!period)throw new Error('Could not open the budget period.');
- const saved=await env.DB.prepare('SELECT config_json FROM v3_versions WHERE id=? AND user_id=?').bind(period.version_id,user).first<{config_json:string}>();return {period,config:JSON.parse(saved!.config_json) as BudgetConfig};
+ const saved=period.version_id===version.id ? version : await env.DB.prepare('SELECT config_json FROM v3_versions WHERE id=? AND user_id=?').bind(period.version_id,user).first<{config_json:string}>();return {period,config:JSON.parse(saved!.config_json) as BudgetConfig};
 }
 
 type PlanRow={id:string;title:string;type:string;amount_cents:number;next_date:string;frequency:string;interval_count:number;anchor_day:number;end_date:string|null;account_id:string|null;destination_account_id:string|null;category_id:string|null;committed:number;auto_post:number};
 export async function generateOccurrences(user:string,today:string){
  type StoredOccurrence=Pick<Occurrence,'id'|'source_kind'|'source_id'|'title'|'amount_cents'|'paid_cents'|'account_id'|'destination_account_id'|'category_id'|'committed'|'auto_post'|'status'>;
- const [plans,existing]=await Promise.all([
+ const [plans,existing,payments]=await Promise.all([
   rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user),
   rows<StoredOccurrence>('SELECT id,source_kind,source_id,title,amount_cents,paid_cents,account_id,destination_account_id,category_id,committed,auto_post,status FROM v3_occurrences WHERE user_id=?',user),
+  rows<{id:string;plan_id:string;due_date:string;amount_cents:number;title:string;payment_account_id:string;category_id:string;auto_post:number}>("SELECT ip.*,p.title,p.payment_account_id,p.category_id,p.auto_post FROM installment_payments ip JOIN installment_plans p ON p.id=ip.plan_id AND p.user_id=ip.user_id WHERE ip.user_id=? AND ip.status='upcoming' AND p.status='active'",user),
  ]);
  const byId=new Map(existing.map(o=>[o.id,o]));const horizon=plusDays(today,400);const stmts:D1PreparedStatement[]=[];
  for(const p of plans){let date=p.next_date;let n=0;while(date<horizon&&(!p.end_date||date<=p.end_date)){
@@ -51,7 +57,6 @@ export async function generateOccurrences(user:string,today:string){
     stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,destination_account_id,category_id,committed,auto_post) VALUES(?,?,'recurring',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.amount_cents ELSE v3_occurrences.amount_cents END,account_id=excluded.account_id,destination_account_id=excluded.destination_account_id,category_id=excluded.category_id,committed=excluded.committed,auto_post=excluded.auto_post`).bind(oid,user,p.id,date,date,p.title,p.type,p.amount_cents,p.account_id,p.destination_account_id,p.category_id,p.committed,p.auto_post));
    date=addCalendarInterval(date,p.frequency,p.interval_count,p.anchor_day);
  }}
- const payments=await rows<{id:string;plan_id:string;due_date:string;amount_cents:number;title:string;payment_account_id:string;category_id:string;auto_post:number}>("SELECT ip.*,p.title,p.payment_account_id,p.category_id,p.auto_post FROM installment_payments ip JOIN installment_plans p ON p.id=ip.plan_id AND p.user_id=ip.user_id WHERE ip.user_id=? AND ip.status='upcoming' AND p.status='active'",user);
  for(const p of payments){const oid='installment:'+p.id;const saved=byId.get(oid);
   if(!saved||saved.title!==p.title||saved.amount_cents!==p.amount_cents||saved.account_id!==p.payment_account_id||saved.category_id!==p.category_id||saved.auto_post!==p.auto_post)
    stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,category_id,committed,auto_post) VALUES(?,?,'installment',?,?,?,?,?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=excluded.amount_cents,account_id=excluded.account_id,category_id=excluded.category_id,auto_post=excluded.auto_post`).bind(oid,user,p.id,p.due_date,p.due_date,p.title,'installment_payment',p.amount_cents,p.payment_account_id,p.category_id,p.auto_post));
@@ -92,19 +97,34 @@ async function advancePlan(user:string,planId:string){const plan=await env.DB.pr
 export async function reconcileV3(user:string,today:string){
  await ensureFinanceSchema();
  await generateOccurrences(user,today);
- const live=new Set((await rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user)).map(a=>a.id));
- const due=await rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today);
+ const [activeAccounts,due]=await Promise.all([
+   rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user),
+   rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today),
+ ]);
+ const live=new Set(activeAccounts.map(a=>a.id));
  for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);}
 }
 
 export async function v3Snapshot(user:string,today:string){
  const {period,config}=await currentPeriod(user,today);
- const [accounts,transactions,trendTransactions,firstRecorded,buckets,occurrences,assignments,events]=await Promise.all([
- rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=?',user),rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?",user,period.start_date,period.end_date),
- rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id",user,plusDays(today,-28),today),
- env.DB.prepare("SELECT date FROM transactions WHERE user_id=? AND status='posted' AND date<=? ORDER BY date LIMIT 1").bind(user,today).first<{date:string}>(),
- rows<Bucket>('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid',user,period.id),
- rows<Occurrence>('SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN (\'upcoming\',\'partial\')) ORDER BY due_date,id',user,period.start_date),rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user),rows<{id:string;kind:string;detail:string;created_at:string}>('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20',user)]);
+ const [accountRows,transactionRows,trendRows,firstRecordedRows,bucketRows,occurrenceRows,assignmentRows,eventRows]=await env.DB.batch([
+  env.DB.prepare('SELECT * FROM accounts WHERE user_id=?').bind(user),
+  env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?").bind(user,period.start_date,period.end_date),
+  env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id").bind(user,plusDays(today,-28),today),
+  env.DB.prepare("SELECT date FROM transactions WHERE user_id=? AND status='posted' AND date<=? ORDER BY date LIMIT 1").bind(user,today),
+  env.DB.prepare('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid').bind(user,period.id),
+  env.DB.prepare("SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN ('upcoming','partial')) ORDER BY due_date,id").bind(user,period.start_date),
+  env.DB.prepare('SELECT * FROM v3_assignments WHERE user_id=?').bind(user),
+  env.DB.prepare('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20').bind(user),
+ ]);
+ const accounts=accountRows.results as MoneyAccount[];
+ const transactions=transactionRows.results as MoneyTransaction[];
+ const trendTransactions=trendRows.results as MoneyTransaction[];
+ const firstRecorded=firstRecordedRows.results[0] as {date:string}|undefined;
+ const buckets=bucketRows.results as Bucket[];
+ const occurrences=occurrenceRows.results as Occurrence[];
+ const assignments=assignmentRows.results as Assignment[];
+ const events=eventRows.results as {id:string;kind:string;detail:string;created_at:string}[];
  const result=buildBudget({today,start:period.start_date,end:period.end_date,config,funding:period.funding_cents,accounts,transactions,buckets,occurrences,assignments});
  return {periodId:period.id,config,result,occurrences,transactions,trendTransactions,firstRecordedDate:firstRecorded?.date??today,events};
 }

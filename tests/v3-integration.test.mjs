@@ -12,7 +12,7 @@ for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/v3-engine.ts','e
 }
 const sqlite=new DatabaseSync(':memory:');
 class Statement{constructor(sql,args=[]){this.sql=sql;this.args=args;}bind(...args){return new Statement(this.sql,args);}async all(){return {results:sqlite.prepare(this.sql).all(...this.args)};}async first(){return sqlite.prepare(this.sql).get(...this.args)||null;}async run(){return {meta:{changes:sqlite.prepare(this.sql).run(...this.args).changes}};}}
-const DB={prepare:sql=>new Statement(sql),batch:async stmts=>{sqlite.exec('BEGIN');try{const result=[];for(const s of stmts)result.push(await s.run());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
+const DB={prepare:sql=>new Statement(sql),batch:async stmts=>{sqlite.exec('BEGIN');try{const result=[];for(const s of stmts)result.push(/^\s*(SELECT|WITH|PRAGMA)\b/i.test(s.sql)?await s.all():await s.run());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
 globalThis.__testEnv={DB};
 const engine=await import(pathToFileURL(path.join(scratch,'engine.mjs')));
 const v3=await import(pathToFileURL(path.join(scratch,'server.mjs')));
@@ -152,6 +152,19 @@ test('Current Plan reconciliation preserves accounts and transaction history',as
  const snapshot=await v3.v3Snapshot(user,base.today);
  assert.equal(snapshot.result.totalSpent,2000);
  assert.equal(snapshot.result.funding,100000);
+});
+test('An existing period keeps its saved configuration even when newer or overlapping periods exist',async()=>{
+ const owner='saved-period-owner';
+ sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('saved-version',owner,'1900-01-01',JSON.stringify(config));
+ sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('newer-version',owner,'2026-09-10',JSON.stringify({...config,target:200000}));
+ sqlite.prepare('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)').run('saved-period',owner,'2026-09-01','2026-10-01','saved-version',100000);
+ const original=await v3.currentPeriod(owner,'2026-09-17');
+ assert.equal(original.period.id,'saved-period');
+ assert.equal(original.config.target,100000);
+ sqlite.prepare('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)').run('overlapping-period',owner,'2026-09-15','2026-09-30','newer-version',200000);
+ const withOverlap=await v3.currentPeriod(owner,'2026-09-17');
+ assert.equal(withOverlap.period.id,'saved-period');
+ assert.equal(withOverlap.config.target,100000);
 });
 test('All preserved schedules expand and reconcile without duplicate balances or transactions',async()=>{
  await v3.reconcileV3(user,base.today);const before=JSON.stringify(sqlite.prepare('SELECT id,balance_cents FROM accounts ORDER BY id').all());const count=sqlite.prepare('SELECT COUNT(*) n FROM transactions').get().n;

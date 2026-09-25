@@ -215,7 +215,7 @@ async function snapshot(user: FinanceUser, mark?: (stage: string) => void) {
   await reconcileV3(user.userId, today);
   mark?.("reconcile");
   const monthStart = `${today.slice(0, 7)}-01`;
-  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = await env.DB.batch([
+  const [mainRows, v3] = await Promise.all([env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
     env.DB.prepare(`WITH recent AS (
@@ -239,10 +239,9 @@ async function snapshot(user: FinanceUser, mark?: (stage: string) => void) {
     env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
-  ]);
-  mark?.("main batch");
-  const v3 = await v3Snapshot(user.userId, today);
-  mark?.("plan snapshot");
+  ]), v3Snapshot(user.userId, today)]);
+  mark?.("read models");
+  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = mainRows;
 
   return {
     needsSetup: false,
