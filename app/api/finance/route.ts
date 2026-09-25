@@ -1,4 +1,4 @@
-import { initializeV3, reconcileV3, v3Snapshot, v3Action, syncLedger } from "../../../db/v3";
+import { reconcileV3, v3Snapshot, v3Action } from "../../../db/v3";
 import { exportBackup } from "../../../db/backup";
 import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
@@ -41,6 +41,12 @@ function calendarDate(value: unknown) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const parsed = new Date(`${date}T00:00:00.000Z`);
   return Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== date ? null : date;
+}
+
+// Temporary cutover support while the old and clean schemas are both live.
+async function hasOldSpareEventFields() {
+  const columns = await env.DB.prepare("PRAGMA table_info(spare_events)").all<{ name: string }>();
+  return columns.results.some((column) => column.name === "base_cents");
 }
 
 async function categoryIdFor(userId: string, value: unknown, kind: "expense" | "income") {
@@ -292,7 +298,6 @@ export async function POST(request: Request) {
     const storedClock = action === "setup" ? null : await env.DB.prepare("SELECT timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<{timezone:string}>();
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
-    if (action !== "setup") await initializeV3(user.userId, actionToday);
     if (["addTransaction", "correctTransaction", "updateTransaction"].includes(action) && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
     if (["addRecurring","updateRecurring"].includes(action)) {
       if(payload.frequency==='once'){payload.frequency='monthly';payload.endDate=payload.nextDate;}
@@ -304,7 +309,6 @@ export async function POST(request: Request) {
     }
     if (action.startsWith("v3")) {
       await v3Action(user.userId, actionToday, action, payload);
-      await syncLedger(user.userId);
       return Response.json(await snapshot(user));
     }
     if (action === "setup") {
@@ -313,7 +317,7 @@ export async function POST(request: Request) {
       const amount = cents(payload.balance);
       const type = text(payload.type, "bank");
       const signedAmount = type === "credit" ? -amount : amount;
-      await env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_cents, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(crypto.randomUUID(), user.userId, text(payload.name, "New account"), type, signedAmount, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId).run();
+      await env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(crypto.randomUUID(), user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId).run();
     } else if (action === "updateAccount") {
       const type = ["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].includes(text(payload.type)) ? text(payload.type) : "custom";
       await env.DB.prepare("UPDATE accounts SET name = ?, type = ?, credit_limit_cents = ?, color = ?, include_spendable = ? WHERE id = ? AND user_id = ?").bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId).run();
@@ -341,7 +345,7 @@ export async function POST(request: Request) {
         .bind(text(payload.snapshotId), user.userId).run();
       if (!Number(result.meta.changes)) return Response.json({ error: "Valuation snapshot not found." }, { status: 404 });
     } else if (action === "addCategory") {
-      await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color, icon) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "expense"), text(payload.color, "#cfe9d7"), text(payload.icon, "circle")).run();
+      await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "expense"), text(payload.color, "#cfe9d7")).run();
     } else if (action === "updateCategory") {
       await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), text(payload.kind, "expense") === "income" ? "income" : "expense", text(payload.color, "#cfe9d7"), payload.categoryId, user.userId).run();
     } else if (action === "archiveCategory") {
@@ -362,14 +366,16 @@ export async function POST(request: Request) {
         const base = (100 - (amount % 100)) % 100;
         spare = base * Math.max(1, profile.spare_multiplier);
       }
-      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, spare_change_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget && !committed && !isMovement ? 1 : 0, countsBudget && !committed && !isMovement ? 1 : 0, countsBudget ? 1 : 0, countsBudget ? 1 : 0, spare)];
+      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_monthly, spare_change_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, spare)];
       if (type === "income") statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
       else if (isMovement) {
         statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
         statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.destinationAccountId, user.userId));
       } else statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
       if (spare && profile?.spare_destination_id) {
-        statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, id, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare));
+        statements.push((await hasOldSpareEventFields()
+          ? env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, id, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare)
+          : env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, multiplied_cents) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, id, spare)));
       }
       await env.DB.batch(statements);
     } else if (action === "updateTransaction") {
@@ -417,11 +423,13 @@ export async function POST(request: Request) {
       const statements = [
         env.DB.prepare("UPDATE transactions SET status = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(correctionMarker, original.id, user.userId),
         ...balanceStatements(user.userId, original, -1, { id: String(original.id), status: correctionMarker }),
-        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, recurring_plan_id, spare_change_cents, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, payload.categoryId || null, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget && !committed && !moving ? 1 : 0, countsBudget && !committed && !moving ? 1 : 0, countsBudget ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, original.id, original.id, user.userId, correctionMarker),
+        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_monthly, recurring_plan_id, spare_change_cents, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, payload.categoryId || null, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, original.id, original.id, user.userId, correctionMarker),
         ...balanceStatements(user.userId, replacement, 1, { id: replacementId, status: "posted" }),
       ];
       if (oldSpare?.status === "pending") statements.push(env.DB.prepare("UPDATE spare_events SET status = 'cancelled' WHERE transaction_id = ? AND user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(original.id, user.userId, original.id, user.userId, correctionMarker));
-      if (spare && profile?.spare_destination_id) statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare, original.id, user.userId, correctionMarker));
+      if (spare && profile?.spare_destination_id) statements.push(await hasOldSpareEventFields()
+        ? env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, destination_account_id, base_cents, multiplied_cents) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, profile.spare_destination_id, Math.round(spare / Math.max(1, profile.spare_multiplier)), spare, original.id, user.userId, correctionMarker)
+        : env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, multiplied_cents) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, spare, original.id, user.userId, correctionMarker));
       statements.push(env.DB.prepare('UPDATE v3_assignments SET transaction_id=?,amount_cents=CAST(amount_cents*MIN(1.0,?*1.0/?) AS INTEGER) WHERE transaction_id=? AND user_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,amount,original.amount_cents,original.id,user.userId,replacementId,'posted'));
       statements.push(env.DB.prepare('UPDATE v3_occurrences SET paid_cents=paid_cents+?,amount_cents=amount_cents+?,transaction_id=CASE WHEN transaction_id=? THEN ? ELSE transaction_id END WHERE user_id=? AND id IN (SELECT occurrence_id FROM v3_payment_links WHERE transaction_id=? AND user_id=?) AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(amount-Number(original.amount_cents),amount-Number(original.amount_cents),original.id,replacementId,user.userId,original.id,user.userId,replacementId,'posted'));
       statements.push(env.DB.prepare('UPDATE v3_payment_links SET transaction_id=? WHERE user_id=? AND transaction_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,user.userId,original.id,replacementId,'posted'));
@@ -460,8 +468,8 @@ export async function POST(request: Request) {
       const base = Math.floor(total / count);
       const custom = Array.isArray(payload.customAmounts) ? payload.customAmounts.map(cents) : [];
       const statements = [
-        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, include_daily_weekly, auto_post) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, categoryId, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0),
-        env.DB.prepare("INSERT INTO transactions (id, user_id, category_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general, installment_plan_id) VALUES (?, ?, ?, 'installment_purchase', ?, ?, ?, 1, 0, 0, 0, 0, ?)").bind(crypto.randomUUID(), user.userId, categoryId, text(payload.title), total, text(payload.purchaseDate, actionToday), planId),
+        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, auto_post) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, categoryId, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0),
+        env.DB.prepare("INSERT INTO transactions (id, user_id, category_id, type, description, amount_cents, date, committed, counts_monthly, installment_plan_id) VALUES (?, ?, ?, 'installment_purchase', ?, ?, ?, 1, 0, ?)").bind(crypto.randomUUID(), user.userId, categoryId, text(payload.title), total, text(payload.purchaseDate, actionToday), planId),
       ];
       for (let index = 0; index < count; index += 1) {
         const amount = custom.length === count ? custom[index] : index === count - 1 ? total - base * (count - 1) : base;
@@ -492,7 +500,7 @@ export async function POST(request: Request) {
       const base = Math.floor(remainingTotal / remainingCount);
       const statements = [
         env.DB.prepare("DELETE FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
-        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, category_id = ?, total_cents = ?, paid_cents = ?, installment_count = ?, first_due_date = ?, frequency = ?, payment_account_id = ?, linked_credit_account_id = ?, include_daily_weekly = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, categoryId, total, paidCents, paidCount + remainingCount, paidCount ? plan.first_due_date : nextDueDate, frequency, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.includeDailyWeekly) ? 1 : 0, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
+        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, category_id = ?, total_cents = ?, paid_cents = ?, installment_count = ?, first_due_date = ?, frequency = ?, payment_account_id = ?, linked_credit_account_id = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, categoryId, total, paidCents, paidCount + remainingCount, paidCount ? plan.first_due_date : nextDueDate, frequency, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
         env.DB.prepare("UPDATE transactions SET description = ?, category_id = ?, amount_cents = CASE WHEN type = 'installment_purchase' THEN ? ELSE amount_cents END WHERE user_id = ? AND installment_plan_id = ? AND status = 'posted'").bind(text(payload.title, "Pay-later plan"), categoryId, total, user.userId, payload.planId),
       ];
       for (let index = 0; index < remainingCount; index += 1) {
@@ -515,14 +523,14 @@ export async function POST(request: Request) {
       if (!validTimeZone(timezone)) return Response.json({ error: "Choose a valid financial timezone." }, { status: 400 });
       await env.DB.prepare("UPDATE profiles SET timezone = ? WHERE user_id = ?").bind(timezone, user.userId).run();
     } else if (action === "updateSpare") {
-      await env.DB.prepare("UPDATE profiles SET spare_multiplier = ?, spare_destination_id = ?, spare_sweep_mode = ?, spare_threshold_cents = ? WHERE user_id = ?").bind(Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), payload.destinationAccountId || null, text(payload.sweepMode, "threshold"), cents(payload.threshold), user.userId).run();
+      await env.DB.prepare("UPDATE profiles SET spare_multiplier = ?, spare_destination_id = ? WHERE user_id = ?").bind(Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), payload.destinationAccountId || null, user.userId).run();
     } else if (action === "sweepSpare") {
       const total = await env.DB.prepare("SELECT COALESCE(SUM(multiplied_cents), 0) AS total FROM spare_events WHERE user_id = ? AND status = 'pending'").bind(user.userId).first<{total:number}>();
       const amount = Number(total?.total || 0);
       if (amount > 0 && payload.sourceAccountId && payload.destinationAccountId) {
         const transactionId = crypto.randomUUID();
         await env.DB.batch([
-          env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_daily, counts_weekly, counts_monthly, counts_general) VALUES (?, ?, ?, ?, 'investment', 'Spare change sweep', ?, ?, 1, 0, 0, 1, 1)").bind(transactionId, user.userId, payload.sourceAccountId, payload.destinationAccountId, amount, actionToday),
+          env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly) VALUES (?, ?, ?, ?, 'investment', 'Spare change sweep', ?, ?, 1, 1)").bind(transactionId, user.userId, payload.sourceAccountId, payload.destinationAccountId, amount, actionToday),
           env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.sourceAccountId, user.userId),
           env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.destinationAccountId, user.userId),
           env.DB.prepare("UPDATE spare_events SET status = 'swept' WHERE user_id = ? AND status = 'pending'").bind(user.userId),
@@ -543,7 +551,6 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unknown action." }, { status: 400 });
     }
 
-    await syncLedger(user.userId);
     return Response.json(await snapshot(user));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save your changes.";

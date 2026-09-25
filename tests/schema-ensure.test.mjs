@@ -49,10 +49,9 @@ test('a cold Worker reads an existing schema without replaying migrations', asyn
   assert.equal(writes, 0);
 });
 
-test('a missing schema object triggers repair', async () => {
-  sqlite.exec('DROP INDEX idx_spare_events_user_status');
+test('a missing current table fails closed without runtime schema writes', async () => {
+  sqlite.exec('DROP TABLE v3_events');
   writes = 0;
-  await (await import(`${moduleUrl}?repair`)).ensureFinanceSchema();
-  assert.ok(writes > 0);
-  assert.ok(sqlite.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_spare_events_user_status'").get());
+  await assert.rejects((await import(`${moduleUrl}?missing`)).ensureFinanceSchema(), /temporarily unavailable/);
+  assert.equal(writes, 0);
 });

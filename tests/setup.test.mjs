@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const scratch = path.resolve("work/setup-tests");
 fs.mkdirSync(scratch, { recursive: true });
-for (const [source, target] of [["app/finance-dates.ts", "dates"], ["app/v3-engine.ts", "engine"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
+for (const [source, target] of [["app/finance-dates.ts", "dates"], ["app/v3-engine.ts", "engine"], ["db/ensure.ts", "ensure"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
   const code = fs.readFileSync(source, "utf8")
     .replaceAll('import { env } from "cloudflare:workers";', "const env = globalThis.__setupEnv;")
     .replaceAll("import { env } from 'cloudflare:workers';", "const env = globalThis.__setupEnv;")
@@ -18,7 +18,8 @@ for (const [source, target] of [["app/finance-dates.ts", "dates"], ["app/v3-engi
     .replaceAll('"../app/v3-engine"', '"./engine.mjs"')
     .replaceAll("'../app/v3-engine'", "'./engine.mjs'")
     .replaceAll('"./v3"', '"./v3.mjs"');
-  fs.writeFileSync(path.join(scratch, `${target}.mjs`), ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
+  const resolved = code.replaceAll('"./ensure"', '"./ensure.mjs"').replaceAll("'./ensure'", "'./ensure.mjs'");
+  fs.writeFileSync(path.join(scratch, `${target}.mjs`), ts.transpileModule(resolved, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 }
 
 const sqlite = new DatabaseSync(":memory:");
@@ -54,16 +55,13 @@ const payload = {
   budgets: { monthly: "1100" }, budgetMode: "fixed_split", carryMode: "stack_signed",
 };
 
-test("fresh setup creates only current Plan state and opening anchors", async () => {
+test("fresh setup creates current Plan state directly", async () => {
   assert.equal(await createCurrentPlan("fresh-owner", payload), true);
   const profile = sqlite.prepare("SELECT setup_complete, timezone FROM profiles WHERE user_id='fresh-owner'").get();
   assert.deepEqual({ ...profile }, { setup_complete: 1, timezone: "Europe/Athens" });
   const accounts = sqlite.prepare("SELECT type, balance_cents FROM accounts WHERE user_id='fresh-owner' ORDER BY type").all().map(row => ({ ...row }));
   assert.deepEqual(accounts, [{ type: "bank", balance_cents: 140000 }, { type: "credit", balance_cents: -8000 }]);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM v3_opening_anchors WHERE user_id='fresh-owner'").get().n, 2);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM categories WHERE user_id='fresh-owner'").get().n, 9);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM budget_rules WHERE user_id='fresh-owner'").get().n, 0);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM v3_migrations WHERE user_id='fresh-owner'").get().n, 0);
   const config = JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='fresh-owner'").get().config_json);
   assert.equal(config.target, 110000);
   assert.equal(config.allocation, "even");

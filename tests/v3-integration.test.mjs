@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
 const scratch=path.resolve('work/v3-tests');fs.mkdirSync(scratch,{recursive:true});
-for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/v3-engine.ts','engine'],['db/v3.ts','server']]){
- let s=fs.readFileSync(src,'utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__testEnv;').replaceAll("'../app/finance-dates'","'./dates.mjs'").replaceAll("'./finance-dates'","'./dates.mjs'").replaceAll("'../app/v3-engine'","'./engine.mjs'");
+for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/v3-engine.ts','engine'],['db/ensure.ts','ensure'],['db/v3.ts','server']]){
+ let s=fs.readFileSync(src,'utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__testEnv;').replace('import { env } from "cloudflare:workers";','const env=globalThis.__testEnv;').replaceAll("'../app/finance-dates'","'./dates.mjs'").replaceAll("'./finance-dates'","'./dates.mjs'").replaceAll("'../app/v3-engine'","'./engine.mjs'").replaceAll("'./ensure'","'./ensure.mjs'");
  fs.writeFileSync(path.join(scratch,dest+'.mjs'),ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 }
 const sqlite=new DatabaseSync(':memory:');
@@ -138,21 +138,20 @@ test('Protected spending and commitments overlap once; released money, splits an
 test('Daily and weekly guidance use one pool',()=>{
  for(const mode of ['adaptive','even','weighted'])for(const carry of ['none','positive','signed','capped']){const r=engine.buildBudget({...base,config:{...config,allocation:mode,carry,carryCap:10000},transactions:[tx('food',6000)]});assert.equal(r.available,94000);assert.equal(r.daily.spent,6000);assert.equal(r.weekly.spent,6000);}
 });
-test('Migration preserves accounts, balances and original history, starts fresh allocations, and is repeatable',async()=>{
- const backupPath=path.resolve('../pre-v3-data-backup.json');
- if(fs.existsSync(backupPath)){
-  const backup=JSON.parse(fs.readFileSync(backupPath,'utf8'));
-  for(const [table,{columns,rows}] of Object.entries(backup.tables))for(const row of rows){const vals=Array.isArray(row)?row:columns.map(c=>row[c]);sqlite.prepare(`INSERT INTO ${table} (${columns.map(c=>'"'+c+'"').join(',')}) VALUES (${columns.map(()=>'?').join(',')})`).run(...vals.map((v,i)=>columns[i]==='user_id'?user:v));}
- }else{
-  sqlite.prepare('INSERT INTO profiles(user_id,setup_complete) VALUES(?,1)').run(user);
-  sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run('cash',user,'Cash','cash',100000);
- }
- const before=JSON.stringify(sqlite.prepare('SELECT * FROM accounts').all());const txBefore=sqlite.prepare('SELECT COUNT(*) n FROM transactions').get().n;
- await v3.initializeV3(user,base.today);await v3.initializeV3(user,base.today);
- assert.equal(JSON.stringify(sqlite.prepare('SELECT * FROM accounts').all()),before);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions').get().n,txBefore);
- assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM v3_bucket_templates').get().n,0);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM v3_migrations').get().n,1);
- const ledger=sqlite.prepare("SELECT transaction_id,SUM(amount_cents) n FROM v3_ledger_entries GROUP BY transaction_id HAVING SUM(amount_cents)!=0").all();assert.equal(ledger.length,0);
- for(const a of sqlite.prepare('SELECT * FROM accounts').all()){const actual=sqlite.prepare("SELECT COALESCE(SUM(e.amount_cents),0) n FROM v3_ledger_entries e JOIN transactions t ON t.id=e.transaction_id WHERE e.account_id=? AND t.status='posted'").get(a.id).n;const anchor=sqlite.prepare('SELECT amount_cents FROM v3_opening_anchors WHERE account_id=?').get(a.id);assert.equal(anchor.amount_cents+actual,a.balance_cents);}
+test('Current Plan reconciliation preserves accounts and transaction history',async()=>{
+ sqlite.prepare('INSERT INTO profiles(user_id,setup_complete) VALUES(?,1)').run(user);
+ sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run('cash',user,'Cash','cash',98000);
+ sqlite.prepare('INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?)').run('posted-expense',user,'cash','expense','Recorded purchase',2000,'2026-09-17');
+ sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('initial:'+user,user,'1900-01-01',JSON.stringify(config));
+ const before=JSON.stringify(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=?').all(user));
+ await v3.reconcileV3(user,base.today);
+ await v3.reconcileV3(user,base.today);
+ assert.equal(JSON.stringify(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=?').all(user)),before);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(user).n,1);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM v3_versions WHERE user_id=?').get(user).n,1);
+ const snapshot=await v3.v3Snapshot(user,base.today);
+ assert.equal(snapshot.result.totalSpent,2000);
+ assert.equal(snapshot.result.funding,100000);
 });
 test('All preserved schedules expand and reconcile without duplicate balances or transactions',async()=>{
  await v3.reconcileV3(user,base.today);const before=JSON.stringify(sqlite.prepare('SELECT id,balance_cents FROM accounts ORDER BY id').all());const count=sqlite.prepare('SELECT COUNT(*) n FROM transactions').get().n;

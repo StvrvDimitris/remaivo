@@ -8,12 +8,10 @@ import ts from 'typescript';
 
 const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
-  'transactions', 'budget_rules', 'recurring_plans', 'expense_reserves',
-  'expense_reserve_periods', 'installment_plans', 'installment_payments',
-  'goals', 'spare_events', 'forecast_scenarios',
+  'transactions', 'recurring_plans', 'installment_plans', 'installment_payments',
+  'goals', 'spare_events',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
-  'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_ledger_entries',
-  'v3_opening_anchors', 'v3_payment_links',
+  'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_payment_links',
 ];
 
 let sqlite;
@@ -79,7 +77,6 @@ function seed(user, prefix) {
   const transaction = `${prefix}-transaction`;
   const recurring = `${prefix}-recurring`;
   const installment = `${prefix}-installment`;
-  const reserve = `${prefix}-reserve`;
   const version = `${prefix}-version`;
   const period = `${prefix}-period`;
   const bucket = `${prefix}-bucket`;
@@ -90,16 +87,15 @@ function seed(user, prefix) {
   insert('INSERT INTO investment_valuation_snapshots(id,user_id,account_id,snapshot_date,value_cents) VALUES(?,?,?,?,?)', `${prefix}-valuation`, user, account, '2026-09-20', 45000);
   insert('INSERT INTO categories(id,user_id,name,kind) VALUES(?,?,?,?)', category, user, `${prefix} food`, 'expense');
   insert('INSERT INTO transactions(id,user_id,account_id,category_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?,?)', transaction, user, account, category, 'expense', `${prefix}_PRIVATE_PURCHASE`, 1750, '2026-09-20');
-  insert('INSERT INTO budget_rules(id,user_id,period,anchor_date,base_cents) VALUES(?,?,?,?,?)', `${prefix}-rule`, user, 'monthly', '2026-09-01', 100000);
   insert('INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date) VALUES(?,?,?,?,?,?,?,?)', recurring, user, `${prefix} groceries`, 'expense', 1750, account, 'monthly', '2026-10-20');
-  insert('INSERT INTO expense_reserves(id,user_id,title,category_id,target_cents) VALUES(?,?,?,?,?)', reserve, user, `${prefix} reserve`, category, 5000);
-  insert('INSERT INTO expense_reserve_periods(id,user_id,reserve_id,category_id,month,target_cents) VALUES(?,?,?,?,?,?)', `${prefix}-reserve-period`, user, reserve, category, '2026-09', 5000);
   insert('INSERT INTO installment_plans(id,user_id,title,total_cents,installment_count,first_due_date,payment_account_id) VALUES(?,?,?,?,?,?,?)', installment, user, `${prefix} laptop`, 120000, 12, '2026-09-10', account);
   insert('INSERT INTO installment_payments(id,user_id,plan_id,sequence,due_date,amount_cents) VALUES(?,?,?,?,?,?)', `${prefix}-installment-payment`, user, installment, 1, '2026-09-10', 10000);
   insert('INSERT INTO goals(id,user_id,name,kind,account_id) VALUES(?,?,?,?,?)', `${prefix}-goal`, user, `${prefix} holiday`, 'savings', account);
-  insert('INSERT INTO spare_events(id,user_id,transaction_id,destination_account_id,base_cents,multiplied_cents) VALUES(?,?,?,?,?,?)', `${prefix}-spare`, user, transaction, account, 50, 50);
-  insert('INSERT INTO forecast_scenarios(id,user_id,name,events_json) VALUES(?,?,?,?)', `${prefix}-scenario`, user, `${prefix} car repair`, '[]');
-  insert('INSERT INTO v3_migrations(user_id,snapshot_json,summary_json) VALUES(?,?,?)', user, JSON.stringify({ transactions: [{ id: transaction }] }), '{"transactions":1}');
+  if (sqlite.prepare('PRAGMA table_info(spare_events)').all().some(column => column.name === 'base_cents')) {
+    insert('INSERT INTO spare_events(id,user_id,transaction_id,base_cents,multiplied_cents) VALUES(?,?,?,?,?)', `${prefix}-spare`, user, transaction, 50, 50);
+  } else {
+    insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
+  }
   insert('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)', version, user, '2026-09-01', '{"target":100000,"period":"monthly"}');
   insert('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)', period, user, '2026-09-01', '2026-10-01', version, 100000);
   insert('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents) VALUES(?,?,?,?,?,?)', bucket, user, `${prefix} food`, 'protected', category, 20000);
@@ -107,8 +103,6 @@ function seed(user, prefix) {
   insert('INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES(?,?,?,?,?)', `${prefix}-assignment`, user, transaction, bucket, 1750);
   insert('INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,paid_cents,account_id,category_id,status,transaction_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', occurrence, user, 'recurring', recurring, '2026-09-20', '2026-09-20', `${prefix} groceries`, 'expense', 1750, 1750, account, category, 'paid', transaction);
   insert('INSERT INTO v3_events(id,user_id,kind,detail) VALUES(?,?,?,?)', `${prefix}-event`, user, 'allocation', `${prefix} allocation`);
-  insert('INSERT INTO v3_ledger_entries(id,user_id,transaction_id,account_id,amount_cents) VALUES(?,?,?,?,?)', `${prefix}-ledger`, user, transaction, account, -1750);
-  insert('INSERT INTO v3_opening_anchors(id,user_id,account_id,amount_cents) VALUES(?,?,?,?)', `${prefix}-anchor`, user, account, 100000);
   insert('INSERT INTO v3_payment_links(transaction_id,user_id,occurrence_id) VALUES(?,?,?)', transaction, user, occurrence);
 }
 
@@ -119,7 +113,7 @@ function rowsFor(user) {
   ]));
 }
 
-test('JSON export includes current records without the migration snapshot or another owner', async () => {
+test('JSON export includes current records without old schema or another owner', async () => {
   freshDatabase();
   seed('alice', 'ALICE');
   seed('bob', 'BOB');
@@ -130,7 +124,7 @@ test('JSON export includes current records without the migration snapshot or ano
   const bobBefore = JSON.parse(JSON.stringify(rowsFor('bob')));
   const backup = JSON.parse(JSON.stringify(await exportBackup('alice')));
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 2);
+  assert.equal(backup.version, 3);
   assert.equal(backup.ownerId, 'alice');
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(Object.keys(backup.tables).sort(), [...tables].sort());

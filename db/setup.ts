@@ -1,21 +1,21 @@
 import { env } from "cloudflare:workers";
 import { addCalendarInterval, financialToday, validTimeZone } from "../app/finance-dates";
 import type { BudgetConfig } from "../app/v3-engine";
-import { ensureV3Schema } from "./v3";
+import { ensureFinanceSchema } from "./ensure";
 
 type SetupAccount = { name?: unknown; type?: unknown; balance?: unknown; creditLimit?: unknown; color?: unknown; includeSpendable?: unknown };
 type SetupPayload = { currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
 
 const categories = [
-  ["Groceries", "expense", "#d8ead7", "basket"],
-  ["Eating out", "expense", "#f5ddcf", "cup"],
-  ["Transport", "expense", "#d9e9ec", "car"],
-  ["Home & bills", "expense", "#eadfcb", "home"],
-  ["Shopping", "expense", "#ead9e6", "bag"],
-  ["Health", "expense", "#d8e7df", "heart"],
-  ["Entertainment", "expense", "#e6e0f2", "spark"],
-  ["Salary", "income", "#d8ead7", "briefcase"],
-  ["Other income", "income", "#d9e9ec", "plus"],
+  ["Groceries", "expense", "#d8ead7"],
+  ["Eating out", "expense", "#f5ddcf"],
+  ["Transport", "expense", "#d9e9ec"],
+  ["Home & bills", "expense", "#eadfcb"],
+  ["Shopping", "expense", "#ead9e6"],
+  ["Health", "expense", "#d8e7df"],
+  ["Entertainment", "expense", "#e6e0f2"],
+  ["Salary", "income", "#d8ead7"],
+  ["Other income", "income", "#d9e9ec"],
 ] as const;
 
 function moneyCents(value: unknown) {
@@ -26,7 +26,7 @@ function moneyCents(value: unknown) {
 }
 
 export async function createCurrentPlan(userId: string, payload: SetupPayload) {
-  await ensureV3Schema();
+  await ensureFinanceSchema();
   const existing = await env.DB.prepare("SELECT setup_complete FROM profiles WHERE user_id = ?").bind(userId).first<{ setup_complete: number }>();
   if (existing?.setup_complete) return false;
 
@@ -62,14 +62,12 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
     const color = /^#[0-9a-fA-F]{6}$/.test(String(input.color)) ? String(input.color) : "#1f5b4e";
     const spendable = typeof input.includeSpendable === "boolean" ? input.includeSpendable : !["savings", "investment", "credit"].includes(type);
     const accountId = `opening:${userId}:${index}`;
-    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, user_id, name, type, currency, opening_balance_cents, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${open}`)
-      .bind(accountId, userId, name, type, currency, balance, balance, creditLimit, color, spendable ? 1 : 0, userId));
-    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO v3_opening_anchors (id, user_id, account_id, amount_cents) SELECT ?, ?, ?, ? WHERE ${open}`)
-      .bind(accountId, userId, accountId, balance, userId));
+    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${open}`)
+      .bind(accountId, userId, name, type, currency, balance, creditLimit, color, spendable ? 1 : 0, userId));
   }
-  for (const [name, kind, color, icon] of categories) {
-    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO categories (id, user_id, name, kind, color, icon) SELECT ?, ?, ?, ?, ?, ? WHERE ${open}`)
-      .bind(crypto.randomUUID(), userId, name, kind, color, icon, userId));
+  for (const [name, kind, color] of categories) {
+    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO categories (id, user_id, name, kind, color) SELECT ?, ?, ?, ?, ? WHERE ${open}`)
+      .bind(crypto.randomUUID(), userId, name, kind, color, userId));
   }
   statements.push(env.DB.prepare(`INSERT OR IGNORE INTO v3_versions (id, user_id, effective_from, config_json) SELECT ?, ?, '1900-01-01', ? WHERE ${open}`)
     .bind(`initial:${userId}`, userId, JSON.stringify(config), userId));

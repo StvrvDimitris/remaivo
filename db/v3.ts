@@ -1,58 +1,13 @@
 import { env } from 'cloudflare:workers';
+import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
 import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 
-export const v3Schema = [
-`CREATE TABLE IF NOT EXISTS v3_payment_links (transaction_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, occurrence_id TEXT NOT NULL)`,
-`CREATE TABLE IF NOT EXISTS v3_migrations (user_id TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, snapshot_json TEXT NOT NULL, summary_json TEXT NOT NULL)`,
-`CREATE TABLE IF NOT EXISTS v3_versions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, effective_from TEXT NOT NULL, config_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-`CREATE INDEX IF NOT EXISTS v3_versions_user ON v3_versions(user_id,effective_from)`,
-`CREATE TABLE IF NOT EXISTS v3_periods (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, version_id TEXT NOT NULL, funding_cents INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id,start_date,end_date))`,
-`CREATE TABLE IF NOT EXISTS v3_bucket_templates (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, category_id TEXT, target_cents INTEGER NOT NULL, priority INTEGER NOT NULL DEFAULT 0, rollover TEXT NOT NULL DEFAULT 'none', rollover_cap INTEGER NOT NULL DEFAULT 0, destination_id TEXT, archived INTEGER NOT NULL DEFAULT 0)`,
-`CREATE TABLE IF NOT EXISTS v3_bucket_periods (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, period_id TEXT NOT NULL, bucket_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, category_id TEXT, target_cents INTEGER NOT NULL, priority INTEGER NOT NULL DEFAULT 0, rollover TEXT NOT NULL DEFAULT 'none', rollover_cap INTEGER NOT NULL DEFAULT 0, destination_id TEXT, released INTEGER NOT NULL DEFAULT 0, UNIQUE(period_id,bucket_id))`,
-`CREATE TABLE IF NOT EXISTS v3_assignments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, transaction_id TEXT NOT NULL, bucket_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, UNIQUE(user_id,transaction_id,bucket_id))`,
-`CREATE TABLE IF NOT EXISTS v3_occurrences (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_kind TEXT NOT NULL, source_id TEXT NOT NULL, scheduled_date TEXT NOT NULL, due_date TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, amount_cents INTEGER NOT NULL, paid_cents INTEGER NOT NULL DEFAULT 0, account_id TEXT, destination_account_id TEXT, category_id TEXT, committed INTEGER NOT NULL DEFAULT 1, auto_post INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'upcoming', transaction_id TEXT, settlement_token TEXT, UNIQUE(user_id,source_kind,source_id,scheduled_date))`,
-`CREATE INDEX IF NOT EXISTS v3_occurrence_user ON v3_occurrences(user_id,status,due_date)`,
-`CREATE TABLE IF NOT EXISTS v3_events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-`CREATE TABLE IF NOT EXISTS v3_ledger_entries (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, transaction_id TEXT NOT NULL, account_id TEXT NOT NULL, amount_cents INTEGER NOT NULL)`,
-`CREATE TABLE IF NOT EXISTS v3_opening_anchors (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_id TEXT NOT NULL, amount_cents INTEGER NOT NULL)`
-];
-let ready:Promise<unknown>|null=null;
-export function ensureV3Schema(){return ready??=env.DB.batch(v3Schema.map(sql=>env.DB.prepare(sql))).catch(e=>{ready=null;throw e;});}
 const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results;
 const cents=(value:unknown)=>{const n=Math.round(Number(value??0)*100);if(!Number.isSafeInteger(n)||n<0)throw new Error('Enter a valid nonnegative amount.');return n;};
 const validDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;
 const id=()=>crypto.randomUUID();
 const event=(user:string,kind:string,detail:string)=>env.DB.prepare('INSERT INTO v3_events (id,user_id,kind,detail) VALUES (?,?,?,?)').bind(id(),user,kind,detail);
-const oldTables=['accounts','transactions','recurring_plans','installment_plans','installment_payments','budget_rules','expense_reserves','expense_reserve_periods','goals','investment_valuation_snapshots','spare_events','categories','profiles'];
-
-export async function initializeV3(user:string,today:string){
- await ensureV3Schema();
- // New accounts already have a current Plan version. Only existing accounts need migration.
- if(await env.DB.prepare('SELECT id FROM v3_versions WHERE user_id=? LIMIT 1').bind(user).first())return;
- const backup:Record<string,unknown[]>={};for(const table of oldTables)backup[table]=await rows(`SELECT * FROM ${table} WHERE user_id=?`,user);
- const rules=backup.budget_rules as {period:string;base_cents:number}[];const profile=(backup.profiles[0]||{}) as {week_start?:number};
- const config:BudgetConfig={name:'Main plan',target:rules.find(r=>r.period==='monthly')?.base_cents||0,period:'monthly',anchor:today.slice(0,7)+'-01',end:plusDays(today,30),payday:1,allocation:'adaptive',carry:'none',carryCap:0,weights:[1,1,1,1,1,1.4,1.4],weekStart:profile.week_start??1};
- const summary=Object.fromEntries(Object.entries(backup).map(([k,v])=>[k,v.length]));
- await env.DB.batch([
- env.DB.prepare('INSERT OR IGNORE INTO v3_migrations (user_id,snapshot_json,summary_json) VALUES (?,?,?)').bind(user,JSON.stringify(backup),JSON.stringify(summary)),
- env.DB.prepare('INSERT OR IGNORE INTO v3_versions (id,user_id,effective_from,config_json) VALUES (?,?,?,?)').bind('initial:'+user,user,'1900-01-01',JSON.stringify(config)),
- env.DB.prepare("INSERT OR IGNORE INTO v3_events(id,user_id,kind,detail) VALUES (?,?,?,?)").bind('migration:'+user,user,'migration','Accounts, balances, transactions and payment plans preserved. Flexible buckets start fresh; original reserves remain in your backup.')]);
- await syncLedger(user,true);
-}
-
-export async function syncLedger(user:string,anchor=false){
- const transactions=await rows<MoneyTransaction>('SELECT * FROM transactions WHERE user_id=?',user);const accounts=await rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=?',user);
- const statements:D1PreparedStatement[]=[];const sums=new Map<string,number>();
- for(const t of transactions){if(t.type==='installment_purchase')continue;const amount=t.amount_cents;const entries:{account:string;amount:number}[]=[];
- if(t.account_id)entries.push({account:t.account_id,amount:t.type==='income'?amount:-amount});
- if(['saving','investment','transfer'].includes(t.type)&&t.destination_account_id)entries.push({account:t.destination_account_id,amount});
- const net=entries.reduce((s,e)=>s+e.amount,0);if(net)entries.push({account:'external:'+t.type,amount:-net});
- for(let n=0;n<entries.length;n++){const e=entries[n];statements.push(env.DB.prepare('INSERT OR IGNORE INTO v3_ledger_entries(id,user_id,transaction_id,account_id,amount_cents) VALUES(?,?,?,?,?)').bind(t.id+':'+n,user,t.id,e.account,e.amount));if(t.status==='posted')sums.set(e.account,(sums.get(e.account)||0)+e.amount);}
- }
- if(anchor)for(const a of accounts)statements.push(env.DB.prepare('INSERT OR IGNORE INTO v3_opening_anchors(id,user_id,account_id,amount_cents) VALUES(?,?,?,?)').bind(a.id,user,a.id,a.balance_cents-(sums.get(a.id)||0)));
- for(let i=0;i<statements.length;i+=80)await env.DB.batch(statements.slice(i,i+80));
-}
 
 export async function currentPeriod(user:string,today:string){
  const version=await env.DB.prepare('SELECT * FROM v3_versions WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC,created_at DESC,rowid DESC LIMIT 1').bind(user,today).first<{id:string;config_json:string}>();if(!version)throw new Error('Your plan is not ready yet. Refresh to continue.');
@@ -122,11 +77,11 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
  const payment=o.source_kind==='installment'?await env.DB.prepare('SELECT plan_id FROM installment_payments WHERE id=? AND user_id=?').bind(o.source_id,user).first<{plan_id:string}>():null;
  if(matchId)statements.push(env.DB.prepare(`UPDATE transactions SET recurring_plan_id=?,installment_plan_id=?,committed=? WHERE id=? AND user_id=? AND ${guard}`).bind(recurringId,payment?.plan_id||null,o.committed,txId,user,o.id,user,token));
  else {
- statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_daily,counts_weekly,counts_monthly,counts_general,recurring_plan_id,installment_plan_id) SELECT ?,?,?,?,?,?,?,?,?,?,1,1,1,1,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,o.id,user,token));
+ statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_monthly,recurring_plan_id,installment_plan_id) SELECT ?,?,?,?,?,?,?,?,?,?,1,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,o.id,user,token));
  statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(o.type==='income'?amount:-amount,o.account_id,user,o.id,user,token));
  if(['saving','investment'].includes(o.type))statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(amount,o.destination_account_id,user,o.id,user,token));
  }
- if(payment){if(status==='paid')statements.push(env.DB.prepare(`UPDATE installment_payments SET status='paid',paid_transaction_id=? WHERE id=? AND user_id=? AND ${guard}`).bind(txId,o.source_id,user,o.id,user,token));statements.push(env.DB.prepare(`UPDATE installment_plans SET paid_cents=paid_cents+?,status=CASE WHEN paid_cents+?>=total_cents THEN 'complete' ELSE status END WHERE id=? AND user_id=? AND ${guard}`).bind(amount,amount,payment.plan_id,user,o.id,user,token));}
+ if(payment){if(status==='paid')statements.push(env.DB.prepare(`UPDATE installment_payments SET status='paid' WHERE id=? AND user_id=? AND ${guard}`).bind(o.source_id,user,o.id,user,token));statements.push(env.DB.prepare(`UPDATE installment_plans SET paid_cents=paid_cents+?,status=CASE WHEN paid_cents+?>=total_cents THEN 'complete' ELSE status END WHERE id=? AND user_id=? AND ${guard}`).bind(amount,amount,payment.plan_id,user,o.id,user,token));}
  statements.push(env.DB.prepare(`INSERT INTO v3_payment_links(transaction_id,user_id,occurrence_id) SELECT ?,?,? WHERE ${guard}`).bind(txId,user,o.id,o.id,user,token));
  statements.push(event(user,'payment',`${o.title}: ${amount/100} recorded on ${date}${matchId?' by matching existing activity':''}.`));
  const results=await env.DB.batch(statements);if(!results[0].meta.changes)throw new Error('This payment changed. Refresh and try again.');
@@ -135,12 +90,11 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
 
 async function advancePlan(user:string,planId:string){const plan=await env.DB.prepare('SELECT * FROM recurring_plans WHERE id=? AND user_id=?').bind(planId,user).first<PlanRow>();if(!plan)return;let date=plan.next_date;for(let i=0;i<2000;i++){const o=await env.DB.prepare('SELECT status FROM v3_occurrences WHERE user_id=? AND source_kind=? AND source_id=? AND scheduled_date=?').bind(user,'recurring',planId,date).first<{status:string}>();if(!o||!['paid','skipped'].includes(o.status))break;date=addCalendarInterval(date,plan.frequency,plan.interval_count,plan.anchor_day);}await env.DB.prepare('UPDATE recurring_plans SET next_date=?,active=CASE WHEN end_date IS NOT NULL AND end_date<? THEN 0 ELSE active END WHERE id=? AND user_id=?').bind(date,date,planId,user).run();}
 export async function reconcileV3(user:string,today:string){
- await initializeV3(user,today);
+ await ensureFinanceSchema();
  await generateOccurrences(user,today);
  const live=new Set((await rows<{id:string}>('SELECT id FROM accounts WHERE user_id=? AND archived=0',user)).map(a=>a.id));
  const due=await rows<Occurrence>("SELECT * FROM v3_occurrences WHERE user_id=? AND status IN ('upcoming','partial') AND auto_post=1 AND due_date<=? ORDER BY due_date,id",user,today);
  for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);}
- if(due.length)await syncLedger(user);
 }
 
 export async function v3Snapshot(user:string,today:string){
@@ -156,7 +110,7 @@ export async function v3Snapshot(user:string,today:string){
 }
 
 export async function v3Action(user:string,today:string,action:string,p:Record<string,unknown>){
- await initializeV3(user,today);await generateOccurrences(user,today);const {period,config}=await currentPeriod(user,today);
+ await ensureFinanceSchema();await generateOccurrences(user,today);const {period,config}=await currentPeriod(user,today);
  if(action==='v3Configure'){
  const next={...config,...p,target:cents(p.target),carryCap:p.carryCap===undefined?config.carryCap:cents(p.carryCap),weekStart:Math.max(0,Math.min(6,Number(p.weekStart??config.weekStart))),payday:Math.max(1,Math.min(31,Number(p.payday)||1)),weights:Array.isArray(p.weights)?p.weights.map(x=>Math.max(0.1,Math.min(10,Number(x)||1))):config.weights} as BudgetConfig;
  if(!['monthly','weekly','fortnightly','payday','custom'].includes(next.period)||!['adaptive','even','weighted'].includes(next.allocation)||!['none','positive','signed','capped'].includes(next.carry))throw new Error('Choose a supported plan setting.');
