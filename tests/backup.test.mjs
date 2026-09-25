@@ -91,11 +91,7 @@ function seed(user, prefix) {
   insert('INSERT INTO installment_plans(id,user_id,title,total_cents,installment_count,first_due_date,payment_account_id) VALUES(?,?,?,?,?,?,?)', installment, user, `${prefix} laptop`, 120000, 12, '2026-09-10', account);
   insert('INSERT INTO installment_payments(id,user_id,plan_id,sequence,due_date,amount_cents) VALUES(?,?,?,?,?,?)', `${prefix}-installment-payment`, user, installment, 1, '2026-09-10', 10000);
   insert('INSERT INTO goals(id,user_id,name,kind,account_id) VALUES(?,?,?,?,?)', `${prefix}-goal`, user, `${prefix} holiday`, 'savings', account);
-  if (sqlite.prepare('PRAGMA table_info(spare_events)').all().some(column => column.name === 'base_cents')) {
-    insert('INSERT INTO spare_events(id,user_id,transaction_id,base_cents,multiplied_cents) VALUES(?,?,?,?,?)', `${prefix}-spare`, user, transaction, 50, 50);
-  } else {
-    insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
-  }
+  insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
   insert('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)', version, user, '2026-09-01', '{"target":100000,"period":"monthly"}');
   insert('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)', period, user, '2026-09-01', '2026-10-01', version, 100000);
   insert('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents) VALUES(?,?,?,?,?,?)', bucket, user, `${prefix} food`, 'protected', category, 20000);
