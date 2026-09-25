@@ -10,10 +10,13 @@ const id=()=>crypto.randomUUID();
 const event=(user:string,kind:string,detail:string)=>env.DB.prepare('INSERT INTO v3_events (id,user_id,kind,detail) VALUES (?,?,?,?)').bind(id(),user,kind,detail);
 
 export async function currentPeriod(user:string,today:string){
- const [version,coveringPeriod]=await Promise.all([
-   env.DB.prepare('SELECT * FROM v3_versions WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC,created_at DESC,rowid DESC LIMIT 1').bind(user,today).first<{id:string;config_json:string}>(),
-   env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date<=? AND end_date>? ORDER BY start_date DESC,end_date DESC LIMIT 1').bind(user,today,today).first<{id:string;start_date:string;end_date:string;version_id:string;funding_cents:number}>(),
- ]);if(!version)throw new Error('Your plan is not ready yet. Refresh to continue.');
+ const [versionRows,coveringPeriodRows]=await env.DB.batch([
+   env.DB.prepare('SELECT * FROM v3_versions WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC,created_at DESC,rowid DESC LIMIT 1').bind(user,today),
+   env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date<=? AND end_date>? ORDER BY start_date DESC,end_date DESC LIMIT 1').bind(user,today,today),
+ ]);
+ const version=versionRows.results[0] as {id:string;config_json:string}|undefined;
+ const coveringPeriod=coveringPeriodRows.results[0] as {id:string;start_date:string;end_date:string;version_id:string;funding_cents:number}|undefined;
+ if(!version)throw new Error('Your plan is not ready yet. Refresh to continue.');
  const desired=JSON.parse(version.config_json) as BudgetConfig;const bounds=periodFor(desired,today);
  let period=coveringPeriod?.start_date===bounds.start&&coveringPeriod.end_date===bounds.end
    ? coveringPeriod

@@ -37,7 +37,7 @@ globalThis.__setupEnv = { DB: {
     sqlite.exec("BEGIN");
     try {
       const result = [];
-      for (const statement of statements) result.push(await statement.run());
+      for (const statement of statements) result.push(/^\s*(SELECT|WITH|PRAGMA)\b/i.test(statement.sql) ? await statement.all() : await statement.run());
       sqlite.exec("COMMIT");
       return result;
     } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
