@@ -7,6 +7,7 @@ import { StatisticsPage } from './statistics-page';
 import { BudgetPace } from './budget-pace';
 import { calculateInvestmentValue } from './investment-valuations';
 import { plusDays, type Bucket, type Occurrence } from './v3-engine';
+import { invalidateFinancePageCache } from './finance-page-cache';
 
 type Page='overview'|'activity'|'plan'|'accounts'|'statistics'|'settings'|'goals';
 type Panel={kind:'explain';view:'available'|'daily'|'weekly'|'cash'}|{kind:'configure'}|{kind:'fund'}|{kind:'bucket';bucket?:Bucket}|{kind:'move'}|{kind:'payment';occurrence:Occurrence}|{kind:'assign'};
@@ -51,13 +52,13 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
    const r=await fetch('/api/finance',{signal:controller.signal});
    const next=await r.json() as Snapshot;
    if(!r.ok)throw new Error(next.error||'Unable to load your money.');
-   setData(next);setError('');
+   invalidateFinancePageCache();setData(next);setRevision(x=>x+1);setError('');
   }catch(e){setError(controller.signal.aborted?'Your workspace is taking too long to load. Please try again.':e instanceof Error?e.message:'Unable to connect.');}
   finally{clearTimeout(timeout);loadingRef.current=false;}
  },[]);
  useEffect(()=>{queueMicrotask(()=>{void load();});const timer=setInterval(()=>{if(document.visibilityState==='visible')void load();},60000);const visible=()=>{if(document.visibilityState==='visible')void load();};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible);};},[load]);
  function navigate(next:Page){setPage(next);window.scrollTo({top:0,behavior:'instant'});const url=new URL(window.location.href);url.searchParams.set('view',next);window.history.replaceState({},'',url);}
- async function save(action:string,payload:Record<string,unknown>){if(busy)return false;setBusy(true);setError('');try{const r=await fetch('/api/finance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,payload})});const next=await r.json() as Snapshot;if(!r.ok)throw new Error(next.error||'Unable to save.');setData(next);setRevision(x=>x+1);setNotice('Saved');setTimeout(()=>setNotice(''),2400);return true;}catch(e){setError(e instanceof Error?e.message:'Unable to save.');return false;}finally{setBusy(false);}}
+ async function save(action:string,payload:Record<string,unknown>){if(busy)return false;setBusy(true);setError('');try{const r=await fetch('/api/finance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,payload})});const next=await r.json() as Snapshot;if(!r.ok)throw new Error(next.error||'Unable to save.');invalidateFinancePageCache();setData(next);setRevision(x=>x+1);setNotice('Saved');setTimeout(()=>setNotice(''),2400);return true;}catch(e){setError(e instanceof Error?e.message:'Unable to save.');return false;}finally{setBusy(false);}}
  const saveModal=async(a:string,p:Record<string,unknown>)=>{if(await save(a,p)){setModal(null);setEdit(null);}};
  if(!data)return <main className="v3-loading"><span className="v3-monogram">R</span><h1>Your money, in view.</h1><p>{error||'Opening your financial workspace…'}</p>{error&&<button onClick={()=>void load()}>Try again</button>}</main>;
  if(data.needsSetup)return <Onboarding displayName={props.displayName} busy={busy} error={error} onComplete={payload=>save('setup',payload)}/>;

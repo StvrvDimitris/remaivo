@@ -4,6 +4,7 @@ import { CSSProperties, FormEvent, HTMLAttributes, ReactNode, useEffect, useStat
 import type { v3Snapshot } from "../db/v3";
 import type { InvestmentValuationSnapshot, InvestmentValueMetrics } from "./investment-valuations";
 import { AnalyticsFilterBar, analyticsRange, useAnalyticsFilters } from "./statistics-page";
+import { financePageCacheGeneration, readFinancePageCache, writeFinancePageCache } from "./finance-page-cache";
 
 export type Account = { id: string; name: string; type: string; currency: string; balance_cents: number; credit_limit_cents: number | null; color: string; include_spendable: number; archived: number };
 export type Category = { id: string; name: string; kind: string; color: string; archived: number };
@@ -146,19 +147,26 @@ export function TransactionsPage({ context, revision, onAdd, onEdit }: { context
 
   useEffect(() => {
     const controller = new AbortController();
+    const params = new URLSearchParams({ view: "transactions", from: range.from, to: range.to, page: String(transactionPage), sort, direction });
+    if (description.trim()) params.set("search", description.trim());
+    const optional = { accountId, categoryId, transactionType, origin };
+    for (const [key, value] of Object.entries(optional)) if (value) params.set(key, value);
+    const url = `/api/finance?${params}`;
     const timer = window.setTimeout(async () => {
+      const cached = readFinancePageCache<TransactionPageResult>(url);
+      if (cached) { setResult(cached); setLoading(false); setLoadError(""); return; }
       setLoading(true);
       setLoadError("");
-      const params = new URLSearchParams({ view: "transactions", from: range.from, to: range.to, page: String(transactionPage), sort, direction });
-      if (description.trim()) params.set("search", description.trim());
-      const optional = { accountId, categoryId, transactionType, origin };
-      for (const [key, value] of Object.entries(optional)) if (value) params.set(key, value);
+      const requestGeneration = financePageCacheGeneration();
       try {
-        const response = await fetch(`/api/finance?${params}`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(url, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as TransactionPageResult;
         if (!response.ok) throw new Error(payload.error || "Unable to load transactions.");
-        setResult(payload);
-        if (payload.page !== transactionPage) setTransactionPage(payload.page);
+        if (!controller.signal.aborted && requestGeneration === financePageCacheGeneration()) {
+          writeFinancePageCache(url, payload, requestGeneration);
+          setResult(payload);
+          if (payload.page !== transactionPage) setTransactionPage(payload.page);
+        }
       } catch (error) {
         if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Unable to load transactions.");
       } finally {

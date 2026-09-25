@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { StatisticsMode } from "./transaction-classification";
+import { financePageCacheGeneration, readFinancePageCache, writeFinancePageCache } from "./finance-page-cache";
 
 type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
 export type AnalyticsPeriod = "today" | "week" | "month" | "year" | "last7" | "last30" | "custom";
@@ -148,16 +149,23 @@ export function StatisticsPage({ context, revision }: { context: AnalyticsContex
   const { accountId, categoryId, comparison, description, mode, origin, transactionType } = filters;
   useEffect(() => {
     const controller = new AbortController();
+    const params = new URLSearchParams({ view: "statistics", from: range.from, to: range.to, comparison, mode });
+    const optional = { accountId, categoryId, transactionType, origin, description };
+    for (const [key, value] of Object.entries(optional)) if (value) params.set(key, value);
+    const url = `/api/finance?${params}`;
     const timer = window.setTimeout(async () => {
+      const cached = readFinancePageCache<StatisticsResult>(url);
+      if (cached) { setResult(cached); setLoading(false); setError(""); return; }
       setLoading(true); setError("");
-      const params = new URLSearchParams({ view: "statistics", from: range.from, to: range.to, comparison, mode });
-      const optional = { accountId, categoryId, transactionType, origin, description };
-      for (const [key, value] of Object.entries(optional)) if (value) params.set(key, value);
+      const requestGeneration = financePageCacheGeneration();
       try {
-        const response = await fetch(`/api/finance?${params}`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(url, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as StatisticsResult & { error?: string };
         if (!response.ok) throw new Error(payload.error || "Unable to load statistics.");
-        setResult(payload);
+        if (!controller.signal.aborted && requestGeneration === financePageCacheGeneration()) {
+          writeFinancePageCache(url, payload, requestGeneration);
+          setResult(payload);
+        }
       } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load statistics."); }
       finally { if (!controller.signal.aborted) setLoading(false); }
     }, description ? 250 : 0);
