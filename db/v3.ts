@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
 import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
+import { spareRoundUpCents, type SpareSettings } from '../app/spare-change';
 
 const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results;
 const cents=(value:unknown)=>{const n=Math.round(Number(value??0)*100);if(!Number.isSafeInteger(n)||n<0)throw new Error('Enter a valid nonnegative amount.');return n;};
@@ -76,13 +77,16 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
  if(o.destination_account_id&&(o.destination_account_id===o.account_id||!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(o.destination_account_id,user).first()))throw new Error('Choose a different active destination account.');
  const token=id();const txId=matchId||id();const newPaid=o.paid_cents+amount;const status=newPaid>=o.amount_cents?'paid':'partial';
  if(matchId){const tx=await env.DB.prepare("SELECT * FROM transactions WHERE id=? AND user_id=? AND status='posted'").bind(matchId,user).first<MoneyTransaction>();if(!tx||tx.type!==o.type||tx.account_id!==o.account_id||tx.amount_cents!==amount||tx.recurring_plan_id||tx.installment_plan_id||tx.destination_account_id!==o.destination_account_id)throw new Error('Choose an unlinked transaction of the same type, account and amount.');}
+ const spareSettings=!matchId&&o.type==='expense'?await env.DB.prepare('SELECT spare_enabled,spare_source_id,spare_debit_id,spare_destination_id,spare_multiplier FROM profiles WHERE user_id=?').bind(user).first<SpareSettings>():null;
+ const spare=!matchId&&o.type==='expense'?spareRoundUpCents(amount,o.account_id,false,spareSettings):0;
  const guard='EXISTS(SELECT 1 FROM v3_occurrences WHERE id=? AND user_id=? AND settlement_token=?)';
  const statements=[env.DB.prepare("UPDATE v3_occurrences SET paid_cents=?,status=?,transaction_id=?,settlement_token=? WHERE id=? AND user_id=? AND paid_cents=? AND status IN ('upcoming','partial')").bind(newPaid,status,txId,token,o.id,user,o.paid_cents)];
  const recurringId=o.source_kind==='recurring'?o.source_id:null;
  const payment=o.source_kind==='installment'?await env.DB.prepare('SELECT plan_id FROM installment_payments WHERE id=? AND user_id=?').bind(o.source_id,user).first<{plan_id:string}>():null;
  if(matchId)statements.push(env.DB.prepare(`UPDATE transactions SET recurring_plan_id=?,installment_plan_id=?,committed=? WHERE id=? AND user_id=? AND ${guard}`).bind(recurringId,payment?.plan_id||null,o.committed,txId,user,o.id,user,token));
  else {
- statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_monthly,recurring_plan_id,installment_plan_id) SELECT ?,?,?,?,?,?,?,?,?,?,1,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,o.id,user,token));
+ statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_monthly,recurring_plan_id,installment_plan_id,spare_change_cents) SELECT ?,?,?,?,?,?,?,?,?,?,1,?,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,spare,o.id,user,token));
+ if(spare)statements.push(env.DB.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND user_id=? AND status='posted')").bind(id(),user,txId,spare,txId,user));
  statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(o.type==='income'?amount:-amount,o.account_id,user,o.id,user,token));
  if(['saving','investment'].includes(o.type))statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(amount,o.destination_account_id,user,o.id,user,token));
  }
