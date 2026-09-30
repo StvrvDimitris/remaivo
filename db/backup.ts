@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 
 // Export current user-owned data, including archived records and Plan history.
 const TABLES = [
-  "accounts", "categories", "goals", "installment_payments",
+  "accounts", "categories", "goals", "goal_entries", "installment_payments",
   "installment_plans", "investment_valuation_snapshots", "profiles",
   "recurring_plans", "spare_events", "transactions", "v3_assignments",
   "v3_bucket_periods", "v3_bucket_templates", "v3_events",

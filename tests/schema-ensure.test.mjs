@@ -46,7 +46,7 @@ test('migrations leave only the current finance tables and columns', () => {
   const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all().map(row => row.name);
   assert.deepEqual(tables, [
-    'accounts', 'categories', 'goals', 'installment_payments',
+    'accounts', 'categories', 'goal_entries', 'goals', 'installment_payments',
     'installment_plans', 'investment_valuation_snapshots', 'profiles',
     'recurring_plans', 'spare_events', 'transactions', 'v3_assignments',
     'v3_bucket_periods', 'v3_bucket_templates', 'v3_events',
@@ -64,6 +64,8 @@ test('migrations leave only the current finance tables and columns', () => {
     const columns = new Set(sqlite.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
     assert.ok(removed.every(name => !columns.has(name)), table);
   }
+  const goalColumns = new Set(sqlite.prepare('PRAGMA table_info(goals)').all().map(row => row.name));
+  assert.ok(['tracking_mode', 'start_date', 'end_date', 'baseline_cents'].every(name => goalColumns.has(name)));
 });
 
 test('a cold Worker reads an existing schema without replaying migrations', async () => {

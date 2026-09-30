@@ -44,6 +44,86 @@ function calendarDate(value: unknown) {
   return Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== date ? null : date;
 }
 
+type GoalRow = {
+  id: string;
+  name: string;
+  kind: string;
+  target_cents: number | null;
+  contributed_cents: number;
+  account_id: string | null;
+  tracking_mode: string;
+  start_date: string | null;
+  end_date: string | null;
+  baseline_cents: number;
+  color: string;
+};
+
+function goalMoneyCents(value: unknown): number | null {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const amount = Math.round(Number(value) * 100);
+  return Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+}
+
+async function goalFields(userId: string, payload: JsonObject, today: string, existing?: GoalRow) {
+  const name = text(payload.name, existing?.name ?? "").slice(0, 120);
+  if (!name) return { error: "Give this goal a name." } as const;
+  const kind = text(payload.kind, existing?.kind ?? "savings");
+  if (kind !== "savings" && kind !== "investment") return { error: "Choose a valid goal type." } as const;
+  const trackingMode = text(payload.trackingMode, existing?.tracking_mode ?? "total");
+  if (!["total", "period", "new_money"].includes(trackingMode)) return { error: "Choose a valid tracking method." } as const;
+
+  const accountId = Object.hasOwn(payload, "accountId") ? text(payload.accountId) : existing?.account_id ?? "";
+  if (Object.hasOwn(payload, "accountId") && payload.accountId != null && typeof payload.accountId !== "string") {
+    return { error: "Choose a valid account or track the goal independently." } as const;
+  }
+  const account = accountId
+    ? await env.DB.prepare("SELECT id, balance_cents FROM accounts WHERE id = ? AND user_id = ? AND archived = 0")
+      .bind(accountId, userId).first<{ id: string; balance_cents: number }>()
+    : null;
+  if (accountId && !account) return { error: "Choose an active account you own." } as const;
+
+  const rawTarget = Object.hasOwn(payload, "target") ? payload.target : existing?.target_cents == null ? null : existing.target_cents / 100;
+  const targetCents = rawTarget == null || rawTarget === "" ? null : goalMoneyCents(rawTarget);
+  if (rawTarget != null && rawTarget !== "" && targetCents === null) return { error: "Enter a valid target amount." } as const;
+
+  const rawContributed = Object.hasOwn(payload, "contributed") ? payload.contributed : existing?.contributed_cents == null ? 0 : existing.contributed_cents / 100;
+  const parsedContributed = goalMoneyCents(rawContributed);
+  if (parsedContributed === null) return { error: "Enter a valid starting amount." } as const;
+  const contributedCents = accountId && existing ? existing.contributed_cents : parsedContributed;
+
+  let startDate = trackingMode === "period"
+    ? calendarDate(Object.hasOwn(payload, "startDate") ? payload.startDate : existing?.start_date)
+    : null;
+  const endDate = trackingMode === "period"
+    ? calendarDate(Object.hasOwn(payload, "endDate") ? payload.endDate : existing?.end_date)
+    : null;
+  if (trackingMode === "period" && (!startDate || !endDate || startDate > endDate)) {
+    return { error: "Choose a valid start and end date for this goal." } as const;
+  }
+
+  let baselineCents = 0;
+  if (trackingMode === "new_money") {
+    if (existing?.tracking_mode === "new_money" && (existing.account_id ?? "") === accountId) {
+      baselineCents = existing.baseline_cents;
+      startDate = existing.start_date ?? today;
+    } else if (account) {
+      baselineCents = account.balance_cents;
+      startDate = today;
+    } else {
+      const entries = existing
+        ? await env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS amount FROM goal_entries WHERE goal_id = ? AND user_id = ?")
+          .bind(existing.id, userId).first<{ amount: number }>()
+        : null;
+      baselineCents = contributedCents + Number(entries?.amount ?? 0);
+      startDate = today;
+    }
+  }
+  return {
+    name, kind, trackingMode, accountId: accountId || null, targetCents, contributedCents,
+    startDate, endDate, baselineCents, color: text(payload.color, existing?.color ?? "#dff35f"),
+  };
+}
+
 async function categoryIdFor(userId: string, value: unknown, kind: "expense" | "income") {
   const categoryId = text(value);
   if (!categoryId) return null;
@@ -234,11 +314,49 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare("SELECT * FROM recurring_plans WHERE user_id = ? AND active = 1 ORDER BY next_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_plans WHERE user_id = ? AND status = 'active' ORDER BY first_due_date").bind(user.userId),
     env.DB.prepare("SELECT * FROM installment_payments WHERE user_id = ? AND status != 'cancelled' ORDER BY due_date").bind(user.userId),
-    env.DB.prepare("SELECT * FROM goals WHERE user_id = ? AND archived = 0 ORDER BY created_at").bind(user.userId),
+    env.DB.prepare(`SELECT g.*,
+      CASE WHEN g.account_id IS NOT NULL THEN
+        CASE g.tracking_mode
+          WHEN 'period' THEN MAX(0, COALESCE((
+            SELECT SUM(
+              CASE WHEN t.type = 'income' AND t.account_id = g.account_id THEN t.amount_cents ELSE 0 END
+              + CASE WHEN t.type IN ('transfer', 'saving', 'investment') AND t.destination_account_id = g.account_id THEN t.amount_cents ELSE 0 END
+              - CASE WHEN t.type IN ('expense', 'transfer', 'saving', 'investment', 'installment_payment') AND t.account_id = g.account_id THEN t.amount_cents ELSE 0 END
+            ) FROM transactions t
+            WHERE t.user_id = g.user_id AND t.status = 'posted'
+              AND t.date BETWEEN g.start_date AND g.end_date
+              AND (t.account_id = g.account_id OR t.destination_account_id = g.account_id)
+          ), 0))
+          WHEN 'new_money' THEN MAX(0, COALESCE(a.balance_cents, 0) - g.baseline_cents)
+          ELSE COALESCE(a.balance_cents, 0)
+        END
+      ELSE
+        CASE g.tracking_mode
+          WHEN 'period' THEN MAX(0, COALESCE((
+            SELECT SUM(e.amount_cents) FROM goal_entries e
+            WHERE e.user_id = g.user_id AND e.goal_id = g.id
+              AND e.date BETWEEN g.start_date AND g.end_date
+          ), 0))
+          WHEN 'new_money' THEN MAX(0, g.contributed_cents + COALESCE((
+            SELECT SUM(e.amount_cents) FROM goal_entries e
+            WHERE e.user_id = g.user_id AND e.goal_id = g.id
+          ), 0) - g.baseline_cents)
+          ELSE g.contributed_cents + COALESCE((
+            SELECT SUM(e.amount_cents) FROM goal_entries e
+            WHERE e.user_id = g.user_id AND e.goal_id = g.id
+          ), 0)
+        END
+      END AS progress_cents
+      FROM goals g
+      LEFT JOIN accounts a ON a.id = g.account_id AND a.user_id = g.user_id
+      WHERE g.user_id = ? AND g.archived = 0 ORDER BY g.created_at`).bind(user.userId),
+    env.DB.prepare(`SELECT e.* FROM goal_entries e
+      JOIN goals g ON g.id = e.goal_id AND g.user_id = e.user_id AND g.archived = 0
+      WHERE e.user_id = ? ORDER BY e.date DESC, e.created_at DESC, e.id DESC LIMIT 200`).bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
   ]), v3Snapshot(user.userId, today)]);
-  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, spareEvents, investmentSnapshots] = mainRows;
+  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots] = mainRows;
 
   return {
     needsSetup: false,
@@ -251,6 +369,7 @@ async function snapshot(user: FinanceUser) {
     installmentPlans: installmentPlans.results,
     installmentPayments: installmentPayments.results,
     goals: goals.results,
+    goalEntries: goalEntries.results,
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
     today,
@@ -556,9 +675,56 @@ export async function POST(request: Request) {
       ]);
       if (!Number(results[0].meta.changes)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the spending account balance." }, { status: 409 });
     } else if (action === "addGoal") {
-      await env.DB.prepare("INSERT INTO goals (id, user_id, name, kind, target_cents, contributed_cents, account_id, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "savings"), cents(payload.target) || null, cents(payload.contributed), payload.accountId || null, text(payload.color, "#dff35f")).run();
+      const fields = await goalFields(user.userId, payload, actionToday);
+      if ("error" in fields) return Response.json({ error: fields.error }, { status: 400 });
+      await env.DB.prepare(`INSERT INTO goals
+        (id, user_id, name, kind, target_cents, contributed_cents, account_id, tracking_mode, start_date, end_date, baseline_cents, color)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), user.userId, fields.name, fields.kind, fields.targetCents,
+          fields.contributedCents, fields.accountId, fields.trackingMode, fields.startDate, fields.endDate,
+          fields.baselineCents, fields.color).run();
     } else if (action === "updateGoal") {
-      await env.DB.prepare("UPDATE goals SET name = ?, kind = ?, target_cents = ?, contributed_cents = CASE WHEN ? IS NULL THEN ? ELSE contributed_cents END, account_id = ?, color = ? WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.name, "Goal"), text(payload.kind, "savings") === "investment" ? "investment" : "savings", cents(payload.target) || null, payload.accountId || null, cents(payload.contributed), payload.accountId || null, text(payload.color, "#dff35f"), payload.goalId, user.userId).run();
+      const existing = await env.DB.prepare("SELECT * FROM goals WHERE id = ? AND user_id = ? AND archived = 0")
+        .bind(text(payload.goalId), user.userId).first<GoalRow>();
+      if (!existing) return Response.json({ error: "Goal not found." }, { status: 404 });
+      const fields = await goalFields(user.userId, payload, actionToday, existing);
+      if ("error" in fields) return Response.json({ error: fields.error }, { status: 400 });
+      await env.DB.prepare(`UPDATE goals SET name = ?, kind = ?, target_cents = ?, contributed_cents = ?,
+        account_id = ?, tracking_mode = ?, start_date = ?, end_date = ?, baseline_cents = ?, color = ?
+        WHERE id = ? AND user_id = ? AND archived = 0`)
+        .bind(fields.name, fields.kind, fields.targetCents, fields.contributedCents, fields.accountId,
+          fields.trackingMode, fields.startDate, fields.endDate, fields.baselineCents, fields.color,
+          existing.id, user.userId).run();
+    } else if (action === "addGoalEntry") {
+      const goalId = text(payload.goalId);
+      const date = calendarDate(payload.date);
+      const amountCents = goalMoneyCents(payload.amount);
+      const kind = text(payload.kind);
+      if (!date || date > actionToday) return Response.json({ error: "Use today or an earlier date for a goal entry." }, { status: 400 });
+      if (amountCents === null || amountCents === 0 || (kind !== "add" && kind !== "remove")) {
+        return Response.json({ error: "Enter an amount to add or remove." }, { status: 400 });
+      }
+      const goal = await env.DB.prepare("SELECT id, tracking_mode, start_date FROM goals WHERE id = ? AND user_id = ? AND archived = 0 AND account_id IS NULL")
+        .bind(goalId, user.userId).first<{ id: string; tracking_mode: string; start_date: string | null }>();
+      if (!goal) return Response.json({ error: "Choose an active independent goal." }, { status: 404 });
+      if (goal.tracking_mode === "new_money" && goal.start_date && date < goal.start_date) {
+        return Response.json({ error: "Use a date on or after this goal started." }, { status: 400 });
+      }
+      const result = await env.DB.prepare(`INSERT INTO goal_entries
+        (id, user_id, goal_id, date, amount_cents, note)
+        SELECT ?, ?, id, ?, ?, ? FROM goals
+        WHERE id = ? AND user_id = ? AND archived = 0 AND account_id IS NULL
+          AND (tracking_mode <> 'new_money' OR start_date IS NULL OR start_date <= ?)`)
+        .bind(crypto.randomUUID(), user.userId, date, kind === "remove" ? -amountCents : amountCents,
+          text(payload.note).slice(0, 240) || null, goalId, user.userId, date).run();
+      if (!Number(result.meta.changes)) return Response.json({ error: "Goal changed. Reopen it and try again." }, { status: 409 });
+    } else if (action === "deleteGoalEntry") {
+      const result = await env.DB.prepare(`DELETE FROM goal_entries
+        WHERE id = ? AND user_id = ? AND EXISTS (
+          SELECT 1 FROM goals g WHERE g.id = goal_entries.goal_id AND g.user_id = goal_entries.user_id
+            AND g.archived = 0 AND g.account_id IS NULL
+        )`).bind(text(payload.entryId), user.userId).run();
+      if (!Number(result.meta.changes)) return Response.json({ error: "Goal entry not found." }, { status: 404 });
     } else if (action === "archiveGoal") {
       await env.DB.prepare("UPDATE goals SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.goalId, user.userId).run();
     } else if (action === "archiveAccount") {

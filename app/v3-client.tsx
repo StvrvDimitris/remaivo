@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Onboarding, TransactionsPage, AccountsPage, SettingsPage, GoalsPage, FinanceModal, EditModal, ValuationModal, TransactionRow, type Account, type Context, type Snapshot, type ModalName, type EditTarget } from './finance-client';
+import { Onboarding, TransactionsPage, AccountsPage, SettingsPage, GoalsPage, GoalEntryModal, FinanceModal, EditModal, ValuationModal, TransactionRow, type Account, type Goal, type Context, type Snapshot, type ModalName, type EditTarget } from './finance-client';
 import { StatisticsPage } from './statistics-page';
 import { BudgetPace } from './budget-pace';
 import { calculateInvestmentValue } from './investment-valuations';
@@ -24,9 +24,9 @@ function DataExportCard(){
  </section>;
 }
 export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string}){
- const [data,setData]=useState<Snapshot|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);const [page,setPage]=useState<Page>(initialPage);const [panel,setPanel]=useState<Panel|null>(null);const [modal,setModal]=useState<ModalName>(null);const [edit,setEdit]=useState<EditTarget|null>(null);const [valuation,setValuation]=useState<Account|null>(null);const [notice,setNotice]=useState('');
+ const [data,setData]=useState<Snapshot|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);const [page,setPage]=useState<Page>(initialPage);const [panel,setPanel]=useState<Panel|null>(null);const [modal,setModal]=useState<ModalName>(null);const [edit,setEdit]=useState<EditTarget|null>(null);const [goalEntry,setGoalEntry]=useState<Goal|null>(null);const [valuation,setValuation]=useState<Account|null>(null);const [notice,setNotice]=useState('');
  const loadingRef=useRef(false);
- const dialogOpen=Boolean(panel||modal||edit||valuation);
+ const dialogOpen=Boolean(panel||modal||edit||goalEntry||valuation);
  useEffect(()=>{
   if(!dialogOpen)return;
   const previousOverflow=document.body.style.overflow;
@@ -37,7 +37,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   if(dialog)focusable()[0]?.focus();
   const keydown=(event:KeyboardEvent)=>{
    if(!dialog)return;
-   if(event.key==='Escape'){setModal(null);setEdit(null);setValuation(null);}
+   if(event.key==='Escape'){setModal(null);setEdit(null);setGoalEntry(null);setValuation(null);}
    if(event.key==='Tab'){const nodes=focusable();const first=nodes[0],last=nodes.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}
   };
   document.addEventListener('keydown',keydown);
@@ -66,7 +66,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  const v3=data.v3;const r=v3.result;const currency=data.profile.currency;const m=(n:number)=>money(n,currency);const accounts=(data.accounts||[]).filter(a=>!a.archived);const categories=data.categories||[];const transactions=data.transactions||[];const accountById=Object.fromEntries((data.accounts||[]).map(a=>[a.id,a]));const categoryById=Object.fromEntries(categories.map(c=>[c.id,c]));
  const investmentMetrics=Object.fromEntries(accounts.filter(a=>a.type==='investment').map(a=>[a.id,calculateInvestmentValue({accountId:a.id,rawInvested:a.balance_cents,transactions,snapshots:data.investmentSnapshots||[]})]));
  const rawInvested=accounts.filter(a=>a.type==='investment').reduce((s,a)=>s+a.balance_cents,0);const invested=Object.values(investmentMetrics).reduce((s,x)=>s+x.estimatedCurrentValue,0);const savings=accounts.filter(a=>a.type==='savings').reduce((s,a)=>s+a.balance_cents,0);
- const context:Context={accounts,categories,transactions,recurring:data.recurring||[],installmentPlans:data.installmentPlans||[],installmentPayments:data.installmentPayments||[],goals:data.goals||[],investmentSnapshots:data.investmentSnapshots||[],investmentMetrics,profile:data.profile,currency,accountById,categoryById,spendable:r.spendable,savings,rawInvested,invested,investmentMovement:invested-rawInvested,investmentMovementPercent:rawInvested?(invested-rawInvested)/rawInvested*100:null,totalBalance:accounts.filter(a=>a.type!=='investment').reduce((s,a)=>s+a.balance_cents,0)+invested,outstandingInstallments:(data.installmentPlans||[]).reduce((s,p)=>s+p.total_cents-p.paid_cents,0),sparePot:(data.spareEvents||[]).reduce((s,e)=>s+e.multiplied_cents,0),today:data.today};
+ const context:Context={accounts,categories,transactions,recurring:data.recurring||[],installmentPlans:data.installmentPlans||[],installmentPayments:data.installmentPayments||[],goals:data.goals||[],goalEntries:data.goalEntries||[],investmentSnapshots:data.investmentSnapshots||[],investmentMetrics,profile:data.profile,currency,accountById,categoryById,spendable:r.spendable,savings,rawInvested,invested,investmentMovement:invested-rawInvested,investmentMovementPercent:rawInvested?(invested-rawInvested)/rawInvested*100:null,totalBalance:accounts.filter(a=>a.type!=='investment').reduce((s,a)=>s+a.balance_cents,0)+invested,outstandingInstallments:(data.installmentPlans||[]).reduce((s,p)=>s+p.total_cents-p.paid_cents,0),sparePot:(data.spareEvents||[]).reduce((s,e)=>s+e.multiplied_cents,0),today:data.today};
  const upcoming=v3.occurrences.filter(o=>['upcoming','partial'].includes(o.status));const deficits=r.buckets.filter(b=>b.deficit>0);const title=nav.find(n=>n[0]===page)?.[1]||({settings:'Settings',statistics:'Insights',goals:'Savings & investing'} as Record<string,string>)[page];
  const allocationSegments=[{name:'Spent',amount:r.totalSpent,color:'#cbd2e0'},{name:'Protected',amount:r.protectedRemaining,color:'#6e85bf'},{name:'Everyday',amount:Math.max(0,r.available),color:'#365bd6'}];
  return <div className="v3-app"><aside className="v3-sidebar"><Link className="v3-brand" href="/" onClick={e=>{e.preventDefault();navigate('overview');}}><span className="v3-monogram">R</span><span>remaivo<small>PERSONAL FINANCE</small></span></Link><div className="v3-space-label">YOUR WORKSPACE</div><nav aria-label="Main navigation">{nav.map(([key,label,icon])=><button key={key} className={`${page===key?'active':''}${key==='settings'?' v3-settings-nav':''}`} aria-current={page===key?'page':undefined} aria-label={key==='settings'?'Settings':undefined} onClick={()=>navigate(key)}><Icon name={icon}/><span className={key==='settings'?'v3-settings-label':undefined}>{label}</span>{page===key&&<span className="v3-nav-mark"/>}</button>)}</nav><div className="v3-sidebar-bottom"><div className="v3-profile"><span>{props.displayName.slice(0,1)}</span><div><strong>{props.displayName}</strong><a href={props.signOutHref}>Sign out</a></div></div></div></aside>
@@ -84,9 +84,9 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  {page==='accounts'&&<AccountsPage context={context} onAdd={()=>setModal('account')} onEdit={record=>setEdit({kind:'account',record})} onSnapshot={setValuation}/>}
  {page==='statistics'&&<><div className="v3-page-actions"><p>Explore historical activity and spending trends.</p></div><StatisticsPage context={context} revision={revision}/></>}
  {page==='settings'&&<><DataExportCard/><SettingsPage context={context} onCategory={()=>setModal('category')} onGoals={()=>navigate('goals')} onWeek={()=>setModal('week')} onTimezone={()=>setModal('timezone')} onEditCategory={record=>setEdit({kind:'category',record})}/></>}
- {page==='goals'&&<><div className="v3-page-actions"><p>Create a goal bucket in Plan to protect money. These accounts and milestones track your progress.</p><button className="v3-secondary" onClick={()=>setPanel({kind:'bucket'})}>New goal allocation</button></div><GoalsPage context={context} onGoal={()=>setModal('goal')} onSpare={()=>setModal('spare')} onSweep={()=>void save('sweepSpare',{})} onEdit={record=>setEdit({kind:'goal',record})}/></>}
+ {page==='goals'&&<><div className="v3-page-actions"><p>Create a goal bucket in Plan to protect money. These accounts and milestones track your progress.</p><button className="v3-secondary" onClick={()=>setPanel({kind:'bucket'})}>New goal allocation</button></div><GoalsPage context={context} onGoal={()=>setModal('goal')} onSpare={()=>setModal('spare')} onSweep={()=>void save('sweepSpare',{})} onEdit={record=>setEdit({kind:'goal',record})} onRecord={setGoalEntry}/></>}
  <footer className="v3-footer"><span>Remaivo</span><span>{data.profile.timezone.replaceAll('_',' ')} · Updated through {dateLabel(data.today)}</span></footer></div>
- {modal&&<FinanceModal name={modal} context={context} busy={busy} close={()=>{setModal(null);setError('');}} save={saveModal}/>}{edit&&<EditModal target={edit} context={context} busy={busy} close={()=>{setEdit(null);setError('');}} save={saveModal}/>}{valuation&&<ValuationModal account={valuation} snapshots={data.investmentSnapshots||[]} currency={currency} today={data.today} busy={busy} close={()=>setValuation(null)} save={save}/>}
+ {modal&&<FinanceModal name={modal} context={context} busy={busy} error={error} close={()=>{setModal(null);setError('');}} save={saveModal}/>}{edit&&<EditModal target={edit} context={context} busy={busy} error={error} close={()=>{setEdit(null);setError('');}} save={saveModal}/>}{goalEntry&&<GoalEntryModal goal={goalEntry} context={context} busy={busy} error={error} close={()=>{setGoalEntry(null);setError('');}} save={save}/>}{valuation&&<ValuationModal account={valuation} snapshots={data.investmentSnapshots||[]} currency={currency} today={data.today} busy={busy} close={()=>setValuation(null)} save={save}/>}
  {panel&&<PlanningPanel panel={panel} data={data} busy={busy} error={error} close={()=>{setPanel(null);setError('');}} save={save}/>}
  </div>;
 }

@@ -9,7 +9,7 @@ import ts from 'typescript';
 const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
   'transactions', 'recurring_plans', 'installment_plans', 'installment_payments',
-  'goals', 'spare_events',
+  'goals', 'goal_entries', 'spare_events',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
   'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_payment_links',
 ];
@@ -91,6 +91,8 @@ function seed(user, prefix) {
   insert('INSERT INTO installment_plans(id,user_id,title,total_cents,installment_count,first_due_date,payment_account_id) VALUES(?,?,?,?,?,?,?)', installment, user, `${prefix} laptop`, 120000, 12, '2026-09-10', account);
   insert('INSERT INTO installment_payments(id,user_id,plan_id,sequence,due_date,amount_cents) VALUES(?,?,?,?,?,?)', `${prefix}-installment-payment`, user, installment, 1, '2026-09-10', 10000);
   insert('INSERT INTO goals(id,user_id,name,kind,account_id) VALUES(?,?,?,?,?)', `${prefix}-goal`, user, `${prefix} holiday`, 'savings', account);
+  insert('INSERT INTO goals(id,user_id,name,kind) VALUES(?,?,?,?)', `${prefix}-manual-goal`, user, `${prefix} manual goal`, 'savings');
+  insert('INSERT INTO goal_entries(id,user_id,goal_id,date,amount_cents,note) VALUES(?,?,?,?,?,?)', `${prefix}-goal-entry`, user, `${prefix}-manual-goal`, '2026-09-20', 2500, `${prefix} contribution`);
   insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
   insert('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)', version, user, '2026-09-01', '{"target":100000,"period":"monthly"}');
   insert('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)', period, user, '2026-09-01', '2026-10-01', version, 100000);

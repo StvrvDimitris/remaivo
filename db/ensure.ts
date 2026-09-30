@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 const requiredTables = [
   "profiles", "accounts", "categories", "transactions",
   "investment_valuation_snapshots", "recurring_plans", "installment_plans",
-  "installment_payments", "goals", "spare_events", "v3_versions",
+  "installment_payments", "goals", "goal_entries", "spare_events", "v3_versions",
   "v3_periods", "v3_bucket_templates", "v3_bucket_periods",
   "v3_assignments", "v3_occurrences", "v3_events", "v3_payment_links",
 ] as const;

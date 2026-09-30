@@ -136,10 +136,24 @@ export const goals = sqliteTable("goals", {
   targetCents: integer("target_cents"),
   contributedCents: integer("contributed_cents").notNull().default(0),
   accountId: text("account_id"),
+  trackingMode: text("tracking_mode").notNull().default("total"),
+  startDate: text("start_date"),
+  endDate: text("end_date"),
+  baselineCents: integer("baseline_cents").notNull().default(0),
   color: text("color").notNull().default("#dff35f"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_goals_user_kind").on(table.userId, table.kind)]);
+
+export const goalEntries = sqliteTable("goal_entries", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  goalId: text("goal_id").notNull(),
+  date: text("date").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  note: text("note"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("idx_goal_entries_user_goal_date").on(table.userId, table.goalId, table.date)]);
 
 export const spareEvents = sqliteTable("spare_events", {
   id: text("id").primaryKey(),

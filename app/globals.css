@@ -347,10 +347,21 @@ button { color: inherit; }
 .goal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
 .goal-grid > article { padding: 24px; border-radius: 17px; background: var(--paper); box-shadow: 0 12px 36px rgba(28,49,43,.04); }
 .goal-kind { color: #81908b; font-size: 8px; font-weight: 900; letter-spacing: .12em; }
-.goal-grid h3 { margin: 12px 0 18px; font-size: 17px; }
+.goal-grid h3 { margin: 12px 0 5px; font-size: 17px; }
 .goal-grid article > strong { font-size: 25px; letter-spacing: -.04em; }
 .goal-grid article > small { margin-left: 5px; color: #84908c; font-size: 9px; }
 .goal-grid article > p { margin: 0; color: #84908c; font-size: 8px; }
+.goal-grid article > .goal-period { min-height: 32px; margin: 0 0 14px; color: #71818d; line-height: 1.4; }
+.goal-record-button { display: block; width: 100%; margin-top: 18px; padding: 10px 12px; border: 1px solid #d8e1e5; border-radius: 9px; background: #f4f8fa; color: #245063; font-size: 11px; font-weight: 700; text-align: center; cursor: pointer; }
+.goal-record-button:hover { background: #e8f1f5; }
+.goal-record-button:focus-visible { outline: 2px solid #245063; outline-offset: 2px; }
+.goal-entry-history { margin-top: 24px; border-top: 1px solid #e7ebec; }
+.goal-entry-history h3 { margin: 17px 0 8px; font-size: 13px; }
+.goal-entry-history > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #edf0f1; }
+.goal-entry-history > div > span { display: grid; gap: 3px; min-width: 0; }
+.goal-entry-history strong { font-size: 12px; }
+.goal-entry-history small { color: #71818d; font-size: 10px; overflow-wrap: anywhere; }
+.goal-entry-history button { border: 0; background: none; color: #8c5250; font-size: 10px; cursor: pointer; }
 
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 18px; align-items: start; }
 .category-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -379,6 +390,7 @@ button { color: inherit; }
 .modal-title { padding-right: 30px; margin-bottom: 24px; }
 .modal-title h2 { margin: 6px 0 8px; font-size: 28px; letter-spacing: -.045em; }
 .modal-title > p:last-child { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.modal-error { padding: 11px 13px; border: 1px solid #efc8c6; border-radius: 9px; background: #fff3f2; color: #933e39; font-size: 12px; line-height: 1.4; }
 .valuation-modal { width: min(620px, 100%); }
 .valuation-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .valuation-form-actions .modal-submit { width: auto; flex: 1; }
