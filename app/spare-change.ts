@@ -1,7 +1,6 @@
 export type SpareSettings = {
   spare_enabled: number;
   spare_source_id: string | null;
-  spare_debit_id: string | null;
   spare_destination_id: string | null;
   spare_multiplier: number;
 };
@@ -16,9 +15,8 @@ export function spareRoundUpCents(
 ): number {
   if (!settings || settings.spare_enabled !== 1 || excluded ||
       !sourceAccountId || sourceAccountId !== settings.spare_source_id ||
-      !settings.spare_debit_id || settings.spare_debit_id === sourceAccountId ||
       !settings.spare_destination_id || settings.spare_destination_id === sourceAccountId ||
-      settings.spare_destination_id === settings.spare_debit_id) return 0;
+      !Number.isSafeInteger(amountCents) || amountCents <= 0) return 0;
   const base = (100 - (amountCents % 100)) % 100;
   return base * Math.max(1, Math.min(20, Math.trunc(settings.spare_multiplier || 1)));
 }

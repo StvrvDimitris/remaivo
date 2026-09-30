@@ -318,11 +318,10 @@ export async function POST(request: Request) {
       const updated = await env.DB.prepare(`UPDATE accounts SET name = ?, type = ?, credit_limit_cents = ?, color = ?, include_spendable = ?
         WHERE id = ? AND user_id = ? AND NOT EXISTS (
           SELECT 1 FROM profiles WHERE user_id = ? AND (
-            (spare_source_id = ? AND ? = 'investment') OR
-            (spare_debit_id = ? AND ? IN ('investment', 'credit')) OR
+            (spare_source_id = ? AND ? IN ('investment', 'credit')) OR
             (spare_destination_id = ? AND ? NOT IN ('savings', 'investment'))
           )
-        )`).bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId, user.userId, payload.accountId, type, payload.accountId, type, payload.accountId, type).run();
+        )`).bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId, user.userId, payload.accountId, type, payload.accountId, type).run();
       if (!Number(updated.meta.changes)) return Response.json({ error: "This account's type must support its spare-change role. Change the spare-change settings first." }, { status: 409 });
     } else if (action === "addInvestmentSnapshot" || action === "updateInvestmentSnapshot") {
       const accountId = text(payload.accountId);
@@ -364,7 +363,7 @@ export async function POST(request: Request) {
       if(isMovement && (!payload.destinationAccountId || payload.destinationAccountId === payload.accountId || !await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0").bind(payload.destinationAccountId,user.userId).first())) return Response.json({error:"Choose a different active destination account."},{status:400});
       const countsBudget = ["expense", "installment_payment", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget);
       const spareExcluded = type === "expense" && bool(payload.excludeFromSpare);
-      const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_debit_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
+      const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
       const spare = type === "expense" ? spareRoundUpCents(amount, text(payload.accountId), spareExcluded, profile) : 0;
       const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_monthly, spare_change_cents, spare_excluded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, spare, spareExcluded ? 1 : 0)];
       if (type === "income") statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
@@ -406,7 +405,7 @@ export async function POST(request: Request) {
       const committed = type === "expense" && bool(payload.committed);
       const countsBudget = ["expense", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget, Number(original.counts_monthly) === 0);
       const spareExcluded = type === "expense" && bool(payload.excludeFromSpare, Number(original.spare_excluded) === 1);
-      const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_debit_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
+      const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
       let spare = type === "expense" ? spareRoundUpCents(amount, accountId, spareExcluded, profile) : 0;
       if (type === "expense" && !profile?.spare_enabled && oldSpare?.status === "pending" &&
           !spareExcluded && accountId === original.account_id) {
@@ -526,30 +525,27 @@ export async function POST(request: Request) {
     } else if (action === "updateSpare") {
       const enabled = bool(payload.enabled);
       const sourceId = text(payload.sourceAccountId) || null;
-      const debitId = text(payload.debitAccountId) || null;
       const destinationId = text(payload.destinationAccountId) || null;
-      if (enabled && (!sourceId || !debitId || !destinationId)) return Response.json({ error: "Choose a spending source, a separate sweep debit account, and a destination before turning spare change on." }, { status: 400 });
-      if ([sourceId, debitId, destinationId].filter(Boolean).length !== new Set([sourceId, debitId, destinationId].filter(Boolean)).size) return Response.json({ error: "The spending source, sweep debit account, and destination must be different accounts." }, { status: 400 });
-      const selected = await env.DB.prepare("SELECT id, type, archived FROM accounts WHERE user_id = ? AND id IN (?, ?, ?)").bind(user.userId, sourceId, debitId, destinationId).all<{id:string;type:string;archived:number}>();
+      if (enabled && (!sourceId || !destinationId)) return Response.json({ error: "Choose the account whose expenses earn round-ups and a savings or investment destination." }, { status: 400 });
+      if (sourceId && sourceId === destinationId) return Response.json({ error: "Choose a destination different from the spending account." }, { status: 400 });
+      const selected = await env.DB.prepare("SELECT id, type, archived FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, sourceId, destinationId).all<{id:string;type:string;archived:number}>();
       const accountsById = new Map(selected.results.map(account => [account.id, account]));
       const source = sourceId ? accountsById.get(sourceId) : null;
-      const debit = debitId ? accountsById.get(debitId) : null;
       const destination = destinationId ? accountsById.get(destinationId) : null;
-      if (sourceId && (!source || source.archived || source.type === "investment")) return Response.json({ error: "Choose an active spending source account." }, { status: 400 });
-      if (debitId && (!debit || debit.archived || ["investment", "credit"].includes(debit.type))) return Response.json({ error: "Choose an active account that can fund the sweep." }, { status: 400 });
+      if (sourceId && (!source || source.archived || ["investment", "credit"].includes(source.type))) return Response.json({ error: "Choose an active spending account that can fund the sweep." }, { status: 400 });
       if (destinationId && (!destination || destination.archived || !["savings", "investment"].includes(destination.type))) return Response.json({ error: "Choose an active savings or investment destination." }, { status: 400 });
-      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_debit_id = ?, spare_multiplier = ?, spare_destination_id = ? WHERE user_id = ?")
-        .bind(enabled ? 1 : 0, sourceId, debitId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, user.userId).run();
+      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_multiplier = ?, spare_destination_id = ? WHERE user_id = ?")
+        .bind(enabled ? 1 : 0, sourceId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, user.userId).run();
     } else if (action === "sweepSpare") {
       const transactionId = crypto.randomUUID();
       const results = await env.DB.batch([
         env.DB.prepare(`INSERT INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly)
-          SELECT ?, ?, debit.id, destination.id, CASE WHEN destination.type = 'investment' THEN 'investment' ELSE 'saving' END, 'Spare change sweep', pending.amount, ?, 1, 1
+          SELECT ?, ?, source.id, destination.id, CASE WHEN destination.type = 'investment' THEN 'investment' ELSE 'saving' END, 'Spare change sweep', pending.amount, ?, 1, 1
           FROM (SELECT COALESCE(SUM(multiplied_cents), 0) AS amount FROM spare_events WHERE user_id = ? AND status = 'pending') pending
           JOIN profiles profile ON profile.user_id = ?
-          JOIN accounts debit ON debit.id = profile.spare_debit_id AND debit.user_id = profile.user_id AND debit.archived = 0 AND debit.type NOT IN ('investment', 'credit')
+          JOIN accounts source ON source.id = profile.spare_source_id AND source.user_id = profile.user_id AND source.archived = 0 AND source.type NOT IN ('investment', 'credit')
           JOIN accounts destination ON destination.id = profile.spare_destination_id AND destination.user_id = profile.user_id AND destination.archived = 0 AND destination.type IN ('savings', 'investment')
-          WHERE pending.amount > 0 AND debit.balance_cents >= pending.amount AND debit.id <> destination.id`)
+          WHERE pending.amount > 0 AND source.balance_cents >= pending.amount AND source.id <> destination.id`)
           .bind(transactionId, user.userId, actionToday, user.userId, user.userId),
         env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - (SELECT amount_cents FROM transactions WHERE id = ? AND user_id = ?) WHERE id = (SELECT account_id FROM transactions WHERE id = ? AND user_id = ?) AND user_id = ?")
           .bind(transactionId, user.userId, transactionId, user.userId, user.userId),
@@ -558,7 +554,7 @@ export async function POST(request: Request) {
         env.DB.prepare("UPDATE spare_events SET status = 'swept' WHERE user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ?)")
           .bind(user.userId, transactionId, user.userId),
       ]);
-      if (!Number(results[0].meta.changes)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the debit account balance." }, { status: 409 });
+      if (!Number(results[0].meta.changes)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the spending account balance." }, { status: 409 });
     } else if (action === "addGoal") {
       await env.DB.prepare("INSERT INTO goals (id, user_id, name, kind, target_cents, contributed_cents, account_id, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "savings"), cents(payload.target) || null, cents(payload.contributed), payload.accountId || null, text(payload.color, "#dff35f")).run();
     } else if (action === "updateGoal") {
@@ -567,7 +563,7 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE goals SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.goalId, user.userId).run();
     } else if (action === "archiveAccount") {
       const accountId = text(payload.accountId);
-      const blocked = await env.DB.prepare("SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM recurring_plans WHERE user_id = ? AND active = 1 AND (account_id = ? OR destination_account_id = ?)) OR EXISTS (SELECT 1 FROM installment_plans WHERE user_id = ? AND status = 'active' AND (payment_account_id = ? OR linked_credit_account_id = ?)) OR EXISTS (SELECT 1 FROM goals WHERE user_id = ? AND archived = 0 AND account_id = ?) OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND (spare_source_id = ? OR spare_debit_id = ? OR spare_destination_id = ?))").bind(user.userId, accountId, accountId, user.userId, accountId, accountId, user.userId, accountId, user.userId, accountId, accountId, accountId).first();
+      const blocked = await env.DB.prepare("SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM recurring_plans WHERE user_id = ? AND active = 1 AND (account_id = ? OR destination_account_id = ?)) OR EXISTS (SELECT 1 FROM installment_plans WHERE user_id = ? AND status = 'active' AND (payment_account_id = ? OR linked_credit_account_id = ?)) OR EXISTS (SELECT 1 FROM goals WHERE user_id = ? AND archived = 0 AND account_id = ?) OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND (spare_source_id = ? OR spare_destination_id = ?))").bind(user.userId, accountId, accountId, user.userId, accountId, accountId, user.userId, accountId, user.userId, accountId, accountId).first();
       if (blocked) return Response.json({ error: "Move active plans, goals, and spare-change accounts before archiving this account." }, { status: 409 });
       await env.DB.prepare("UPDATE accounts SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.accountId, user.userId).run();
     } else {

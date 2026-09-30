@@ -10,7 +10,6 @@ export const profiles = sqliteTable("profiles", {
   spareMultiplier: integer("spare_multiplier").notNull().default(1),
   spareEnabled: integer("spare_enabled", { mode: "boolean" }).notNull().default(false),
   spareSourceId: text("spare_source_id"),
-  spareDebitId: text("spare_debit_id"),
   spareDestinationId: text("spare_destination_id"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });

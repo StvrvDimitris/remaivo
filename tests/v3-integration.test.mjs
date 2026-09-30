@@ -206,8 +206,8 @@ test('Occurrence generation skips unchanged rows while preserving schedule state
 });
 test('Auto-posted recurring expenses accrue spare change once without moving sweep cash',async()=>{
  const owner='recurring-spare-owner';
- sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_debit_id,spare_destination_id,spare_multiplier) VALUES(?,1,?,?,?,3)').run(owner,'recurring-source','recurring-debit','recurring-destination');
- for(const [id,type,balance] of [['recurring-source','bank',10000],['recurring-debit','cash',5000],['recurring-destination','savings',0]])
+ sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_multiplier) VALUES(?,1,?,?,3)').run(owner,'recurring-source','recurring-destination');
+ for(const [id,type,balance] of [['recurring-source','bank',10000],['recurring-destination','savings',0]])
   sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id,owner,id,type,balance);
  sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,interval_count,next_date,anchor_day,end_date,auto_post) VALUES('spare-recurring',?,'Coffee plan','expense',1234,'recurring-source','monthly',1,'2026-09-17',17,'2026-10-17',1)").run(owner);
  await v3.reconcileV3(owner,'2026-09-17');
@@ -217,7 +217,7 @@ test('Auto-posted recurring expenses accrue spare change once without moving swe
  assert.deepEqual({...postedDetail},{amount_cents:1234,spare_change_cents:198,recurring_plan_id:'spare-recurring'});
  assert.deepEqual(sqlite.prepare('SELECT multiplied_cents,status,transaction_id FROM spare_events WHERE user_id=?').all(owner).map(row=>({...row})),[{multiplied_cents:198,status:'pending',transaction_id:postedId}]);
  assert.deepEqual(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row=>({...row})),[
-  {id:'recurring-debit',balance_cents:5000},{id:'recurring-destination',balance_cents:0},{id:'recurring-source',balance_cents:8766},
+  {id:'recurring-destination',balance_cents:0},{id:'recurring-source',balance_cents:8766},
  ]);
  assert.equal(sqlite.prepare("SELECT status FROM v3_occurrences WHERE id='recurring:spare-recurring:2026-09-17'").get().status,'paid');
  assert.equal(sqlite.prepare("SELECT status FROM v3_occurrences WHERE id='recurring:spare-recurring:2026-10-17'").get().status,'upcoming');
