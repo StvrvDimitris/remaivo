@@ -284,6 +284,10 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-app .account-card { margin-bottom: 0; padding: 22px; background: var(--paper) !important; }
 .v3-app .account-card::after { display: none; }
 .v3-app .account-card-top { margin-bottom: 18px; }
+.v3-app .account-card-top { gap: 12px; flex-wrap: wrap; }
+.v3-app .account-expense-default { padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--muted); font-size: .75rem; line-height: 1.4; }
+.v3-app .account-expense-default:hover { border-color: var(--green); color: var(--green); }
+.v3-app .account-expense-default[aria-pressed="true"] { background: var(--mint); border-color: transparent; color: var(--green); opacity: 1; cursor: default; }
 .v3-app .account-icon { background: var(--theme-soft); color: var(--theme-chart-secondary); width: 34px; height: 34px; border-radius: 7px; font-size: 1rem; }
 .v3-app .account-card p { font-size: .75rem; letter-spacing: .06em; font-weight: 500; color: var(--theme-muted); }
 .v3-app .account-card h3 { font-size: 1rem; font-weight: 550; color: var(--theme-text); margin: 7px 0 16px; }

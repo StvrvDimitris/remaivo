@@ -634,6 +634,12 @@ export async function POST(request: Request) {
         env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
         env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
       ]);
+    } else if (action === "updateDefaultExpenseAccount") {
+      const accountId = text(payload.accountId);
+      if (!await env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND user_id = ? AND archived = 0").bind(accountId, user.userId).first()) {
+        return Response.json({ error: "Choose an active account." }, { status: 400 });
+      }
+      await env.DB.prepare("UPDATE profiles SET default_expense_account_id = ? WHERE user_id = ?").bind(accountId, user.userId).run();
     } else if (action === "updateTheme") {
       if (!isUITheme(payload.theme)) return Response.json({ error: "Choose an available theme." }, { status: 400 });
       await env.DB.prepare("UPDATE profiles SET ui_theme = ? WHERE user_id = ?").bind(payload.theme, user.userId).run();
@@ -722,7 +728,10 @@ export async function POST(request: Request) {
       const accountId = text(payload.accountId);
       const blocked = await env.DB.prepare("SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM recurring_plans WHERE user_id = ? AND active = 1 AND (account_id = ? OR destination_account_id = ?)) OR EXISTS (SELECT 1 FROM installment_plans WHERE user_id = ? AND status = 'active' AND (payment_account_id = ? OR linked_credit_account_id = ?)) OR EXISTS (SELECT 1 FROM goals WHERE user_id = ? AND archived = 0 AND account_id = ?) OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND (spare_source_id = ? OR spare_destination_id = ?))").bind(user.userId, accountId, accountId, user.userId, accountId, accountId, user.userId, accountId, user.userId, accountId, accountId).first();
       if (blocked) return Response.json({ error: "Move active plans, goals, and spare-change accounts before archiving this account." }, { status: 409 });
-      await env.DB.prepare("UPDATE accounts SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.accountId, user.userId).run();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE accounts SET archived = 1 WHERE id = ? AND user_id = ?").bind(accountId, user.userId),
+        env.DB.prepare("UPDATE profiles SET default_expense_account_id = NULL WHERE user_id = ? AND default_expense_account_id = ?").bind(user.userId, accountId),
+      ]);
     } else {
       return Response.json({ error: "Unknown action." }, { status: 400 });
     }

@@ -91,6 +91,35 @@ test('migrations provide tracking fields and a dated manual-entry ledger', () =>
   }
 });
 
+test('default expense account persists per owner, rejects unavailable accounts, and clears on archive', async () => {
+  const user = 'expense-default-owner'; owner(user);
+  account('expense-default-first', user); account('expense-default-second', user);
+  account('expense-default-foreign', 'someone-else');
+  account('expense-default-archived', user);
+  sqlite.prepare('UPDATE accounts SET archived=1 WHERE id=?').run('expense-default-archived');
+  await expectSaved(await post('updateDefaultExpenseAccount', { accountId: 'expense-default-second' }));
+  assert.equal(sqlite.prepare('SELECT default_expense_account_id FROM profiles WHERE user_id=?').get(user).default_expense_account_id, 'expense-default-second');
+  const response = await get();
+  assert.equal((await response.json()).profile.default_expense_account_id, 'expense-default-second');
+  for (const accountId of ['expense-default-foreign', 'expense-default-archived', 'missing', '']) {
+    assert.equal((await post('updateDefaultExpenseAccount', { accountId })).status, 400);
+  }
+  assert.equal(sqlite.prepare('SELECT default_expense_account_id FROM profiles WHERE user_id=?').get(user).default_expense_account_id, 'expense-default-second');
+  await expectSaved(await post('archiveAccount', { accountId: 'expense-default-second' }));
+  assert.equal(sqlite.prepare('SELECT default_expense_account_id FROM profiles WHERE user_id=?').get(user).default_expense_account_id, null);
+});
+
+test('expense preselection uses the saved active account and safely falls back', async () => {
+  const code = ts.transpileModule(fs.readFileSync('app/expense-account.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  fs.writeFileSync(path.join(scratch, 'expense-account.mjs'), code);
+  const { defaultExpenseAccountId } = await import(pathToFileURL(path.join(scratch, 'expense-account.mjs')));
+  const accounts = [{ id: 'first', archived: 0 }, { id: 'chosen', archived: 0 }, { id: 'archived', archived: 1 }];
+  assert.equal(defaultExpenseAccountId(accounts, 'chosen'), 'chosen');
+  assert.equal(defaultExpenseAccountId(accounts, 'archived'), 'first');
+  assert.equal(defaultExpenseAccountId(accounts, 'missing'), 'first');
+  assert.equal(defaultExpenseAccountId([]), '');
+});
+
 test('linked total uses the full balance; new-money starts at the balance when created', async () => {
   const user = 'goal-linked-owner'; owner(user); account('goal-linked-savings', user, 50000);
   await expectSaved(await post('addGoal', { name: 'Whole balance', kind: 'savings', accountId: 'goal-linked-savings', target: 1500, trackingMode: 'total' }));

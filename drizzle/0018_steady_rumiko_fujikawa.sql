@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `default_expense_account_id` text;

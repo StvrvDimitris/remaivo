@@ -7,6 +7,7 @@ export const profiles = sqliteTable("profiles", {
   weekStart: integer("week_start").notNull().default(1),
   timezone: text("timezone").notNull().default("UTC"),
   uiTheme: text("ui_theme").notNull().default("indigo"),
+  defaultExpenseAccountId: text("default_expense_account_id"),
   setupComplete: integer("setup_complete", { mode: "boolean" }).notNull().default(false),
   spareMultiplier: integer("spare_multiplier").notNull().default(1),
   spareEnabled: integer("spare_enabled", { mode: "boolean" }).notNull().default(false),

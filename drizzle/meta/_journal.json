@@ -127,6 +127,13 @@
       "when": 1790842690376,
       "tag": "0017_square_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1790860047138,
+      "tag": "0018_steady_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }
