@@ -59,9 +59,11 @@ class Statement {
   async all() { return { results: sqlite.prepare(this.sql).all(...this.args) }; }
   async run() { return { meta: sqlite.prepare(this.sql).run(...this.args) }; }
 }
+let batchQueue = Promise.resolve();
 globalThis.__spareTestEnv = { DB: {
   prepare: sql => new Statement(sql),
-  batch: async statements => {
+  batch: statements => {
+    const operation = batchQueue.then(async () => {
     sqlite.exec('BEGIN');
     try {
       const results = [];
@@ -72,8 +74,15 @@ globalThis.__spareTestEnv = { DB: {
       sqlite.exec('ROLLBACK');
       throw error;
     }
+    });
+    batchQueue = operation.catch(() => {});
+    return operation;
   },
 } };
+
+compile(fs.readFileSync('db/spare.ts', 'utf8').replace("import { env } from 'cloudflare:workers';", 'const env = globalThis.__spareTestEnv;'), 'spare.mjs');
+const { sweepSpare, autoSweepSpare } = await import(pathToFileURL(path.join(scratch, 'spare.mjs')));
+globalThis.__spareTestSweep = sweepSpare;
 
 // Run the actual sweep action with local auth, clock, and DB bindings.
 const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8')
@@ -83,6 +92,7 @@ const getChatGPTUser = async () => ({ userId: globalThis.__spareTestUser, displa
 const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;
+const sweepSpare = globalThis.__spareTestSweep;
 ${routeSource}`, 'route.mjs');
 const { POST } = await import(pathToFileURL(path.join(scratch, 'route.mjs')));
 const post = (action, payload = {}) => POST(new Request('https://example.invalid/api/finance', {
@@ -91,6 +101,85 @@ const post = (action, payload = {}) => POST(new Request('https://example.invalid
   body: JSON.stringify({ action, payload }),
 }));
 const sweep = () => post('sweepSpare');
+
+function seedAuto(owner, { pending = 100, threshold = 100, enabled = 1, balance = 1000, type = 'savings' } = {}) {
+  const source = `${owner}-source`, destination = `${owner}-destination`;
+  sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_auto_sweep_threshold_cents) VALUES(?,?,?,?,?)').run(owner, enabled, source, destination, threshold);
+  for (const [id, kind, amount] of [[source, 'bank', balance], [destination, type, 0]])
+    sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id, owner, id, kind, amount);
+  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)").run(`${owner}-event`, owner, `${owner}-purchase`, pending);
+  return { source, destination };
+}
+
+test('Automatic sweep settings validate and persist a positive threshold, with off as the default', async () => {
+  const owner = 'threshold-settings-owner';
+  globalThis.__spareTestUser = owner;
+  const { source, destination } = seedAuto(owner, { threshold: 0 });
+  const payload = { enabled: true, autoSweep: true, sourceAccountId: source, destinationAccountId: destination, multiplier: 2 };
+  for (const autoSweepThreshold of ['', '0', '-1', 'bad', 'Infinity', '9007199254740991']) {
+    assert.equal((await post('updateSpare', { ...payload, autoSweepThreshold })).status, 400);
+    assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 0);
+  }
+  assert.equal((await post('updateSpare', { ...payload, autoSweepThreshold: '5.25' })).status, 200);
+  assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 525);
+  assert.equal((await post('updateSpare', { ...payload, autoSweep: false })).status, 200);
+  assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 0);
+});
+
+test('Automatic sweeps wait below the threshold and sweep the full total at or above it', async () => {
+  for (const pending of [99, 100, 140]) {
+    const owner = `threshold-${pending}`;
+    const { source, destination } = seedAuto(owner, { pending, type: pending === 140 ? 'investment' : 'savings' });
+    assert.equal(await autoSweepSpare(owner, '2026-10-01'), pending >= 100);
+    assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 1000 - (pending >= 100 ? pending : 0));
+    assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, pending >= 100 ? pending : 0);
+    const recorded = sqlite.prepare("SELECT amount_cents,type,date,committed,counts_monthly FROM transactions WHERE user_id=?").all(owner);
+    assert.deepEqual(recorded.map(row => ({ ...row })), pending >= 100 ? [{ amount_cents: pending, type: pending === 140 ? 'investment' : 'saving', date: '2026-10-01', committed: 1, counts_monthly: 1 }] : []);
+  }
+});
+
+test('Turning collection or automatic sweeps off pauses auto while manual sweeping remains available', async () => {
+  for (const settings of [{ enabled: 0 }, { threshold: 0 }, { pending: 20, threshold: 100 }]) {
+    const owner = `paused-${JSON.stringify(settings)}`;
+    seedAuto(owner, settings);
+    assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
+    assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
+    assert.equal(await sweepSpare(owner, '2026-10-01'), true);
+  }
+});
+
+test('Insufficient funds preserve the entire pending total and a later sync retries only once', async () => {
+  const owner = 'auto-retry';
+  const { source, destination } = seedAuto(owner, { pending: 140, balance: 139 });
+  assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
+  assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
+  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, 0);
+  sqlite.prepare('UPDATE accounts SET balance_cents=500 WHERE id=?').run(source);
+  assert.equal(await autoSweepSpare(owner, '2026-10-02'), true);
+  assert.equal(await autoSweepSpare(owner, '2026-10-02'), false);
+  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 360);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n, 1);
+});
+
+test('Competing automatic and manual sweeps consume the same pending change exactly once', async () => {
+  const owner = 'auto-contention';
+  const { source, destination } = seedAuto(owner, { pending: 140 });
+  const results = await Promise.all([autoSweepSpare(owner, '2026-10-01'), autoSweepSpare(owner, '2026-10-01'), sweepSpare(owner, '2026-10-01')]);
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 860);
+  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, 140);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n, 1);
+});
+
+test('Automatic sweeps respect account ownership, archived accounts and supported account types', async () => {
+  for (const [field, value] of [['user_id', 'someone-else'], ['archived', 1], ['type', 'bank']]) {
+    const owner = `invalid-${field}`;
+    const { destination } = seedAuto(owner);
+    sqlite.prepare(`UPDATE accounts SET ${field}=? WHERE id=?`).run(value, destination);
+    assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
+    assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
+  }
+});
 
 test('Saving spare settings and sweeping use the expense account, preserve pending accrual, and cannot repeat', async () => {
   const owner = 'sweep-owner';

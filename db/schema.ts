@@ -11,6 +11,7 @@ export const profiles = sqliteTable("profiles", {
   spareEnabled: integer("spare_enabled", { mode: "boolean" }).notNull().default(false),
   spareSourceId: text("spare_source_id"),
   spareDestinationId: text("spare_destination_id"),
+  spareAutoSweepThresholdCents: integer("spare_auto_sweep_threshold_cents").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

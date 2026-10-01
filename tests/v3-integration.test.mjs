@@ -6,8 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
 const scratch=path.resolve('work/v3-tests');fs.mkdirSync(scratch,{recursive:true});
-for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/spare-change.ts','spare-change'],['app/v3-engine.ts','engine'],['db/ensure.ts','ensure'],['db/v3.ts','server']]){
+for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/spare-change.ts','spare-change'],['app/v3-engine.ts','engine'],['db/ensure.ts','ensure'],['db/spare.ts','spare'],['db/v3.ts','server']]){
  let s=fs.readFileSync(src,'utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__testEnv;').replace('import { env } from "cloudflare:workers";','const env=globalThis.__testEnv;').replaceAll("'../app/finance-dates'","'./dates.mjs'").replaceAll("'./finance-dates'","'./dates.mjs'").replaceAll("'../app/v3-engine'","'./engine.mjs'").replaceAll("'../app/spare-change'","'./spare-change.mjs'").replaceAll('"../app/spare-change"','"./spare-change.mjs"').replaceAll("'./ensure'","'./ensure.mjs'");
+ s=s.replaceAll("'./spare'","'./spare.mjs'");
  fs.writeFileSync(path.join(scratch,dest+'.mjs'),ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 }
 const sqlite=new DatabaseSync(':memory:');
@@ -225,6 +226,14 @@ test('Auto-posted recurring expenses accrue spare change once without moving swe
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n,1);
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM spare_events WHERE user_id=?').get(owner).n,1);
  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-source'").get().balance_cents,8766);
+ sqlite.prepare('UPDATE profiles SET spare_auto_sweep_threshold_cents=300 WHERE user_id=?').run(owner);
+ await v3.reconcileV3(owner,'2026-10-17');
+ assert.deepEqual(sqlite.prepare("SELECT amount_cents,type FROM transactions WHERE user_id=? AND description='Spare change sweep'").all(owner).map(row=>({...row})),[{amount_cents:396,type:'saving'}]);
+ assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-source'").get().balance_cents,7136);
+ assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-destination'").get().balance_cents,396);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM spare_events WHERE user_id=? AND status='pending'").get(owner).n,0);
+ await v3.reconcileV3(owner,'2026-10-17');
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE user_id=? AND description='Spare change sweep'").get(owner).n,1);
 });
 test('Create, move, release and configure use cash limits and reject invalid dates',async()=>{
  await v3.v3Action(user,base.today,'v3Bucket',{name:'Test groceries',target:'100',kind:'protected',rollover:'positive'});

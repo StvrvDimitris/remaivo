@@ -425,6 +425,7 @@ button { color: inherit; }
 .spare-toggle input:checked + .spare-toggle-track i { transform: translateX(18px); }
 .spare-toggle input:focus-visible + .spare-toggle-track { outline: 3px solid #41b5a6; outline-offset: 3px; }
 .spare-toggle small { grid-column: 2; grid-row: 2; color: #71818d; font-size: 11px; font-weight: 400; margin-top: 2px; }
+.spare-hero .spare-sweep-status { margin-top: 12px; font-size: .875rem; color: #d7e1f5; }
 .budget-enable { min-height: 62px; padding: 12px 14px; border: 1px solid #dfe2d9; border-radius: 12px; display: flex; align-items: center; gap: 12px; background: #f7f8f3; cursor: pointer; }
 .budget-enable > span { margin-right: auto; display: grid; gap: 4px; }
 .budget-enable strong { font-size: 10px; }

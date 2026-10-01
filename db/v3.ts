@@ -3,6 +3,7 @@ import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
 import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 import { spareRoundUpCents, type SpareSettings } from '../app/spare-change';
+import { autoSweepSpare } from './spare';
 
 const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results;
 const cents=(value:unknown)=>{const n=Math.round(Number(value??0)*100);if(!Number.isSafeInteger(n)||n<0)throw new Error('Enter a valid nonnegative amount.');return n;};
@@ -107,6 +108,7 @@ export async function reconcileV3(user:string,today:string){
  ]);
  const live=new Set(activeAccounts.map(a=>a.id));
  for(const o of due){if(!o.account_id||!live.has(o.account_id)||(['saving','investment'].includes(o.type)&&(!o.destination_account_id||!live.has(o.destination_account_id)||o.destination_account_id===o.account_id)))continue;await settleOccurrence(user,o.id,o.due_date);}
+ await autoSweepSpare(user,today);
 }
 
 export async function v3Snapshot(user:string,today:string){

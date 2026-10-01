@@ -7,6 +7,7 @@ import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
 import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
+import { sweepSpare } from "../../../db/spare";
 import type { StatisticsMode } from "../../transaction-classification";
 
 export const dynamic = "force-dynamic";
@@ -643,9 +644,12 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE profiles SET timezone = ? WHERE user_id = ?").bind(timezone, user.userId).run();
     } else if (action === "updateSpare") {
       const enabled = bool(payload.enabled);
+      const autoSweep = bool(payload.autoSweep);
+      const threshold = autoSweep ? Math.round(Number(payload.autoSweepThreshold) * 100) : 0;
+      if (autoSweep && (!Number.isSafeInteger(threshold) || threshold < 1)) return Response.json({ error: "Enter an automatic sweep threshold of at least 0.01." }, { status: 400 });
       const sourceId = text(payload.sourceAccountId) || null;
       const destinationId = text(payload.destinationAccountId) || null;
-      if (enabled && (!sourceId || !destinationId)) return Response.json({ error: "Choose the account whose expenses earn round-ups and a savings or investment destination." }, { status: 400 });
+      if ((enabled || autoSweep) && (!sourceId || !destinationId)) return Response.json({ error: "Choose the account whose expenses earn round-ups and a savings or investment destination." }, { status: 400 });
       if (sourceId && sourceId === destinationId) return Response.json({ error: "Choose a destination different from the spending account." }, { status: 400 });
       const selected = await env.DB.prepare("SELECT id, type, archived FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, sourceId, destinationId).all<{id:string;type:string;archived:number}>();
       const accountsById = new Map(selected.results.map(account => [account.id, account]));
@@ -653,27 +657,10 @@ export async function POST(request: Request) {
       const destination = destinationId ? accountsById.get(destinationId) : null;
       if (sourceId && (!source || source.archived || ["investment", "credit"].includes(source.type))) return Response.json({ error: "Choose an active spending account that can fund the sweep." }, { status: 400 });
       if (destinationId && (!destination || destination.archived || !["savings", "investment"].includes(destination.type))) return Response.json({ error: "Choose an active savings or investment destination." }, { status: 400 });
-      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_multiplier = ?, spare_destination_id = ? WHERE user_id = ?")
-        .bind(enabled ? 1 : 0, sourceId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, user.userId).run();
+      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_multiplier = ?, spare_destination_id = ?, spare_auto_sweep_threshold_cents = ? WHERE user_id = ?")
+        .bind(enabled ? 1 : 0, sourceId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, threshold, user.userId).run();
     } else if (action === "sweepSpare") {
-      const transactionId = crypto.randomUUID();
-      const results = await env.DB.batch([
-        env.DB.prepare(`INSERT INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly)
-          SELECT ?, ?, source.id, destination.id, CASE WHEN destination.type = 'investment' THEN 'investment' ELSE 'saving' END, 'Spare change sweep', pending.amount, ?, 1, 1
-          FROM (SELECT COALESCE(SUM(multiplied_cents), 0) AS amount FROM spare_events WHERE user_id = ? AND status = 'pending') pending
-          JOIN profiles profile ON profile.user_id = ?
-          JOIN accounts source ON source.id = profile.spare_source_id AND source.user_id = profile.user_id AND source.archived = 0 AND source.type NOT IN ('investment', 'credit')
-          JOIN accounts destination ON destination.id = profile.spare_destination_id AND destination.user_id = profile.user_id AND destination.archived = 0 AND destination.type IN ('savings', 'investment')
-          WHERE pending.amount > 0 AND source.balance_cents >= pending.amount AND source.id <> destination.id`)
-          .bind(transactionId, user.userId, actionToday, user.userId, user.userId),
-        env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - (SELECT amount_cents FROM transactions WHERE id = ? AND user_id = ?) WHERE id = (SELECT account_id FROM transactions WHERE id = ? AND user_id = ?) AND user_id = ?")
-          .bind(transactionId, user.userId, transactionId, user.userId, user.userId),
-        env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + (SELECT amount_cents FROM transactions WHERE id = ? AND user_id = ?) WHERE id = (SELECT destination_account_id FROM transactions WHERE id = ? AND user_id = ?) AND user_id = ?")
-          .bind(transactionId, user.userId, transactionId, user.userId, user.userId),
-        env.DB.prepare("UPDATE spare_events SET status = 'swept' WHERE user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ?)")
-          .bind(user.userId, transactionId, user.userId),
-      ]);
-      if (!Number(results[0].meta.changes)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the spending account balance." }, { status: 409 });
+      if (!await sweepSpare(user.userId, actionToday)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the spending account balance." }, { status: 409 });
     } else if (action === "addGoal") {
       const fields = await goalFields(user.userId, payload, actionToday);
       if ("error" in fields) return Response.json({ error: fields.error }, { status: 400 });

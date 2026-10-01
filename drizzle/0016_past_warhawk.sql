@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `spare_auto_sweep_threshold_cents` integer DEFAULT 0 NOT NULL;
