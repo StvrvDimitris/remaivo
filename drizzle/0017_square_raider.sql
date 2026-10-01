@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `ui_theme` text DEFAULT 'indigo' NOT NULL;

@@ -120,6 +120,13 @@
       "when": 1790839560857,
       "tag": "0016_past_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1790842690376,
+      "tag": "0017_square_raider",
+      "breakpoints": true
     }
   ]
 }

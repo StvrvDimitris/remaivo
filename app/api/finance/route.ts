@@ -8,6 +8,7 @@ import { addCalendarInterval, financialToday, validTimeZone } from "../../financ
 import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
+import { isUITheme } from "../../ui-themes";
 import type { StatisticsMode } from "../../transaction-classification";
 
 export const dynamic = "force-dynamic";
@@ -633,6 +634,9 @@ export async function POST(request: Request) {
         env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
         env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
       ]);
+    } else if (action === "updateTheme") {
+      if (!isUITheme(payload.theme)) return Response.json({ error: "Choose an available theme." }, { status: 400 });
+      await env.DB.prepare("UPDATE profiles SET ui_theme = ? WHERE user_id = ?").bind(payload.theme, user.userId).run();
     } else if (action === "updateWeekStart") {
       const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
       await env.DB.prepare("UPDATE profiles SET week_start = ? WHERE user_id = ?").bind(weekStart, user.userId).run();

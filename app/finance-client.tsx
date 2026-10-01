@@ -15,7 +15,7 @@ type InstallmentPayment = { id: string; plan_id: string; sequence: number; due_d
 export type Goal = { id: string; name: string; kind: string; target_cents: number | null; contributed_cents: number; account_id: string | null; color: string; tracking_mode: "total" | "period" | "new_money"; start_date: string | null; end_date: string | null; baseline_cents: number; progress_cents: number };
 export type GoalEntry = { id: string; goal_id: string; date: string; amount_cents: number; note: string | null; created_at: string };
 type SpareEvent = { id: string; multiplied_cents: number };
-type Profile = { currency: string; week_start: number; timezone: string; spare_multiplier: number; spare_enabled: number; spare_source_id: string | null; spare_destination_id: string | null; spare_auto_sweep_threshold_cents: number; };
+type Profile = { ui_theme?: string; currency: string; week_start: number; timezone: string; spare_multiplier: number; spare_enabled: number; spare_source_id: string | null; spare_destination_id: string | null; spare_auto_sweep_threshold_cents: number; };
 export type Snapshot = {
   v3?: Awaited<ReturnType<typeof v3Snapshot>>;
   needsSetup: boolean;
