@@ -407,7 +407,7 @@ html[data-theme="midnight"] {
   .v3-app .v3-sidebar nav button svg { width: 20px; height: 20px; }
   .v3-app .v3-sidebar nav button.active { background: transparent; box-shadow: none; color: var(--theme-text); font-weight: 600; }
   .v3-app .v3-sidebar nav button.active svg { background: none; box-shadow: none; color: var(--theme-accent); }
-  .v3-app .v3-sidebar .v3-settings-label { display: inline; }
+  .v3-app .v3-sidebar .v3-settings-label { display: none; }
   .v3-nav-badge { position: absolute; top: 8px; left: calc(50% + 6px); min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0; background: var(--theme-negative); }
   .v3-app .v3-workspace { margin: 0; min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
   .v3-app .v3-topbar { min-height: 56px; padding: 0 16px; border-radius: 0; }

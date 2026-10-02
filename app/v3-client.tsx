@@ -53,6 +53,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  },[dialogOpen]);
  useEffect(()=>{
   const focusSearch=(event:KeyboardEvent)=>{
+   if(dialogOpen)return;
    if(event.key!=='/'||event.metaKey||event.ctrlKey||event.altKey)return;
    const target=event.target as HTMLElement|null;
    if(target&&(target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(target.tagName)))return;
@@ -61,6 +62,11 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   };
   document.addEventListener('keydown',focusSearch);
   return()=>document.removeEventListener('keydown',focusSearch);
+ },[dialogOpen]);
+ useEffect(()=>{
+  const restorePage=()=>setPage(initialPage());
+  window.addEventListener('popstate',restorePage);
+  return()=>window.removeEventListener('popstate',restorePage);
  },[]);
  const load=useCallback(async()=>{
   if(loadingRef.current)return;
