@@ -560,3 +560,161 @@ html[data-theme="midnight"] {
  .v3-app .statistics-page .week-band-grid { padding:16px; }
  .v3-app .statistics-page .concentration-grid { padding:16px; }
 }
+
+/* Shared dialog anatomy: a scrolling form and an always-visible action footer. */
+.v3-app :is(.modal-card,.v3-dialog).dialog-frame { width:min(480px,100%); max-width:480px; max-height:calc(100dvh - 48px); padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.v3-app .dialog-frame::before { display:none; }
+.v3-app .dialog-scroll { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:24px; scrollbar-gutter:stable; }
+.v3-app .dialog-heading { display:flex; align-items:flex-start; gap:12px; padding-right:28px; margin-bottom:20px; }
+.v3-app .dialog-heading-icon { width:40px; height:40px; flex-shrink:0; border:1px solid var(--theme-border); border-radius:10px; display:grid; place-items:center; color:var(--theme-text-soft); box-shadow:var(--pro-shadow); }
+.v3-app .dialog-heading h2 { margin:0; font-size:1rem; line-height:1.4; font-weight:600; letter-spacing:-.015em; }
+.v3-app .dialog-heading p { margin:4px 0 0; color:var(--theme-text-soft); font-size:.8125rem; line-height:1.5; }
+.v3-app .dialog-frame .modal-close { z-index:2; top:16px; right:12px; }
+.v3-app .dialog-frame form { display:flex; flex-direction:column; gap:16px; }
+.v3-app .allocation-accounts { display:grid; gap:16px; }
+.v3-app .dialog-frame .empty-mini { font-size:.8125rem; line-height:1.5; }
+.v3-app .dialog-frame .form-field { min-width:0; margin:0; }
+.v3-app .dialog-frame .form-field > span:first-child { font-size:.875rem; font-weight:500; }
+.v3-app .dialog-frame :is(.form-grid,.v3-form-grid) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.v3-app .dialog-frame :is(input,select) { min-width:0; max-width:100%; box-sizing:border-box; }
+.v3-app .dialog-footer { flex-shrink:0; display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 24px; border-top:1px solid var(--theme-line); background:var(--theme-soft); }
+.v3-app .dialog-footer :is(.primary-button,.ghost-button) { min-height:40px; padding:0 16px; font-size:.875rem; }
+.v3-app .dialog-key-hint { margin-right:auto; color:var(--theme-muted); font-size:.75rem; white-space:nowrap; }
+.v3-app .dialog-key-hint kbd { font:inherit; border:1px solid var(--theme-border); padding:2px 5px; border-radius:4px; background:var(--paper); }
+.v3-app .money-input { display:flex; align-items:stretch; height:40px; border:1px solid var(--theme-border); border-radius:8px; overflow:hidden; background:var(--paper); box-shadow:var(--pro-shadow); }
+.v3-app .money-input > i { display:grid; place-items:center; padding:0 12px; background:var(--theme-soft); border-right:1px solid var(--theme-line); font-size:.875rem; font-style:normal; font-weight:500; color:var(--theme-text-soft); }
+.v3-app .money-input input { flex:1; width:100%; height:100%; min-height:0; border:0; border-radius:0; background:transparent; box-shadow:none; font-weight:500; }
+.v3-app .money-input:focus-within { border-color:var(--theme-focus); box-shadow:0 0 0 3px var(--pro-ring); }
+.v3-app .money-input input:focus { outline:0; box-shadow:none; }
+.v3-app .transaction-amount .money-input { height:56px; }
+.v3-app .transaction-amount input { font-size:1.5rem; font-weight:600; letter-spacing:-.02em; }
+.v3-app .dialog-frame .segmented { display:flex; flex-wrap:nowrap; margin:0; }
+.v3-app .dialog-frame .segmented button { min-width:0; flex:1; padding:0 6px; min-height:34px; white-space:nowrap; }
+.v3-app .dialog-frame .transaction-types { gap:1px; }
+.v3-app .dialog-frame .transaction-types button { font-size:.75rem; }
+.v3-app .dialog-frame .v3-note { margin:0; }
+.v3-app .color-picker { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.v3-app .color-picker button { width:28px; height:28px; padding:0; border:2px solid transparent; border-radius:50%; color:#fff; font-size:1rem; text-shadow:0 1px 2px #0009; }
+.v3-app .color-picker button[aria-pressed="true"] { outline:2px solid var(--theme-focus); outline-offset:2px; }
+.v3-app .color-picker button:focus-visible { outline:2px solid var(--theme-focus); outline-offset:3px; }
+.v3-app .color-picker input[type="color"] { width:30px; height:30px; min-height:30px; padding:2px; border-radius:50%; }
+.v3-app .choice-field { flex-wrap:wrap!important; }
+.v3-app .choice-field button { flex:1 0 32px!important; }
+.v3-app .valuation-form-actions:empty { display:none; }
+.v3-app .dialog-frame .archive-zone { margin-top:20px; }
+
+/* Activity: one toolbar, then period shortcuts and the selected date range. */
+.v3-app .transaction-page { padding:0; overflow:visible; }
+.v3-app .transaction-page .analytics-filter-shell { padding:18px 20px 12px; }
+.v3-app .analytics-filter-shell .page-toolbar { display:flex; flex-direction:row; gap:10px; align-items:center; margin:0 0 12px; }
+.v3-app .statistics-page .analytics-filter-shell { display:block; }
+.v3-app .analytics-filter-shell .search-box { max-width:none; min-width:0; height:40px; }
+.v3-app .analytics-filter-shell .page-toolbar > button { flex-shrink:0; }
+.v3-app .analytics-filter-shell .advanced-filters { width:auto; flex-shrink:0; }
+.v3-app .analytics-filter-shell .advanced-filters summary { min-height:40px; white-space:nowrap; }
+.v3-app .analytics-filter-shell .transaction-filter-bar { display:flex; flex-direction:row; align-items:center; flex-wrap:wrap; margin:0; gap:12px; }
+.v3-app .analytics-filter-shell .quick-filters { display:flex; flex-wrap:nowrap; overflow-x:auto; gap:2px; max-width:100%; }
+.v3-app .analytics-filter-shell .quick-filters button { flex-shrink:0; padding:7px 10px; font-size:.8125rem; }
+.v3-app .analytics-filter-shell .active-filter-line { margin:0; gap:6px; }
+.v3-app .analytics-filter-shell .active-filter-line span { font-size:.75rem; font-weight:500; padding:4px 8px; background:var(--theme-soft); color:var(--theme-text-soft); }
+.v3-app .transaction-page > .edit-hint { margin:0; padding:0 20px 12px; font-size:.75rem; }
+.v3-app .transaction-page .table-head { border-top:1px solid var(--theme-line); padding:12px 20px; background:var(--theme-soft); }
+.v3-app .transaction-page .table-row { padding:14px 20px; }
+.v3-app .transaction-page .table-head button { font-size:.8125rem; font-weight:500; }
+.v3-app .transaction-page .transaction-pagination { padding:12px 20px; }
+.v3-app .analytics-filter-shell .advanced-filters > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.v3-app .analytics-filter-shell .advanced-filters :is(input,select) { width:100%; }
+
+/* Accounts and goals: compact cards with a readable hierarchy. */
+.v3-app .summary-strip { padding:16px 20px; }
+.v3-app .summary-strip p { text-transform:none; letter-spacing:0; font-size:.8125rem; font-weight:500; }
+.v3-app .account-card { min-height:0; padding:18px; }
+.v3-app .account-card-top { flex-wrap:nowrap; align-items:center; gap:8px; margin-bottom:14px; }
+.v3-app .account-type { display:flex; align-items:center; gap:8px; min-width:0; font-size:.75rem; color:var(--theme-muted); }
+.v3-app .account-type .account-icon { width:28px; height:28px; border-radius:7px; font-size:1rem; }
+.v3-app .account-card-top .account-expense-default { font-size:.75rem; padding:4px 6px; white-space:nowrap; }
+.v3-app .account-card h3 { margin:0 0 6px; }
+.v3-app .account-card > small { margin-top:6px; line-height:1.5; }
+.v3-app .snapshot-action { align-self:flex-start; width:auto; padding:7px 11px; margin-top:12px; min-height:34px; border:1px solid var(--theme-border); border-radius:7px; background:var(--paper); color:var(--theme-text-soft); font-size:.8125rem; }
+.v3-app .snapshot-action:hover { background:var(--theme-soft); }
+.v3-app .accounts-grid { align-items:start; }
+.v3-app .accounts-grid .add-card { min-height:174px; padding:20px; }
+.v3-app .goal-heading { align-items:center; margin:24px 0 16px; }
+.v3-app .goal-heading p { text-transform:none; letter-spacing:0; font-size:.8125rem; }
+.v3-app .goal-heading h3 { font-size:1rem; }
+.v3-app .goal-grid article { padding:20px; }
+.v3-app .goal-kind { font-size:.75rem; font-weight:500; letter-spacing:0; text-transform:none; }
+.v3-app .goal-grid h3 { margin:8px 0 4px; font-size:1rem; }
+.v3-app .goal-grid article > .goal-period { min-height:0; margin:0 0 12px; font-size:.75rem; line-height:1.5; }
+.v3-app .goal-grid .wide-progress { margin:12px 0 8px; background:var(--theme-soft); }
+.v3-app .goal-grid .wide-progress i { background:var(--goal-color,var(--theme-accent))!important; }
+.v3-app .goal-grid article > p:not(.goal-period) { font-size:.75rem; }
+
+/* Settings: equal columns and neutral category pills with coloured markers. */
+.v3-app .settings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.v3-app .preferences-heading { margin:0 0 4px; padding:0 0 12px; border-bottom:1px solid var(--theme-line); }
+.v3-app .preferences-heading h3 { margin:0; font-size:1rem; font-weight:600; }
+.v3-app .category-cloud > span { background:var(--paper); border:1px solid var(--theme-border); border-radius:999px; padding:6px 10px 6px 6px; color:var(--theme-text); font-size:.8125rem; }
+.v3-app .category-cloud i { background:var(--category-color); color:#253345; font-size:.75rem; width:24px; height:24px; }
+.v3-app .category-cloud small { color:var(--theme-muted); font-size:.75rem; }
+html[data-theme="midnight"] .v3-app .category-cloud > span { color:var(--theme-text); }
+html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-muted); }
+.v3-app .v3-data-export { position:relative; padding-right:250px; }
+.v3-app .v3-data-export-actions { margin:12px 0 0; }
+.v3-app .v3-data-export-actions > a { position:absolute; right:24px; top:50%; transform:translateY(-50%); }
+.v3-app .v3-data-export-actions > span { font-size:.75rem; }
+.v3-app .v3-appearance { padding:20px; }
+.v3-app .v3-theme-preview { height:90px; }
+
+/* Plan polish leaves the allocation and forecast calculations untouched. */
+.v3-app .v3-plan-summary { gap:16px; margin-bottom:20px; }
+.v3-app .v3-plan-summary > div { padding:16px 18px; }
+.v3-app .v3-plan-summary strong { font-size:1.5rem; line-height:1.3; margin-top:6px; }
+.v3-app .v3-bucket-row { padding-top:16px; padding-bottom:16px; }
+.v3-app .plan-pace-heading p { text-transform:none; letter-spacing:0; }
+.v3-app .plan-pace-heading h2 { font-size:1rem; }
+.v3-app .plan-pace-total strong { font-size:1.875rem; }
+.v3-app .plan-pace-forecast-result > small { text-transform:none; letter-spacing:0; font-size:.8125rem; }
+
+@media (max-width:1000px) {
+ .v3-app .settings-grid { grid-template-columns:1fr; }
+}
+@media (max-width:760px) {
+ .v3-app :is(.modal-card,.v3-dialog).dialog-frame { width:100%; max-width:none; max-height:calc(100dvh - 24px); border-radius:18px 18px 0 0; }
+ .v3-app .dialog-frame::before { display:block; width:36px; height:5px; min-height:5px; margin:10px auto 0; }
+ .v3-app .dialog-scroll { padding:18px; scrollbar-gutter:auto; }
+ .v3-app .dialog-heading { gap:10px; padding-right:30px; margin-bottom:18px; }
+ .v3-app .dialog-heading-icon { width:36px; height:36px; }
+ .v3-app .dialog-frame .modal-close { top:12px; right:8px; width:44px; height:44px; }
+ .v3-app .dialog-frame form { gap:14px; }
+ .v3-app .dialog-footer { padding:12px 18px max(12px,env(safe-area-inset-bottom)); gap:10px; }
+ .v3-app .dialog-key-hint { display:none; }
+ .v3-app .dialog-footer .primary-button { flex:1; min-height:48px; }
+ .v3-app .dialog-footer .ghost-button { min-height:48px; }
+ .v3-app .money-input { height:46px; }
+ .v3-app .transaction-amount .money-input { height:56px; }
+ .v3-app .money-input input { min-height:0; height:100%; }
+ .v3-app .dialog-frame .transaction-types button { font-size:.75rem; padding:0 4px; }
+ .v3-app .transaction-page .analytics-filter-shell { padding:16px 16px 10px; }
+ .v3-app .analytics-filter-shell .page-toolbar { flex-wrap:wrap; gap:8px; }
+ .v3-app .analytics-filter-shell .search-box { flex:1 0 100%; box-sizing:border-box; }
+ .v3-app .analytics-filter-shell .page-toolbar > button { margin-left:auto; }
+ .v3-app .analytics-filter-shell .quick-filters { width:100%; }
+ .v3-app .analytics-filter-shell .quick-filters button { flex:1; font-size:.75rem; padding:7px 6px; white-space:nowrap; }
+ .v3-app .analytics-filter-shell .advanced-filters { position:static; }
+ .v3-app .analytics-filter-shell .page-toolbar { position:relative; }
+ .v3-app .analytics-filter-shell .advanced-filters > div { position:absolute; left:0; right:0; top:88px; width:100%; box-sizing:border-box; grid-template-columns:repeat(2,minmax(0,1fr)); z-index:4; max-height:60dvh; overflow-y:auto; }
+ .v3-app .transaction-page > .edit-hint { padding:0 16px 12px; }
+ .v3-app .transaction-page .table-row { padding:12px 16px; }
+ .v3-app .transaction-page .table-head { padding:12px 16px; }
+ .v3-app .goal-heading { flex-wrap:wrap; gap:12px; }
+ .v3-app .goal-heading > button { margin:0; }
+ .v3-app .accounts-grid .add-card { min-height:140px; }
+ .v3-app .v3-data-export { padding:16px; }
+ .v3-app .v3-data-export-actions { align-items:flex-start; }
+ .v3-app .v3-data-export-actions > a { position:static; transform:none; }
+ .v3-app .v3-appearance { padding:16px; }
+ .v3-app .v3-plan-summary { gap:12px; }
+ .v3-app .v3-plan-summary > div { padding:14px; }
+ .v3-app .v3-plan-summary strong { font-size:1.25rem; }
+}
