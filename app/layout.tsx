@@ -60,3 +60,4 @@ export default function RootLayout({
 
 import './v3.css';
 import './remaivo-theme.css';
+import './remaivo-pro.css';
