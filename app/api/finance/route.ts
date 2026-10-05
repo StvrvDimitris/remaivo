@@ -1,5 +1,6 @@
 import { reconcileV3, v3Snapshot, v3Action } from "../../../db/v3";
 import { exportBackup } from "../../../db/backup";
+import { ArchiveError, listArchive, restoreArchive } from "../../../db/archive";
 import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
@@ -394,11 +395,15 @@ export async function GET(request: Request) {
         "X-Content-Type-Options": "nosniff",
       } });
     }
+    if (view === "archive") {
+      await ensureFinanceSchema();
+      return Response.json(await listArchive(user.userId, new URL(request.url).searchParams), { headers: { "Cache-Control": "private, no-store" } });
+    }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
     return Response.json(await snapshot(user));
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: error instanceof ArchiveError ? error.status : 500 });
   }
 }
 
@@ -427,7 +432,9 @@ export async function POST(request: Request) {
       await v3Action(user.userId, actionToday, action, payload);
       return Response.json(await snapshot(user));
     }
-    if (action === "setup") {
+    if (action === "restoreArchived") {
+      await restoreArchive(user.userId, actionToday, payload);
+    } else if (action === "setup") {
       await createCurrentPlan(user.userId, payload);
     } else if (action === "addAccount") {
       const amount = cents(payload.balance);
@@ -739,6 +746,6 @@ export async function POST(request: Request) {
     return Response.json(await snapshot(user));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save your changes.";
-    return Response.json({ error: message.includes("UNIQUE") ? "That item already exists." : message }, { status: 500 });
+    return Response.json({ error: message.includes("UNIQUE") ? "That item already exists." : message }, { status: error instanceof ArchiveError ? error.status : 500 });
   }
 }

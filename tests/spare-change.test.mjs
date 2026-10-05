@@ -93,6 +93,7 @@ const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;
 const sweepSpare = globalThis.__spareTestSweep;
+class ArchiveError extends Error { status = 409; }
 ${routeSource}`, 'route.mjs');
 const { POST } = await import(pathToFileURL(path.join(scratch, 'route.mjs')));
 const post = (action, payload = {}) => POST(new Request('https://example.invalid/api/finance', {

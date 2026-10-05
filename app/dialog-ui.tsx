@@ -40,7 +40,7 @@ export function DialogFrame({ children, close, currency, className = "", labelle
 
 export function DialogHeading({ title, copy, icon = "entry", id }: { title: string; copy?: string; icon?: string; id?: string }) {
   const headingId = useContext(HeadingId);
-  const paths: Record<string, string> = { entry: "M12 4v16M4 12h16", account: "M3 7h18v13H3V7Zm0 0 14-4v4M16 12h5v4h-5", goal: "M12 3l8 9-8 9-8-9 8-9Z", category: "M3 3h8l10 10-8 8L3 11V3Zm4 4h.01", plan: "M5 4h14v17H5V4Zm3-2v4m8-4v4M8 10h8M8 14h8", spare: "M4 8a8 8 0 0 1 14-2l2 2M20 3v5h-5M20 16a8 8 0 0 1-14 2l-2-2M4 21v-5h5" };
+  const paths: Record<string, string> = { archive: "M3 4h18v5H3V4Zm2 5v12h14V9M9 13h6", entry: "M12 4v16M4 12h16", account: "M3 7h18v13H3V7Zm0 0 14-4v4M16 12h5v4h-5", goal: "M12 3l8 9-8 9-8-9 8-9Z", category: "M3 3h8l10 10-8 8L3 11V3Zm4 4h.01", plan: "M5 4h14v17H5V4Zm3-2v4m8-4v4M8 10h8M8 14h8", spare: "M4 8a8 8 0 0 1 14-2l2 2M20 3v5h-5M20 16a8 8 0 0 1-14 2l-2-2M4 21v-5h5" };
   return <header className="dialog-heading"><span className="dialog-heading-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={paths[icon] || paths.plan}/></svg></span><div><h2 id={id || headingId}>{title}</h2>{copy && <p>{copy}</p>}</div></header>;
 }
 

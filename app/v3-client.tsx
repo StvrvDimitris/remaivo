@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import Link from 'next/link';
 import { Onboarding, TransactionsPage, AccountsPage, SettingsPage, GoalsPage, GoalEntryModal, FinanceModal, EditModal, ValuationModal, TransactionRow, type Account, type Goal, type Context, type Snapshot, type ModalName, type EditTarget } from './finance-client';
 import { DialogFrame, DialogHeading, DialogSubmit, FormField as Field } from './dialog-ui';
+import { ArchiveManager } from './archive-manager';
 import { StatisticsPage } from './statistics-page';
 import { BudgetPace } from './budget-pace';
 import { SpendingChart } from './spending-chart';
@@ -32,10 +33,11 @@ function DataExportCard(){
 }
 export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string}){
  const [data,setData]=useState<Snapshot|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);const [page,setPage]=useState<Page>(initialPage);const [panel,setPanel]=useState<Panel|null>(null);const [modal,setModal]=useState<ModalName>(null);const [edit,setEdit]=useState<EditTarget|null>(null);const [goalEntry,setGoalEntry]=useState<Goal|null>(null);const [valuation,setValuation]=useState<Account|null>(null);const [notice,setNotice]=useState('');
+ const [archiveOpen,setArchiveOpen]=useState(false);
  const theme=normalizeUITheme(data?.profile?.ui_theme);
  useEffect(()=>{document.documentElement.dataset.theme=theme;return()=>{delete document.documentElement.dataset.theme;};},[theme]);
  const loadingRef=useRef(false);
- const dialogOpen=Boolean(panel||modal||edit||goalEntry||valuation);
+ const dialogOpen=Boolean(panel||modal||edit||goalEntry||valuation||archiveOpen);
  useEffect(()=>{
   if(!dialogOpen)return;
   const previousOverflow=document.body.style.overflow;
@@ -46,7 +48,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   if(dialog)focusable()[0]?.focus();
   const keydown=(event:KeyboardEvent)=>{
    if(!dialog)return;
-   if(event.key==='Escape'){setModal(null);setEdit(null);setGoalEntry(null);setValuation(null);setPanel(null);}
+   if(event.key==='Escape'){setModal(null);setEdit(null);setGoalEntry(null);setValuation(null);setPanel(null);setArchiveOpen(false);}
    if(event.key==='Tab'){const nodes=focusable();const first=nodes[0],last=nodes.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}
   };
   document.addEventListener('keydown',keydown);
@@ -125,10 +127,11 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  {page==='plan'&&<><PlanView data={data} onPanel={setPanel} onAdd={()=>setModal('plan')} onEdit={setEdit}/><BudgetPace plan={{name:v3.config.name,period:v3.config.period,start:r.start,end:r.end,target:r.target,funding:r.funding,spent:r.totalSpent,today:data.today,transactions:v3.trendTransactions,occurrences:v3.occurrences,firstRecordedDate:v3.firstRecordedDate,buckets:r.buckets,allocationByTx:r.allocationByTx}} currency={currency} onConfigure={()=>setPanel({kind:'configure'})}/><button className="v3-text-button" onClick={()=>navigate('goals')}>Savings milestones & spare change →</button></>}
  {page==='accounts'&&<AccountsPage context={context} busy={busy} onDefaultExpense={account=>void save("updateDefaultExpenseAccount",{accountId:account.id})} onAdd={()=>setModal('account')} onEdit={record=>setEdit({kind:'account',record})} onSnapshot={setValuation}/>}
  {page==='statistics'&&<><div className="v3-page-actions"><p>Explore historical activity and spending trends.</p></div><StatisticsPage context={context} revision={revision}/></>}
- {page==='settings'&&<><AppearanceSettings theme={theme} busy={busy} onChange={next=>void save('updateTheme',{theme:next})}/><DataExportCard/><SettingsPage context={context} onCategory={()=>setModal('category')} onGoals={()=>navigate('goals')} onWeek={()=>setModal('week')} onTimezone={()=>setModal('timezone')} onEditCategory={record=>setEdit({kind:'category',record})}/></>}
+ {page==='settings'&&<><AppearanceSettings theme={theme} busy={busy} onChange={next=>void save('updateTheme',{theme:next})}/><DataExportCard/><SettingsPage context={context} onCategory={()=>setModal('category')} onGoals={()=>navigate('goals')} onWeek={()=>setModal('week')} onTimezone={()=>setModal('timezone')} onArchive={()=>{setError('');setArchiveOpen(true);}} onEditCategory={record=>setEdit({kind:'category',record})}/></>}
  {page==='goals'&&<><div className="v3-page-actions"><p>Create a goal bucket in Plan to protect money. These accounts and milestones track your progress.</p><button className="v3-secondary" onClick={()=>setPanel({kind:'bucket'})}>New goal allocation</button></div><GoalsPage context={context} onGoal={()=>setModal('goal')} onSpare={()=>setModal('spare')} onSweep={()=>void save('sweepSpare',{})} onEdit={record=>setEdit({kind:'goal',record})} onRecord={setGoalEntry}/></>}
  <footer className="v3-footer"><span>Remaivo</span><span>{data.profile.timezone.replaceAll('_',' ')} · Updated through {dateLabel(data.today)}</span></footer></div></div>
  {modal&&<FinanceModal name={modal} context={context} busy={busy} error={error} close={()=>{setModal(null);setError('');}} save={saveModal}/>}{edit&&<EditModal target={edit} context={context} busy={busy} error={error} close={()=>{setEdit(null);setError('');}} save={saveModal}/>}{goalEntry&&<GoalEntryModal goal={goalEntry} context={context} busy={busy} error={error} close={()=>{setGoalEntry(null);setError('');}} save={save}/>}{valuation&&<ValuationModal account={valuation} snapshots={data.investmentSnapshots||[]} currency={currency} today={data.today} busy={busy} close={()=>setValuation(null)} save={save}/>}
+ {archiveOpen&&<ArchiveManager currency={currency} today={data.today} busy={busy} saveError={error} clearError={()=>setError('')} close={()=>{if(!busy){setArchiveOpen(false);setError('');}}} save={save}/>}
  {panel&&<PlanningPanel panel={panel} data={data} busy={busy} error={error} close={()=>{setPanel(null);setError('');}} save={save}/>}
  </div>;
 }

@@ -561,6 +561,31 @@ html[data-theme="midnight"] {
  .v3-app .statistics-page .concentration-grid { padding:16px; }
 }
 
+/* The archive stays behind Settings; its only data request runs while open. */
+.v3-app .modal-card.archive-manager.dialog-frame { width:min(680px,100%); max-width:680px; }
+.v3-app .archive-filters { display:grid; grid-template-columns:minmax(0,1fr) 190px; gap:12px; }
+.v3-app .archive-count { margin:20px 0 8px; font-size:.875rem; color:var(--theme-text-soft); }
+.v3-app .archive-list { display:grid; }
+.v3-app .archive-list article { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; border-bottom:1px solid var(--theme-border); }
+.v3-app .archive-list article > div { min-width:0; }
+.v3-app .archive-type { font-size:.8125rem; color:var(--theme-text-soft); }
+.v3-app :is(.archive-list,.archive-restore-summary) h3 { margin:5px 0; font-size:1rem; line-height:1.4; overflow-wrap:anywhere; }
+.v3-app :is(.archive-list,.archive-restore-summary) p { margin:0; color:var(--theme-text-soft); font-size:.875rem; line-height:1.5; overflow-wrap:anywhere; }
+.v3-app .archive-list button { flex-shrink:0; min-height:38px; }
+.v3-app .archive-empty { padding:32px 0; text-align:center; font-size:.875rem; color:var(--theme-text-soft); }
+.v3-app .archive-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:20px; font-size:.875rem; color:var(--theme-text-soft); }
+.v3-app .archive-back { margin-bottom:16px; }
+.v3-app .archive-restore-summary { padding:16px; border:1px solid var(--theme-border); border-radius:10px; margin-bottom:20px; }
+.v3-app .archive-restore-note { margin:0; font-size:.875rem; line-height:1.6; color:var(--theme-text-soft); }
+.v3-app .archive-notice { font-size:.875rem; color:var(--theme-accent); }
+@media (max-width:760px) {
+ .v3-app .archive-backdrop { padding:0; }
+ .v3-app .modal-card.archive-manager.dialog-frame { width:100%; max-width:none; height:100dvh; max-height:100dvh; border-radius:0; }
+ .v3-app .archive-manager .dialog-scroll { flex:1; }
+ .v3-app .archive-filters { grid-template-columns:1fr; }
+ .v3-app .archive-manager .dialog-footer { padding-bottom:max(18px,env(safe-area-inset-bottom)); }
+}
+
 /* Shared dialog anatomy: a scrolling form and an always-visible action footer. */
 .v3-app :is(.modal-card,.v3-dialog).dialog-frame { width:min(480px,100%); max-width:480px; max-height:calc(100dvh - 48px); padding:0; display:flex; flex-direction:column; overflow:hidden; }
 .v3-app .dialog-frame::before { display:none; }
