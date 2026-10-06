@@ -253,3 +253,56 @@ test('Correcting a pending expense while collection is off carries its earned mu
   ]);
   assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='correction-source'").get().balance_cents, 4984);
 });
+
+
+test('Transaction corrections support every manual type combination without duplicating balances', async () => {
+  const types = ['expense', 'income', 'transfer', 'saving', 'investment'];
+  const effect = type => type === 'income' ? [1234, 0] : ['transfer', 'saving', 'investment'].includes(type) ? [-1234, 1234] : [-1234, 0];
+  for (const before of types) for (const after of types) {
+    const owner = `type-${before}-${after}`;
+    globalThis.__spareTestUser = owner;
+    const source = `${owner}-source`, destination = `${owner}-dest`, original = `${owner}-tx`;
+    const old = effect(before), expected = effect(after);
+    for (const [id, balance] of [[source, 10000 + old[0]], [destination, 10000 + old[1]]])
+      sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,'bank',?)").run(id, owner, id, balance);
+    sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,destination_account_id,type,description,amount_cents,date,counts_monthly) VALUES(?,?,?,?,?,'Mistake',1234,'2026-09-17',?)")
+      .run(original, owner, source, ['transfer','saving','investment'].includes(before) ? destination : null, before, ['expense','saving','investment'].includes(before) ? 1 : 0);
+    const response = await post('correctTransaction', { transactionId: original, type: after, accountId: source, destinationAccountId: destination, amount: '12.34', date: '2026-09-17', description: 'Corrected' });
+    assert.equal(response.status, 200, `${before} -> ${after}: ${JSON.stringify(await response.json())}`);
+    const replacement = sqlite.prepare('SELECT * FROM transactions WHERE replaces_transaction_id=?').get(original);
+    assert.equal(replacement.type, after);
+    assert.equal(replacement.counts_monthly, ['expense','saving','investment'].includes(after) ? 1 : 0);
+    assert.equal(replacement.destination_account_id, ['transfer','saving','investment'].includes(after) ? destination : null);
+    assert.equal(sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(source).balance_cents, 10000 + expected[0]);
+    assert.equal(sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(destination).balance_cents, 10000 + expected[1]);
+    assert.equal(sqlite.prepare('SELECT status FROM transactions WHERE id=?').get(original).status, 'corrected');
+  }
+});
+
+test('Reclassifying an expense cancels pending spare change; invalid types cannot mutate it', async () => {
+  const owner = 'reclassify-spare'; globalThis.__spareTestUser = owner;
+  sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('reclassify-card',?,'Card','bank',8766)").run(owner);
+  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date) VALUES('reclassify-tx',?,'reclassify-card','expense','Mistake',1234,'2026-09-17')").run(owner);
+  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES('reclassify-event',?,'reclassify-tx',66)").run(owner);
+  const payload = { transactionId:'reclassify-tx', accountId:'reclassify-card', amount:'12.34', date:'2026-09-17' };
+  assert.equal((await post('correctTransaction', {...payload,type:'bogus'})).status,400);
+  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='reclassify-card'").get().balance_cents,8766);
+  assert.equal((await post('correctTransaction', {...payload,type:'income'})).status,200);
+  assert.equal(sqlite.prepare("SELECT status FROM spare_events WHERE id='reclassify-event'").get().status,'cancelled');
+  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='reclassify-card'").get().balance_cents,11234);
+});
+
+
+test('Type corrections keep linked payments and completed round-ups protected', async () => {
+  const owner = 'type-guards'; globalThis.__spareTestUser = owner;
+  sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('type-guards-card',?,'Card','bank',9000)").run(owner);
+  for (const [id, recurring] of [['type-guards-linked','some-plan'],['type-guards-swept',null]])
+    sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date,recurring_plan_id) VALUES(?,?,'type-guards-card','expense','Protected',1000,'2026-09-17',?)").run(id,owner,recurring);
+  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents,status) VALUES('type-guards-event',?,'type-guards-swept',66,'swept')").run(owner);
+  for (const transactionId of ['type-guards-linked','type-guards-swept']) {
+    const response = await post('correctTransaction',{transactionId,type:'income',accountId:'type-guards-card',amount:'10',date:'2026-09-17'});
+    assert.equal(response.status,409);
+    assert.equal(sqlite.prepare('SELECT status FROM transactions WHERE id=?').get(transactionId).status,'posted');
+  }
+  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='type-guards-card'").get().balance_cents,9000);
+});
