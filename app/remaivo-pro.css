@@ -561,6 +561,10 @@ html[data-theme="midnight"] {
  .v3-app .statistics-page .concentration-grid { padding:16px; }
 }
 
+.v3-app .v3-refresh { width:40px; height:40px; flex-shrink:0; display:grid; place-items:center; padding:0; background:var(--paper); color:var(--theme-text-soft); border:1px solid var(--theme-border); border-radius:8px; }
+.v3-app .v3-refresh:hover { background:var(--theme-soft); }
+.v3-app .v3-refresh:disabled { opacity:.5; cursor:wait; }
+
 /* The archive stays behind Settings; its only data request runs while open. */
 .v3-app .modal-card.archive-manager.dialog-frame { width:min(680px,100%); max-width:680px; }
 .v3-app .archive-filters { display:grid; grid-template-columns:minmax(0,1fr) 190px; gap:12px; }

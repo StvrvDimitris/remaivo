@@ -12,6 +12,8 @@ import { calculateInvestmentValue } from './investment-valuations';
 import { plusDays, type Bucket, type Occurrence } from './v3-engine';
 import { uiThemes, normalizeUITheme, type UITheme } from './ui-themes';
 import { invalidateFinancePageCache } from './finance-page-cache';
+import { FinanceRefreshPolicy, snapshotChanged } from './finance-refresh';
+import { financialToday } from './finance-dates';
 
 type Page='overview'|'activity'|'plan'|'accounts'|'statistics'|'settings'|'goals';
 type Panel={kind:'explain';view:'available'|'daily'|'weekly'|'cash'}|{kind:'configure'}|{kind:'fund'}|{kind:'bucket';bucket?:Bucket}|{kind:'move'}|{kind:'payment';occurrence:Occurrence}|{kind:'assign'};
@@ -19,7 +21,7 @@ const money=(n:number,currency='EUR')=>new Intl.NumberFormat('en-IE',{style:'cur
 const dateLabel=(date:string)=>new Date(date+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'});
 const nav:[Page,string,string][]=[['overview','Overview','home'],['activity','Activity','activity'],['plan','Plan','plan'],['statistics','Insights','insights'],['accounts','Accounts','accounts'],['settings','Settings','settings']];
 function initialPage():Page { if(typeof window==='undefined')return 'overview';const value=new URL(window.location.href).searchParams.get('view');const candidate=value;return candidate&&[...nav.map(n=>n[0]),'goals'].includes(candidate)?candidate as Page:'overview'; }
-function Icon({name}:{name:string}){const paths:Record<string,string>={home:'M3 10 12 3l9 7v10H3V10Zm6 10v-7h6v7',activity:'M3 12h4l3-8 4 16 3-8h4',plan:'M5 4h14v17H5V4Zm3-2v4m8-4v4M8 10h8M8 14h8M8 18h4',insights:'M3 19V5m0 14h18M6 15l5-5 4 3 6-8',accounts:'M3 7h18v13H3V7Zm0 0 14-4v4M16 12h5v4h-5v-4',settings:'M4 7h16M4 17h16M8 4v6m8 4v6',plus:'M12 4v16M4 12h16',arrow:'M4 12h16m-6-6 6 6-6 6',check:'m5 12 4 4L19 6',goals:'M12 3l8 9-8 9-8-9 8-9Z',search:'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4-4',chevron:'m6 9 6 6 6-6',alert:'M12 9v4m0 4h.01M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z'};return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]||paths.plan}/></svg>;}
+function Icon({name}:{name:string}){const paths:Record<string,string>={refresh:'M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 3l1 3M4 12l1 3a8 8 0 0 0 13 3',home:'M3 10 12 3l9 7v10H3V10Zm6 10v-7h6v7',activity:'M3 12h4l3-8 4 16 3-8h4',plan:'M5 4h14v17H5V4Zm3-2v4m8-4v4M8 10h8M8 14h8M8 18h4',insights:'M3 19V5m0 14h18M6 15l5-5 4 3 6-8',accounts:'M3 7h18v13H3V7Zm0 0 14-4v4M16 12h5v4h-5v-4',settings:'M4 7h16M4 17h16M8 4v6m8 4v6',plus:'M12 4v16M4 12h16',arrow:'M4 12h16m-6-6 6 6-6 6',check:'m5 12 4 4L19 6',goals:'M12 3l8 9-8 9-8-9 8-9Z',search:'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4-4',chevron:'m6 9 6 6 6-6',alert:'M12 9v4m0 4h.01M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z'};return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]||paths.plan}/></svg>;}
 
 function AppearanceSettings({theme,busy,onChange}:{theme:UITheme;busy:boolean;onChange:(theme:UITheme)=>void}){
  return <section className="v3-card v3-appearance"><div className="v3-section-head"><div><span className="v3-eyebrow">MAKE IT YOURS</span><h2>Appearance</h2></div></div><p>Choose a look for your workspace. Your preference is saved to your account.</p><div className="v3-theme-options" role="group" aria-label="Workspace theme">{uiThemes.map(option=><button key={option.id} className="v3-theme-option" aria-pressed={theme===option.id} disabled={busy} onClick={()=>onChange(option.id)}><span className="v3-theme-preview" aria-hidden="true" style={{background:option.canvas}}><span style={{background:option.surface}}/><i style={{background:option.accent}}/><b style={{background:option.surface}}/></span><span className="v3-theme-title"><strong>{option.name}</strong>{theme===option.id&&<Icon name="check"/>}</span><small>{option.description}</small></button>)}</div></section>;
@@ -37,7 +39,15 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  const theme=normalizeUITheme(data?.profile?.ui_theme);
  useEffect(()=>{document.documentElement.dataset.theme=theme;return()=>{delete document.documentElement.dataset.theme;};},[theme]);
  const loadingRef=useRef(false);
+ const busyRef=useRef(false);
+ const mutationRef=useRef(0);
+ const dataRef=useRef<Snapshot|null>(null);
+ const fingerprintRef=useRef<string|null>(null);
+ const [refreshPolicy]=useState(()=>new FinanceRefreshPolicy(Date.now()));
+ const [refreshing,setRefreshing]=useState(false);
  const dialogOpen=Boolean(panel||modal||edit||goalEntry||valuation||archiveOpen);
+ const dialogOpenRef=useRef(false);
+ useEffect(()=>{dialogOpenRef.current=dialogOpen;},[dialogOpen]);
  useEffect(()=>{
   if(!dialogOpen)return;
   const previousOverflow=document.body.style.overflow;
@@ -71,20 +81,44 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   window.addEventListener('popstate',restorePage);
   return()=>window.removeEventListener('popstate',restorePage);
  },[]);
- const load=useCallback(async()=>{
-  if(loadingRef.current)return;
+ const load=useCallback(async(force=true)=>{
+  if(loadingRef.current||busyRef.current||(!force&&dialogOpenRef.current))return;
+  const now=Date.now();
+  if(!force&&!refreshPolicy.due(now,document.visibilityState==='visible',financialToday(dataRef.current?.profile?.timezone||'UTC')))return;
+  refreshPolicy.attempted(now);
   loadingRef.current=true;
+  setRefreshing(true);
+  const mutation=mutationRef.current;
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),20000);
   try{
    const r=await fetch('/api/finance',{signal:controller.signal});
    const next=await r.json() as Snapshot;
    if(!r.ok)throw new Error(next.error||'Unable to load your money.');
-   invalidateFinancePageCache();setData(next);setRevision(x=>x+1);setError('');
-  }catch(e){setError(controller.signal.aborted?'Your workspace is taking too long to load. Please try again.':e instanceof Error?e.message:'Unable to connect.');}
-  finally{clearTimeout(timeout);loadingRef.current=false;}
- },[]);
- useEffect(()=>{queueMicrotask(()=>{void load();});const timer=setInterval(()=>{if(document.visibilityState==='visible')void load();},60000);const visible=()=>{if(document.visibilityState==='visible')void load();};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible);};},[load]);
+   // Reads started before a save cannot overwrite that save's authoritative result.
+   if(mutation!==mutationRef.current)return;
+   const result=snapshotChanged(fingerprintRef.current,next);
+   if(force||result.changed)invalidateFinancePageCache();
+   if(result.changed)setData(next);
+   dataRef.current=next;fingerprintRef.current=result.fingerprint;
+   refreshPolicy.succeeded(Date.now(),next.today);
+   setRevision(x=>x+1);setError('');
+  }catch(e){if(mutation===mutationRef.current)setError(controller.signal.aborted?'Your workspace is taking too long to load. Please try again.':e instanceof Error?e.message:'Unable to connect.');}
+  finally{clearTimeout(timeout);loadingRef.current=false;setRefreshing(false);}
+ },[refreshPolicy]);
+ useEffect(()=>{
+  queueMicrotask(()=>{void load(false);});
+  const timer=setInterval(()=>{void load(false);},30000);
+  const activity=()=>{refreshPolicy.activity(Date.now());};
+  const visible=()=>{if(document.visibilityState==='visible'){activity();void load(false);}};
+  const online=()=>{if(document.visibilityState==='visible'){activity();void load(false);}};
+  document.addEventListener('pointerdown',activity,{passive:true});
+  document.addEventListener('keydown',activity);
+  document.addEventListener('scroll',activity,{passive:true,capture:true});
+  document.addEventListener('visibilitychange',visible);
+  window.addEventListener('online',online);
+  return()=>{clearInterval(timer);document.removeEventListener('pointerdown',activity);document.removeEventListener('keydown',activity);document.removeEventListener('scroll',activity,true);document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',online);};
+ },[load,refreshPolicy]);
  function navigate(next:Page){setPage(next);window.scrollTo({top:0,behavior:'instant'});const url=new URL(window.location.href);url.searchParams.set('view',next);window.history.replaceState({},'',url);}
  function searchActivity(event:FormEvent<HTMLFormElement>){
   event.preventDefault();
@@ -98,7 +132,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
   // An already-open Activity page restores its filters from the URL on popstate.
   window.dispatchEvent(new PopStateEvent('popstate'));
  }
- async function save(action:string,payload:Record<string,unknown>){if(busy)return false;setBusy(true);setError('');try{const r=await fetch('/api/finance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,payload})});const next=await r.json() as Snapshot;if(!r.ok)throw new Error(next.error||'Unable to save.');invalidateFinancePageCache();setData(next);setRevision(x=>x+1);setNotice('Saved');setTimeout(()=>setNotice(''),2400);return true;}catch(e){setError(e instanceof Error?e.message:'Unable to save.');return false;}finally{setBusy(false);}}
+ async function save(action:string,payload:Record<string,unknown>){if(busyRef.current)return false;busyRef.current=true;mutationRef.current+=1;setBusy(true);setError('');try{const r=await fetch('/api/finance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,payload})});const next=await r.json() as Snapshot;if(!r.ok)throw new Error(next.error||'Unable to save.');invalidateFinancePageCache();dataRef.current=next;fingerprintRef.current=JSON.stringify(next);refreshPolicy.succeeded(Date.now(),next.today);setData(next);setRevision(x=>x+1);setNotice('Saved');setTimeout(()=>setNotice(''),2400);return true;}catch(e){setError(e instanceof Error?e.message:'Unable to save.');return false;}finally{busyRef.current=false;setBusy(false);}}
  const saveModal=async(a:string,p:Record<string,unknown>)=>{if(await save(a,p)){setModal(null);setEdit(null);}};
  if(!data)return <main className="v3-loading"><span className="v3-monogram">R</span><h1>Your money, in view.</h1><p>{error||'Opening your financial workspace…'}</p>{error&&<button onClick={()=>void load()}>Try again</button>}</main>;
  if(data.needsSetup)return <Onboarding displayName={props.displayName} busy={busy} error={error} onComplete={payload=>save('setup',payload)}/>;
@@ -112,7 +146,7 @@ export function RemaivoV3(props:{displayName:string;email:string;signOutHref:str
  const positionSegments=[{name:'Spending accounts',amount:r.spendable,color:'var(--theme-accent)'},{name:'Savings',amount:savings,color:'var(--pro-chart-positive)'},{name:'Investments',amount:invested,color:'var(--pro-chart-strong)'}];
  const navButton=([key,label,icon]:[Page,string,string])=><button key={key} className={`${page===key?'active':''}${key==='settings'?' v3-settings-nav':''}`} aria-current={page===key?'page':undefined} aria-label={key==='settings'?'Settings':undefined} title={label} onClick={()=>navigate(key)}><Icon name={icon}/><span className={key==='settings'?'v3-settings-label':'v3-nav-label'}>{label}</span>{key==='plan'&&deficits.length>0&&<span className="v3-nav-badge" aria-label={`${deficits.length} ${deficits.length===1?'bucket needs':'buckets need'} cover`}>{deficits.length}</span>}{page===key&&<span className="v3-nav-mark"/>}</button>;
  return <div className="v3-app" data-theme={theme}><aside className="v3-sidebar"><Link className="v3-brand" href="/" onClick={e=>{e.preventDefault();navigate('overview');}}><span className="v3-monogram">R</span><span className="v3-brand-text">Remaivo<small>Personal finance</small></span></Link><nav aria-label="Main navigation">{nav.filter(n=>n[0]!=='settings').map(navButton)}<div className="v3-space-label">Save & invest</div><button className={`v3-goals-nav ${page==='goals'?'active':''}`} aria-current={page==='goals'?'page':undefined} title="Savings & investing" onClick={()=>navigate('goals')}><Icon name="goals"/><span className="v3-nav-label">Savings & investing</span>{page==='goals'&&<span className="v3-nav-mark"/>}</button><div className="v3-space-label">Preferences</div>{nav.filter(n=>n[0]==='settings').map(navButton)}</nav><div className="v3-sidebar-bottom"><div className="v3-profile"><span>{props.displayName.slice(0,1)}</span><div><strong>{props.displayName}</strong><small>{props.email}</small></div><a href={props.signOutHref}>Sign out</a></div></div></aside>
- <div className="v3-workspace"><header className="v3-topbar"><nav className="v3-breadcrumb" aria-label="Breadcrumb">Remaivo <span>/</span> <span className="v3-breadcrumb-page">{title}</span></nav><span className="v3-mobile-brand" aria-hidden="true"><span className="v3-monogram">R</span>Remaivo</span><div className="v3-header-actions"><form className="v3-global-search" role="search" onSubmit={searchActivity}><Icon name="search"/><input key={page} name="q" type="search" placeholder="Search transactions" aria-label="Search transactions" defaultValue={page==='activity'&&typeof window!=='undefined'?new URL(window.location.href).searchParams.get('description')||'':''}/><kbd aria-hidden="true">/</kbd></form><button className="v3-primary" aria-label="Add transaction" onClick={()=>setModal('transaction')}><Icon name="plus"/><span className="v3-add-label">Add transaction</span></button></div></header>
+ <div className="v3-workspace"><header className="v3-topbar"><nav className="v3-breadcrumb" aria-label="Breadcrumb">Remaivo <span>/</span> <span className="v3-breadcrumb-page">{title}</span></nav><span className="v3-mobile-brand" aria-hidden="true"><span className="v3-monogram">R</span>Remaivo</span><div className="v3-header-actions"><button className="v3-refresh" type="button" aria-label="Refresh finances" title="Refresh finances" disabled={busy||refreshing} onClick={()=>void load()}><Icon name="refresh"/></button><form className="v3-global-search" role="search" onSubmit={searchActivity}><Icon name="search"/><input key={page} name="q" type="search" placeholder="Search transactions" aria-label="Search transactions" defaultValue={page==='activity'&&typeof window!=='undefined'?new URL(window.location.href).searchParams.get('description')||'':''}/><kbd aria-hidden="true">/</kbd></form><button className="v3-primary" aria-label="Add transaction" onClick={()=>setModal('transaction')}><Icon name="plus"/><span className="v3-add-label">Add transaction</span></button></div></header>
  <div className="v3-content">
  <div className="v3-page-head"><h1>{title}</h1><div className="v3-period-bar"><button onClick={()=>setPanel({kind:'configure'})}><span className="v3-period-dot"/>{v3.config.name}<span className="v3-chevron" aria-hidden="true"><Icon name="chevron"/></span></button><span>{dateLabel(r.start)} — {dateLabel(plusDays(r.end,-1))}, {r.start.slice(0,4)}</span><span className="v3-period-mode">{v3.config.allocation==='adaptive'?'Adaptive':v3.config.allocation==='weighted'?'Weighted':'Even'} pacing</span></div></div>
  {error&&<div className="v3-alert" role="alert"><span>{error}</span><button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}{notice&&<div className="v3-toast" role="status"><Icon name="check"/>{notice}</div>}

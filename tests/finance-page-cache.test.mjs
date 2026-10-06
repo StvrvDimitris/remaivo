@@ -15,3 +15,15 @@ test('filtered response cache is keyed by request and invalidated by an authorit
   writeFinancePageCache('transactions?from=2026-09-01', response, previous);
   assert.equal(readFinancePageCache('transactions?from=2026-09-01'), null);
 });
+
+test('Unchanged reads can reuse fresh results, but historical results expire after five minutes', t => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  invalidateFinancePageCache();
+  const response = { historicalDescription: 'Old transaction' };
+  writeFinancePageCache('statistics?from=2025-01-01', response, financePageCacheGeneration());
+  now += 4 * 60_000;
+  assert.equal(readFinancePageCache('statistics?from=2025-01-01'), response);
+  now += 60_000;
+  assert.equal(readFinancePageCache('statistics?from=2025-01-01'), null);
+});

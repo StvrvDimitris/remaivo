@@ -1,6 +1,8 @@
 // Keep recently visited filtered pages responsive without changing their calculations.
-// Every authoritative snapshot refresh or save invalidates these derived responses.
-const MAX_AGE_MS = 30_000;
+// Saves and changed snapshots invalidate these responses immediately. Unchanged
+// refreshes retain them until expiry, including historical data not in a snapshot.
+import { FINANCE_FRESH_MS } from "./finance-refresh.ts";
+const MAX_AGE_MS = FINANCE_FRESH_MS;
 const entries = new Map<string, { value: unknown; savedAt: number }>();
 let generation = 0;
 
