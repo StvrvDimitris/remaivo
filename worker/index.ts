@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { authenticateRequest, handleGoogleAuth } from "./google-auth";
+import { enforceRateLimit } from "./rate-limit";
 
 interface WorkerEnv extends Env {
   GOOGLE_CLIENT_ID?: string;
@@ -33,6 +34,8 @@ const worker = {
     const url = new URL(request.url);
 
     if (env.AUTH_PROVIDER === "google") {
+      const limited = await enforceRateLimit(request, env);
+      if (limited) return limited;
       const authResponse = await handleGoogleAuth(request, env);
       if (authResponse) return authResponse;
       if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.headers.get("origin") !== env.APP_ORIGIN) {

@@ -7,6 +7,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "ratelimits": [
+    { "name": "LOGIN_RATE_LIMIT", "namespace_id": "472601", "simple": { "limit": 10, "period": 60 } },
+    { "name": "CALLBACK_RATE_LIMIT", "namespace_id": "472602", "simple": { "limit": 30, "period": 60 } },
+    { "name": "FINANCE_RATE_LIMIT", "namespace_id": "472603", "simple": { "limit": 120, "period": 60 } },
+    { "name": "PAGE_RATE_LIMIT", "namespace_id": "472604", "simple": { "limit": 60, "period": 60 } }
+  ],
   "assets": { "binding": "ASSETS", "not_found_handling": "none" },
   "d1_databases": [{
     "binding": "DB",
