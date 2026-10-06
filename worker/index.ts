@@ -1,10 +1,13 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { authenticateRequest, handleGoogleAuth } from "./google-auth";
 
-interface Env {
-  ASSETS: Fetcher;
-  DB: D1Database;
+interface WorkerEnv extends Env {
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  LEGACY_OWNER_EMAIL?: string;
+  LEGACY_OWNER_ID?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -26,8 +29,17 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (env.AUTH_PROVIDER === "google") {
+      const authResponse = await handleGoogleAuth(request, env);
+      if (authResponse) return authResponse;
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.headers.get("origin") !== env.APP_ORIGIN) {
+        return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
+      }
+      request = await authenticateRequest(request, env);
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -66,6 +78,13 @@ const worker = {
           'Cache-Control': 'no-store',
         },
       });
+    }
+    if (env.AUTH_PROVIDER === "google" && !url.pathname.startsWith("/_next/") && !url.pathname.startsWith("/assets/")) {
+      const headers = new Headers(response.headers);
+      headers.set("Cache-Control", "private, no-store");
+      headers.set("Referrer-Policy", "no-referrer");
+      headers.set("X-Content-Type-Options", "nosniff");
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
     return response;
   },

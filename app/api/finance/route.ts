@@ -3,7 +3,7 @@ import { exportBackup } from "../../../db/backup";
 import { ArchiveError, listArchive, restoreArchive } from "../../../db/archive";
 import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser, usesGoogleAuth } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
 import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
@@ -18,9 +18,9 @@ type FinanceUser = { userId: string; displayName: string; email: string };
 type JsonObject = Record<string, unknown>;
 
 async function currentUser(): Promise<FinanceUser | null> {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (user) return user;
-  if (process.env.NODE_ENV !== "production") {
+  if (!usesGoogleAuth() && process.env.NODE_ENV !== "production") {
     return { userId: "local-demo-user", displayName: "Alex Morgan", email: "alex@example.com" };
   }
   return null;

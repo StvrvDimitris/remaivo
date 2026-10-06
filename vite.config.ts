@@ -49,10 +49,12 @@ export default defineConfig(async () => {
       : undefined,
     plugins: [
       vinext(),
-      sites(),
+      ...(process.env.REMAIVO_HOST === "cloudflare" ? [] : [sites()]),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
+        ...(process.env.REMAIVO_HOST === "cloudflare"
+          ? { configPath: "./wrangler.cloudflare.jsonc" }
+          : { config: localBindingConfig }),
       }),
     ],
   };

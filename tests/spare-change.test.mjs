@@ -88,7 +88,8 @@ globalThis.__spareTestSweep = sweepSpare;
 const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8')
   .replace(/^import[^\n]*\r?\n/gm, '');
 compile(`const env = globalThis.__spareTestEnv;
-const getChatGPTUser = async () => ({ userId: globalThis.__spareTestUser, displayName: 'Test', email: 'test@example.invalid' });
+const getUser = async () => ({ userId: globalThis.__spareTestUser, displayName: 'Test', email: 'test@example.invalid' });
+const usesGoogleAuth = () => false;
 const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;

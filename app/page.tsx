@@ -1,11 +1,11 @@
-import { chatGPTSignInPath, chatGPTSignOutPath, getChatGPTUser } from "./chatgpt-auth";
+import { signInPath, signOutPath, getUser, usesGoogleAuth } from "./auth";
 import { RemaivoV3 as FinanceClient } from "./v3-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const authenticatedUser = await getChatGPTUser();
-  const isLocalPreview = process.env.NODE_ENV !== "production";
+  const authenticatedUser = await getUser();
+  const isLocalPreview = !usesGoogleAuth() && process.env.NODE_ENV !== "production";
 
   if (!authenticatedUser && !isLocalPreview) {
     return (
@@ -15,8 +15,8 @@ export default async function Home() {
           <p className="eyebrow">REMAIVO PERSONAL FINANCE</p>
           <h1>Know what’s left.</h1>
           <p>Sign in securely to see your private accounts, budgets, plans, and progress on every device.</p>
-          <a className="primary-button signin-button" href={chatGPTSignInPath("/")}>Sign in with ChatGPT <span>→</span></a>
-          <small>Your finance data stays connected to this Site and your signed-in account.</small>
+          <a className="primary-button signin-button" href={signInPath("/")}>{usesGoogleAuth() ? "Continue with Google" : "Sign in with ChatGPT"} <span>→</span></a>
+          <small>Your financial data is private to your signed-in account.</small>
         </section>
       </main>
     );
@@ -26,7 +26,7 @@ export default async function Home() {
     <FinanceClient
       displayName={authenticatedUser?.displayName ?? "Alex Morgan"}
       email={authenticatedUser?.email ?? "alex@example.com"}
-      signOutHref={authenticatedUser ? chatGPTSignOutPath("/") : "#"}
+      signOutHref={authenticatedUser ? signOutPath("/") : "#"}
     />
   );
 }
