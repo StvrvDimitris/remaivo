@@ -668,6 +668,22 @@ html[data-theme="midnight"] {
 .v3-app .snapshot-action:hover { background:var(--theme-soft); }
 .v3-app .accounts-grid { align-items:start; }
 .v3-app .accounts-grid .add-card { min-height:174px; padding:20px; }
+/* Investment details fit the same card grid without a second nested card. */
+.v3-app .investment-card-values { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:2px; }
+.v3-app .investment-card-values > div { display:grid; gap:3px; min-width:0; }
+.v3-app .investment-card-values small { color:var(--theme-muted); font-size:.6875rem; line-height:1.4; }
+.v3-app .investment-card-values strong { font-size:1.375rem; line-height:1.4; font-weight:600; letter-spacing:-.03em; color:var(--theme-text); }
+.v3-app .investment-card-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:auto; padding-top:12px; }
+.v3-app .investment-card-footer > div { display:grid; gap:3px; min-width:0; }
+.v3-app .investment-card-movement { color:var(--theme-muted); font-size:.6875rem; font-weight:600; }
+.v3-app .investment-card-movement.positive { color:var(--green); }
+.v3-app .investment-card-movement.negative { color:var(--red); }
+.v3-app .investment-card-footer small { font-size:.6875rem; color:var(--theme-muted); }
+.v3-app .investment-card-footer .snapshot-action { margin:0; min-height:32px; padding:5px 8px; align-self:center; font-size:.75rem; flex-shrink:0; }
+@media (min-width:761px) {
+ .v3-app .accounts-grid { align-items:stretch; grid-auto-rows:1fr; }
+ .v3-app .accounts-grid .account-card { min-height:220px; }
+}
 .v3-app .goal-heading { align-items:center; margin:24px 0 16px; }
 .v3-app .goal-heading p { text-transform:none; letter-spacing:0; font-size:.8125rem; }
 .v3-app .goal-heading h3 { font-size:1rem; }
