@@ -1,5 +1,8 @@
 // UI translations only; user-entered names and descriptions are not translated.
 export const greek: Record<string,string> = {
+  "Period surplus": "Πλεόνασμα περιόδου",
+  "Net added to savings & investments": "Καθαρή προσθήκη σε αποταμιεύσεις και επενδύσεις",
+  "Money in minus money out; internal transfers and market gains excluded": "Εισροές μείον εκροές· χωρίς εσωτερικές μεταφορές και μεταβολές αγοραίας αξίας",
   "Investment funding": "Προέλευση επένδυσης",
   "New contribution": "Νέα εισφορά",
   "Existing savings": "Υπάρχουσες αποταμιεύσεις",

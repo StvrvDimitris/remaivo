@@ -254,7 +254,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
       where.push("instr(lower(t.description), ?) > 0");
       bindings.push(filters.description.toLowerCase());
     }
-    return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
+    return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color, source.type AS source_account_type, destination.type AS destination_account_type FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id LEFT JOIN accounts source ON source.id = t.account_id AND source.user_id = t.user_id LEFT JOIN accounts destination ON destination.id = t.destination_account_id AND destination.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
   };
 
   const [currentRows, comparisonRows] = await env.DB.batch([

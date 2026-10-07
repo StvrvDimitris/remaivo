@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildStatistics, comparisonRange, shiftCalendarMonth, shiftCalendarYear } from "../app/statistics.ts";
+import { buildStatistics, netSavingsEffect, comparisonRange, shiftCalendarMonth, shiftCalendarYear } from "../app/statistics.ts";
 import { reportingClass, parseInvestmentFunding } from "../app/transaction-classification.ts";
 
 test("canonical reporting classes prevent installment and transfer double counting", () => {
@@ -42,11 +42,11 @@ test('New contributions count saved money once; net savings includes excluded ex
  const make=rows=>buildStatistics({rows,comparisonRows:[],today:'2026-10-07',currency:'EUR',filters:{from:'2026-10-01',to:'2026-10-31',mode:'cashflow',comparison:'none',comparisonFrom:null,comparisonTo:null,accountId:'',categoryId:'',transactionType:'',origin:'',description:''}}).summary;
  const result=make([row('income','income',100000),row('save','saving',20000),row('invest','investment',10000,{investment_from_savings_cents:10000}),row('expense','expense',85000,{counts_monthly:0})]);
  assert.equal(result.saving,20000);assert.equal(result.investment,10000);assert.equal(result.investmentFromExistingSavings,10000);
- assert.equal(result.savedAndInvested,20000);assert.equal(result.savingsRate,20);assert.equal(result.netSavings,15000);assert.equal(result.netSavingsRate,15);assert.equal(result.cashRemaining,-5000);
+ assert.equal(result.savedAndInvested,20000);assert.equal(result.savingsRate,20);assert.equal(result.netSavings,0);assert.equal(result.netSavingsRate,0);assert.equal(result.cashRemaining,-5000);
  const old=make([row('old savings invested','investment',10000,{investment_from_savings_cents:10000})]);
  assert.equal(old.savedAndInvested,0);assert.equal(old.investment,10000);assert.equal(old.savingsRate,null);assert.equal(old.netSavingsRate,null);
  const mixed=make([row('income','income',10000),row('mixed','investment',10000,{investment_from_savings_cents:4000}),row('expense','expense',12000)]);
- assert.equal(mixed.savedAndInvested,6000);assert.equal(mixed.savingsRate,60);assert.equal(mixed.netSavingsRate,-20);
+ assert.equal(mixed.savedAndInvested,6000);assert.equal(mixed.savingsRate,60);assert.equal(mixed.netSavingsRate,0);
 });
 
 test('Funding choices support new, existing and mixed with strict cent validation',()=>{
@@ -55,4 +55,27 @@ test('Funding choices support new, existing and mixed with strict cent validatio
  assert.equal(parseInvestmentFunding('investment',10000,{investmentFunding:'mixed',existingSavingsAmount:'40.25'}),4025);
  assert.equal(parseInvestmentFunding('expense',10000,{investmentFunding:'existing'}),0);
  for(const amount of ['-1','0','100','101','bad'])assert.throws(()=>parseInvestmentFunding('investment',10000,{investmentFunding:'mixed',existingSavingsAmount:amount}));
+});
+
+
+test('Net savings measures the savings/investment account boundary, regardless of budget or funding tags',()=>{
+ const row=(type,amount,from,to=null,extra={})=>({id:type,type,amount_cents:amount,account_id:'from',destination_account_id:to?'to':null,source_account_type:from,destination_account_type:to,date:'2026-10-07',description:type,category_id:null,category_name:null,category_color:null,committed:0,recurring_plan_id:null,...extra});
+ const rows=[row('income',100000,'bank'),row('saving',20000,'wallet','savings',{counts_monthly:0}),row('investment',10000,'savings','investment',{investment_from_savings_cents:0}),row('expense',3000,'savings',null,{counts_monthly:0})];
+ const filters={from:'2026-10-01',to:'2026-10-31',mode:'cashflow',comparison:'none',comparisonFrom:null,comparisonTo:null,accountId:'',categoryId:'',transactionType:'',origin:'',description:''};
+ const result=buildStatistics({rows,comparisonRows:[],filters,today:'2026-10-07',currency:'EUR'}).summary;
+ assert.equal(result.netSavings,17000);assert.equal(result.netSavingsRate,17);assert.equal(result.netOperatingCashFlow,97000);
+ assert.equal(netSavingsEffect(row('transfer',10000,'bank','savings')),10000);
+ assert.equal(netSavingsEffect(row('transfer',10000,'savings','bank')),-10000);
+ assert.equal(netSavingsEffect(row('transfer',10000,'savings','savings')),0);
+ assert.equal(netSavingsEffect(row('transfer',10000,'investment','savings')),0);
+ assert.equal(netSavingsEffect(row('investment',10000,'bank','investment',{investment_from_savings_cents:10000})),10000);
+ assert.equal(netSavingsEffect(row('income',2000,'savings')),2000);
+ assert.equal(netSavingsEffect(row('fee',100,'investment')),-100);
+ assert.equal(netSavingsEffect(row('installment_payment',1000,'savings')),-1000);
+ assert.equal(netSavingsEffect(row('installment_purchase',1000,'savings')),0);
+ assert.equal(netSavingsEffect(row('expense',1000,'bank')),0);
+ const negative=buildStatistics({rows:[rows[0],row('expense',5000,'savings')],comparisonRows:[],filters,today:'2026-10-07',currency:'EUR'}).summary;
+ assert.equal(negative.netSavings,-5000);assert.equal(negative.netSavingsRate,-5);
+ const noIncome=buildStatistics({rows:[row('expense',5000,'savings')],comparisonRows:[],filters,today:'2026-10-07',currency:'EUR'}).summary;
+ assert.equal(noIncome.netSavings,-5000);assert.equal(noIncome.netSavingsRate,null);
 });
