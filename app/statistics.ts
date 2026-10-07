@@ -101,9 +101,9 @@ function totals(rows: StatisticsRow[]) {
     netOperatingCashFlow: income - spending,
     saving,
     investment,
-    savedAndInvested: saving + investment,
     cashRemaining: income - spending - saving - investment,
-    savingsRate: income > 0 ? (saving + investment) / income * 100 : null,
+    savingsContributionRate: income > 0 ? saving / income * 100 : null,
+    investmentContributionRate: income > 0 ? investment / income * 100 : null,
   };
 }
 
@@ -278,9 +278,11 @@ function insights(input: {
   if (weekend >= 5000 && weekendShare >= 40) candidates.push({ score: weekend * weekendShare / 100, kind: "timing", text: `${weekendShare.toFixed(0)}% of ${input.mode === "income" ? "income" : "activity"} occurred on weekends.` });
   const topDescription = input.descriptions[0];
   if (topDescription && topDescription.amount >= 5000 && topDescription.share >= 20) candidates.push({ score: topDescription.amount * topDescription.share / 100, kind: "description", text: `${topDescription.description} was the largest description at ${topDescription.share.toFixed(0)}% across ${topDescription.count} transaction${topDescription.count === 1 ? "" : "s"}.` });
-  if (input.summary.savingsRate !== null && input.comparisonSummary.savingsRate !== null) {
-    const movement = input.summary.savingsRate - input.comparisonSummary.savingsRate;
-    if (Math.abs(movement) >= 5) candidates.push({ score: Math.abs(movement) * 1000, kind: "saving", text: `Savings rate ${movement > 0 ? "improved" : "fell"} by ${Math.abs(movement).toFixed(1)} percentage points.` });
+  for (const [key, label] of [['savingsContributionRate','Savings'],['investmentContributionRate','Investment']] as const) {
+    const current = input.summary[key], previous = input.comparisonSummary[key];
+    if (current === null || previous === null) continue;
+    const movement = current - previous;
+    if (Math.abs(movement) >= 5) candidates.push({score:Math.abs(movement)*1000,kind:'saving',text:`${label} contribution rate ${movement>0?'increased':'decreased'} by ${Math.abs(movement).toFixed(1)} percentage points.`});
   }
   return candidates.sort((left, right) => right.score - left.score).slice(0, 5);
 }

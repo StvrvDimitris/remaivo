@@ -1,5 +1,11 @@
 // UI translations only; user-entered names and descriptions are not translated.
 export const greek: Record<string,string> = {
+  "Savings contributions": "Εισφορές αποταμίευσης",
+  "Investment contributions": "Επενδυτικές εισφορές",
+  "Saving transactions as a share of income; withdrawals are not deducted": "Κινήσεις αποταμίευσης ως ποσοστό εισοδήματος· οι αναλήψεις δεν αφαιρούνται",
+  "Investment transactions as a share of income; may include money previously saved": "Επενδυτικές κινήσεις ως ποσοστό εισοδήματος· μπορεί να περιλαμβάνουν υπάρχουσες αποταμιεύσεις",
+  "These measure contribution activity, not balances. Income paid directly into savings remains income. The two amounts and rates are not combined because the same money can appear in both.": "Μετρούν εισφορές, όχι υπόλοιπα. Τα έσοδα που κατατίθενται απευθείας σε αποταμιεύσεις παραμένουν έσοδα. Τα ποσά και ποσοστά δεν αθροίζονται, επειδή τα ίδια χρήματα μπορεί να εμφανίζονται και στα δύο.",
+
   "Changes apply to future unpaid occurrences. Already posted transactions keep their budget setting.": "Οι αλλαγές ισχύουν για μελλοντικές πληρωμές χωρίς καταγεγραμμένο ποσό. Οι ήδη καταγεγραμμένες κινήσεις διατηρούν τη ρύθμιση προϋπολογισμού τους.",
   "Protected allocations do not move money between accounts. They describe its purpose.": "Οι δεσμευμένες κατανομές δεν μεταφέρουν χρήματα μεταξύ λογαριασμών. Περιγράφουν τον σκοπό τους.",
   "A covered payment replaces the unpaid amount or consumes its bucket. It is counted once.": "Η καλυμμένη πληρωμή αντικαθιστά το απλήρωτο ποσό ή καταναλώνει τον φάκελό της. Μετρά μία φορά.",

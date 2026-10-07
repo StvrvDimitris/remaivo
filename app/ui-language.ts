@@ -17,6 +17,8 @@ export function translateInsight(text: string, language: UILanguage): string {
   if (match) return `${match[1]}% ${match[2] === 'income' ? 'των εσόδων' : 'των κινήσεων'} καταγράφηκε τα Σαββατοκύριακα.`;
   match = text.match(/^(.*) was the largest description at (\d+)% across (\d+) transactions?\.$/);
   if (match) return `${match[1]} ήταν η μεγαλύτερη περιγραφή με ${match[2]}%, σε ${match[3]} ${match[3] === '1' ? 'συναλλαγή' : 'συναλλαγές'}.`;
+  match = text.match(/^(Savings|Investment) contribution rate (increased|decreased) by ([\d.]+) percentage points\.$/);
+  if (match) return `Το ποσοστό ${match[1] === 'Savings' ? 'εισφορών αποταμίευσης' : 'επενδυτικών εισφορών'} ${match[2] === 'increased' ? 'αυξήθηκε' : 'μειώθηκε'} κατά ${match[3].replace('.', ',')} ποσοστιαίες μονάδες.`;
   match = text.match(/^Savings rate (improved|fell) by ([\d.]+) percentage points\.$/);
   if (match) return `Το ποσοστό αποταμίευσης ${match[1] === 'improved' ? 'αυξήθηκε' : 'μειώθηκε'} κατά ${match[2].replace('.', ',')} ποσοστιαίες μονάδες.`;
   return translate(text, language);

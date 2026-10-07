@@ -31,7 +31,23 @@ test("statistics separate spending, contributions, cash flow, and market-neutral
   assert.equal(result.summary.income, 100000);
   assert.equal(result.summary.spending, 35000);
   assert.equal(result.summary.netOperatingCashFlow, 65000);
-  assert.equal(result.summary.savedAndInvested, 25000);
+  assert.equal(result.summary.saving, 15000);
+  assert.equal(result.summary.investment, 10000);
   assert.equal(result.summary.cashRemaining, 40000);
-  assert.equal(result.summary.savingsRate, 25);
+  assert.equal(result.summary.savingsContributionRate, 15);
+  assert.equal(result.summary.investmentContributionRate, 10);
+});
+
+
+test('Contribution amounts and rates stay separate when money is saved then invested or withdrawn',()=>{
+ const row=(type,amount_cents)=>({id:type,type,amount_cents,date:'2026-10-07',description:type,account_id:'savings',destination_account_id:'spending',category_id:null,category_name:null,category_color:null,committed:0,recurring_plan_id:null,counts_monthly:0});
+ const filters={from:'2026-10-01',to:'2026-10-31',comparison:'none',comparisonFrom:null,comparisonTo:null,mode:'cashflow',accountId:'',categoryId:'',transactionType:'',origin:'',description:''};
+ const make=rows=>buildStatistics({rows,comparisonRows:[],filters,today:'2026-10-07',currency:'EUR'}).summary;
+ const result=make([row('income',100000),row('saving',20000),row('investment',10000),row('transfer',7500),row('expense',7500)]);
+ assert.equal(result.saving,20000);assert.equal(result.investment,10000);
+ assert.equal(result.savingsContributionRate,20);assert.equal(result.investmentContributionRate,10);
+ assert.equal('savedAndInvested' in result,false);assert.equal('savingsRate' in result,false);
+ const noIncome=make([row('saving',20000),row('investment',10000)]);
+ assert.equal(noIncome.savingsContributionRate,null);assert.equal(noIncome.investmentContributionRate,null);
+ const directIncome=make([row('income',10000)]);assert.equal(directIncome.saving,0);assert.equal(directIncome.savingsContributionRate,0);
 });
