@@ -5,7 +5,7 @@ export const greek: Record<string,string> = {
   "Existing savings": "Υπάρχουσες αποταμιεύσεις",
   "Part new, part existing savings": "Νέα χρήματα και υπάρχουσες αποταμιεύσεις",
   "Amount funded from existing savings": "Ποσό από υπάρχουσες αποταμιεύσεις",
-  "Existing savings still count as investment activity, but not as new contributions or a second charge to the Plan. Choose new contribution if this money has not already been set aside.": "Οι υπάρχουσες αποταμιεύσεις καταγράφονται ως επενδυτική δραστηριότητα, αλλά όχι ως νέα εισφορά ή δεύτερη χρέωση του πλάνου. Επιλέξτε νέα εισφορά αν τα χρήματα δεν έχουν ήδη αποταμιευτεί.",
+  "Funding affects Insights only. Existing savings are not counted again as new contributions. The separate budget inclusion choice controls whether the investment counts toward the Plan.": "Η προέλευση επηρεάζει μόνο τις Αναλύσεις. Οι υπάρχουσες αποταμιεύσεις δεν μετρούν ξανά ως νέες εισφορές. Η ξεχωριστή επιλογή συμμετοχής στον προϋπολογισμό καθορίζει αν η επένδυση μετρά στο πλάνο.",
   "New contributions": "Νέες εισφορές",
   "Net savings": "Καθαρή αποταμίευση",
   "of income newly allocated to savings and investments": "του εισοδήματος που διατέθηκε σε νέες αποταμιεύσεις και επενδύσεις",

@@ -132,14 +132,11 @@ export function splitWeighted(total:number, weights:number[]) {
   return result;
 }
 export function budgetAmount(tx:MoneyTransaction) {
-  if ((!tx.status || tx.status==='posted') && tx.counts_monthly!==0 && ['expense','installment_payment','saving','investment','fee'].includes(tx.type)) return Math.max(0,tx.amount_cents-(tx.type==='investment'?Math.min(tx.amount_cents,tx.investment_from_savings_cents||0):0));
+  if ((!tx.status || tx.status==='posted') && tx.counts_monthly!==0 && ['expense','installment_payment','saving','investment','fee'].includes(tx.type)) return Math.max(0,tx.amount_cents);
   return 0;
 }
 export function occurrenceBudgetRemaining(o:Occurrence) {
- const saved=o.type==='investment'?Math.min(o.amount_cents,o.investment_from_savings_cents||0):0;
- const newTotal=o.amount_cents-saved;
- const paid=Math.min(o.paid_cents,o.amount_cents);
- return Math.max(0,newTotal-paid+(o.amount_cents?Math.round(paid*saved/o.amount_cents):0));
+ return Math.max(0,o.amount_cents-o.paid_cents);
 }
 export function consumesBudget(tx:MoneyTransaction) {return budgetAmount(tx)>0;}
 export function carryAmount(amount:number,config:BudgetConfig){return config.carry==='signed'?amount:config.carry==='positive'?Math.max(0,amount):config.carry==='capped'?Math.min(Math.max(0,amount),config.carryCap):0;}
