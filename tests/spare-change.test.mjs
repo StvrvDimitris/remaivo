@@ -306,3 +306,14 @@ test('Type corrections keep linked payments and completed round-ups protected', 
   }
   assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='type-guards-card'").get().balance_cents,9000);
 });
+
+
+test('Language settings persist per owner and reject unsupported values', async () => {
+  sqlite.prepare("INSERT INTO profiles(user_id) VALUES('language-a'),('language-b')").run();
+  globalThis.__spareTestUser='language-a';
+  assert.equal((await post('updateLanguage',{language:'el'})).status,200);
+  assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='language-a'").get().ui_language,'el');
+  assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='language-b'").get().ui_language,'en');
+  assert.equal((await post('updateLanguage',{language:'xx'})).status,400);
+  assert.equal((await post('updateLanguage',{language:'en'})).status,200);
+});

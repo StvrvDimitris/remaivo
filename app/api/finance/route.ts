@@ -657,6 +657,9 @@ export async function POST(request: Request) {
         return Response.json({ error: "Choose an active account." }, { status: 400 });
       }
       await env.DB.prepare("UPDATE profiles SET default_expense_account_id = ? WHERE user_id = ?").bind(accountId, user.userId).run();
+    } else if (action === "updateLanguage") {
+      if (!["en", "el"].includes(String(payload.language))) return Response.json({ error: "Choose English or Greek." }, { status: 400 });
+      await env.DB.prepare("UPDATE profiles SET ui_language = ? WHERE user_id = ?").bind(payload.language, user.userId).run();
     } else if (action === "updateTheme") {
       if (!isUITheme(payload.theme)) return Response.json({ error: "Choose an available theme." }, { status: 400 });
       await env.DB.prepare("UPDATE profiles SET ui_theme = ? WHERE user_id = ?").bind(payload.theme, user.userId).run();

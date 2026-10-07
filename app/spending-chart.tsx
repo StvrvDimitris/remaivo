@@ -1,18 +1,20 @@
 "use client";
 
+import { useTranslation } from "./i18n";
+
 import { consumesBudget, daysApart, planPace, plusDays, type MoneyTransaction } from "./v3-engine";
 
 const W = 640, H = 232, LEFT = 52, RIGHT = 16, TOP = 18, BOTTOM = 30;
 const PLOT_W = W - LEFT - RIGHT, PLOT_H = H - TOP - BOTTOM;
 
-function money(cents: number, currency: string) {
-  return new Intl.NumberFormat("en-IE", { style: "currency", currency, maximumFractionDigits: 0 }).format(cents / 100);
+function money(cents: number, currency: string, locale = "en-IE") {
+  return new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 }).format(cents / 100);
 }
-function compact(cents: number, currency: string) {
-  return new Intl.NumberFormat("en-IE", { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }).format(cents / 100);
+function compact(cents: number, currency: string, locale = "en-IE") {
+  return new Intl.NumberFormat(locale, { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }).format(cents / 100);
 }
-function shortDate(value: string) {
-  return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+function shortDate(value: string, locale = "en-IE") {
+  return new Date(`${value}T12:00:00Z`).toLocaleDateString(locale, { day: "numeric", month: "short", timeZone: "UTC" });
 }
 // Rounds the axis ceiling up to 1, 2 or 5 × a power of ten.
 function niceCeiling(value: number) {
@@ -24,6 +26,8 @@ function niceCeiling(value: number) {
 
 /** Cumulative spending in the current plan period against an even pace toward the target. */
 export function SpendingChart({ start, end, today, target, spent, transactions, currency }: { start: string; end: string; today: string; target: number; spent: number; transactions: MoneyTransaction[]; currency: string }) {
+ const { t: tr, locale } = useTranslation();
+
   const totalDays = Math.max(1, daysApart(start, end));
   const elapsed = Math.max(0, Math.min(totalDays, daysApart(start, plusDays(today, 1))));
   const daily = Array.from({ length: totalDays }, () => 0);
@@ -46,25 +50,25 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
   const labelLeft = todayX > W - 150;
   const status = pace ? pace.paceDifference > 0 ? "above" : pace.paceDifference < 0 ? "below" : "on" : null;
   const summary = pace
-    ? `Cumulative spending reached ${money(spent, currency)} by ${shortDate(today)}, against an even pace of ${money(pace.expectedSpent, currency)} and a ${money(target, currency)} target.`
-    : `Cumulative spending reached ${money(spent, currency)} by ${shortDate(today)}. No spending target is set.`;
+    ? `Cumulative spending reached ${money(spent, currency, locale)} by ${shortDate(today, locale)}, against an even pace of ${money(pace.expectedSpent, currency, locale)} and a ${money(target, currency, locale)} target.`
+    : `Cumulative spending reached ${money(spent, currency, locale)} by ${shortDate(today, locale)}. No spending target is set.`;
 
   return <div className="v3-spend-chart">
     <div className="v3-spend-chart-head">
       <div>
-        <h2>Spending against your target</h2>
-        <p>{pace ? `${money(spent, currency)} used of ${money(target, currency)} · ${pace.elapsedRatio.toFixed(0)}% of the period elapsed` : `${money(spent, currency)} spent so far. Set a spending target in Plan to compare pace.`}</p>
+        <h2>{tr("Spending against your target")}</h2>
+        <p>{pace ? `${money(spent, currency, locale)} used of ${money(target, currency, locale)} · ${pace.elapsedRatio.toFixed(0)}% of the period elapsed` : `${money(spent, currency, locale)} spent so far. Set a spending target in Plan to compare pace.`}</p>
       </div>
-      {pace && status && <span className={`v3-pace-pill ${status}`}><i />{status === "on" ? "On even pace" : `${money(Math.abs(pace.paceDifference), currency)} ${status} even pace`}</span>}
+      {pace && status && <span className={`v3-pace-pill ${status}`}><i />{status === "on" ? tr("On even pace") : `${money(Math.abs(pace.paceDifference), currency, locale)} ${status} even pace`}</span>}
     </div>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary}>
       {[0, 0.5, 1].map((share) => <g key={share}>
         <line className={share ? "grid" : "axis"} x1={LEFT} x2={W - RIGHT} y1={y(ceiling * share)} y2={y(ceiling * share)} />
-        <text className="tick" x={LEFT - 8} y={y(ceiling * share) + 4} textAnchor="end">{compact(ceiling * share, currency)}</text>
+        <text className="tick" x={LEFT - 8} y={y(ceiling * share) + 4} textAnchor="end">{compact(ceiling * share, currency, locale)}</text>
       </g>)}
       {target > 0 && <>
         <line className="target" x1={LEFT} x2={W - RIGHT} y1={y(target)} y2={y(target)} />
-        <text className="target-label" x={W - RIGHT - 2} y={y(target) - 6} textAnchor="end">Target {money(target, currency)}</text>
+        <text className="target-label" x={W - RIGHT - 2} y={y(target) - 6} textAnchor="end">{tr("Target")} {money(target, currency, locale)}</text>
         <line className="pace" x1={x(0)} y1={y(0)} x2={x(totalDays)} y2={y(target)} />
       </>}
       <polygon className="area" points={area} />
@@ -72,15 +76,15 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
       {elapsed < totalDays && <line className="today" x1={todayX} x2={todayX} y1={TOP} y2={y(0)} />}
       {expectedY !== null && <circle className="pace-dot" cx={todayX} cy={expectedY} r="3.5" />}
       <circle className="spent-dot" cx={todayX} cy={spentY} r="4.5" />
-      <text className="value" x={labelLeft ? todayX - 10 : todayX + 10} y={spentY + 4} textAnchor={labelLeft ? "end" : "start"}>{money(spent, currency)}</text>
-      {pace && expectedY !== null && Math.abs(expectedY - spentY) > 14 && <text className="tick" x={labelLeft ? todayX - 10 : todayX + 10} y={expectedY + 4} textAnchor={labelLeft ? "end" : "start"}>{money(pace.expectedSpent, currency)} pace</text>}
-      <text className="tick" x={LEFT} y={H - 8}>{shortDate(start)}</text>
-      {elapsed > totalDays * 0.15 && elapsed < totalDays * 0.85 && <text className="tick strong" x={todayX} y={H - 8} textAnchor="middle">Today</text>}
-      <text className="tick" x={W - RIGHT} y={H - 8} textAnchor="end">{shortDate(plusDays(end, -1))}</text>
+      <text className="value" x={labelLeft ? todayX - 10 : todayX + 10} y={spentY + 4} textAnchor={labelLeft ? "end" : "start"}>{money(spent, currency, locale)}</text>
+      {pace && expectedY !== null && Math.abs(expectedY - spentY) > 14 && <text className="tick" x={labelLeft ? todayX - 10 : todayX + 10} y={expectedY + 4} textAnchor={labelLeft ? "end" : "start"}>{money(pace.expectedSpent, currency, locale)}  {tr("pace")}</text>}
+      <text className="tick" x={LEFT} y={H - 8}>{shortDate(start, locale)}</text>
+      {elapsed > totalDays * 0.15 && elapsed < totalDays * 0.85 && <text className="tick strong" x={todayX} y={H - 8} textAnchor="middle">{tr("Today")}</text>}
+      <text className="tick" x={W - RIGHT} y={H - 8} textAnchor="end">{shortDate(plusDays(end, -1), locale)}</text>
     </svg>
     <div className="v3-spend-chart-legend">
-      <span><i className="spent" />Spent so far</span>
-      {target > 0 && <><span><i className="pace" />Even pace</span><span><i className="target" />Spending target</span></>}
+      <span><i className="spent" />{tr("Spent so far")}</span>
+      {target > 0 && <><span><i className="pace" />{tr("Even pace")}</span><span><i className="target" />{tr("Spending target")}</span></>}
     </div>
   </div>;
 }

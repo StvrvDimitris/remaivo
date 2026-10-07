@@ -84,3 +84,12 @@ test("invalid setup leaves no partial profile", async () => {
   await assert.rejects(createCurrentPlan("invalid-owner", { ...payload, accounts: [] }));
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM profiles WHERE user_id='invalid-owner'").get().n, 0);
 });
+
+
+test("setup saves the selected UI language without changing opening money", async () => {
+  await createCurrentPlan("greek-owner", {...payload,language:"el"});
+  assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='greek-owner'").get().ui_language,"el");
+  assert.equal(sqlite.prepare("SELECT SUM(balance_cents) AS amount FROM accounts WHERE user_id='greek-owner'").get().amount,132000);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS amount FROM transactions WHERE user_id='greek-owner'").get().amount,0);
+  assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='fresh-owner'").get().ui_language,"en");
+});

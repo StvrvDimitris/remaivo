@@ -4,7 +4,7 @@ import type { BudgetConfig } from "../app/v3-engine";
 import { ensureFinanceSchema } from "./ensure";
 
 type SetupAccount = { name?: unknown; type?: unknown; balance?: unknown; creditLimit?: unknown; color?: unknown; includeSpendable?: unknown };
-type SetupPayload = { currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
+type SetupPayload = { language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
 
 const categories = [
   ["Groceries", "expense", "#d8ead7"],
@@ -30,6 +30,7 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
   const existing = await env.DB.prepare("SELECT setup_complete FROM profiles WHERE user_id = ?").bind(userId).first<{ setup_complete: number }>();
   if (existing?.setup_complete) return false;
 
+  const language = payload.language === "el" ? "el" : "en";
   const currency = String(payload.currency || "EUR").toUpperCase();
   if (!["EUR", "USD", "GBP"].includes(currency)) throw new Error("Choose a supported currency.");
   const timezone = String(payload.timezone || "UTC");
@@ -49,7 +50,7 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
   const open = "EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND setup_complete = 0)";
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT OR IGNORE INTO profiles (user_id, currency, week_start, timezone, setup_complete) VALUES (?, ?, ?, ?, 0)").bind(userId, currency, weekStart, timezone),
-    env.DB.prepare("UPDATE profiles SET currency = ?, week_start = ?, timezone = ? WHERE user_id = ? AND setup_complete = 0").bind(currency, weekStart, timezone, userId),
+    env.DB.prepare("UPDATE profiles SET currency = ?, week_start = ?, timezone = ?, ui_language = ? WHERE user_id = ? AND setup_complete = 0").bind(currency, weekStart, timezone, language, userId),
   ];
 
   for (const [index, input] of accounts.entries()) {
