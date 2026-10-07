@@ -2,7 +2,7 @@
 
 import { useTranslation } from "./i18n";
 
-import { budgetAmount, consumesBudget, daysApart, planPace, plusDays, type MoneyTransaction } from "./v3-engine";
+import { consumesBudget, daysApart, planPace, plusDays, type MoneyTransaction } from "./v3-engine";
 
 const W = 640, H = 232, LEFT = 52, RIGHT = 16, TOP = 18, BOTTOM = 30;
 const PLOT_W = W - LEFT - RIGHT, PLOT_H = H - TOP - BOTTOM;
@@ -34,7 +34,7 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
   // Same rule as buildBudget's `counted`, so the line ends at the period's total spent.
   for (const t of transactions) {
     if (!consumesBudget(t) || t.date < start || t.date >= end || t.date > today) continue;
-    daily[daysApart(start, t.date)] += budgetAmount(t);
+    daily[daysApart(start, t.date)] += t.amount_cents;
   }
   let running = 0;
   const cumulative = [0, ...daily.slice(0, elapsed).map((amount) => (running += amount))];

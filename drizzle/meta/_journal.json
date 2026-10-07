@@ -148,6 +148,13 @@
       "when": 1791363818702,
       "tag": "0020_investment_funding",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791365786505,
+      "tag": "0021_remove_investment_funding",
+      "breakpoints": true
     }
   ]
 }

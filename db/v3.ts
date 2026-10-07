@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
-import { buildBudget, budgetAmount, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
+import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 import { spareRoundUpCents, type SpareSettings } from '../app/spare-change';
 import { autoSweepSpare } from './spare';
 
@@ -24,7 +24,7 @@ export async function currentPeriod(user:string,today:string){
    const accounts=await rows<MoneyAccount>('SELECT * FROM accounts WHERE user_id=? AND archived=0',user);
    const actuals=await rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? AND date<=?",user,bounds.start,bounds.end,today);
    const cash=accounts.filter(a=>a.include_spendable&&a.type!=='investment').reduce((a,b)=>a+b.balance_cents,0);
-   const funding=Math.max(0,Math.min(desired.target,cash+actuals.filter(consumesBudget).reduce((a,b)=>a+budgetAmount(b),0)));
+   const funding=Math.max(0,Math.min(desired.target,cash+actuals.filter(consumesBudget).reduce((a,b)=>a+b.amount_cents,0)));
    const periodId=id();const templates=await rows<Bucket>('SELECT * FROM v3_bucket_templates WHERE user_id=? AND archived=0 ORDER BY priority',user);
    const stmts=[env.DB.prepare('INSERT OR IGNORE INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)').bind(periodId,user,bounds.start,bounds.end,version.id,funding)];
    for(const b of templates){let rollover=0;const previous=await env.DB.prepare('SELECT bp.*,p.start_date,p.end_date FROM v3_bucket_periods bp JOIN v3_periods p ON p.id=bp.period_id WHERE bp.user_id=? AND bp.bucket_id=? AND p.end_date<=? ORDER BY p.end_date DESC LIMIT 1').bind(user,b.id,bounds.start).first<Bucket&{start_date:string;end_date:string;period_id:string}>();
@@ -43,20 +43,20 @@ export async function currentPeriod(user:string,today:string){
  const saved=period.version_id===version.id ? version : await env.DB.prepare('SELECT config_json FROM v3_versions WHERE id=? AND user_id=?').bind(period.version_id,user).first<{config_json:string}>();return {period,config:JSON.parse(saved!.config_json) as BudgetConfig};
 }
 
-type PlanRow={investment_from_savings_cents?:number;id:string;title:string;type:string;amount_cents:number;next_date:string;frequency:string;interval_count:number;anchor_day:number;end_date:string|null;account_id:string|null;destination_account_id:string|null;category_id:string|null;committed:number;auto_post:number};
+type PlanRow={id:string;title:string;type:string;amount_cents:number;next_date:string;frequency:string;interval_count:number;anchor_day:number;end_date:string|null;account_id:string|null;destination_account_id:string|null;category_id:string|null;committed:number;auto_post:number};
 export async function generateOccurrences(user:string,today:string){
- type StoredOccurrence=Pick<Occurrence,'investment_from_savings_cents'|'id'|'source_kind'|'source_id'|'title'|'amount_cents'|'paid_cents'|'account_id'|'destination_account_id'|'category_id'|'committed'|'auto_post'|'status'>;
+ type StoredOccurrence=Pick<Occurrence,'id'|'source_kind'|'source_id'|'title'|'amount_cents'|'paid_cents'|'account_id'|'destination_account_id'|'category_id'|'committed'|'auto_post'|'status'>;
  const [plans,existing,payments]=await Promise.all([
   rows<PlanRow>('SELECT * FROM recurring_plans WHERE user_id=? AND active=1',user),
-  rows<StoredOccurrence>('SELECT investment_from_savings_cents,id,source_kind,source_id,title,amount_cents,paid_cents,account_id,destination_account_id,category_id,committed,auto_post,status FROM v3_occurrences WHERE user_id=?',user),
+  rows<StoredOccurrence>('SELECT id,source_kind,source_id,title,amount_cents,paid_cents,account_id,destination_account_id,category_id,committed,auto_post,status FROM v3_occurrences WHERE user_id=?',user),
   rows<{id:string;plan_id:string;due_date:string;amount_cents:number;title:string;payment_account_id:string;category_id:string;auto_post:number}>("SELECT ip.*,p.title,p.payment_account_id,p.category_id,p.auto_post FROM installment_payments ip JOIN installment_plans p ON p.id=ip.plan_id AND p.user_id=ip.user_id WHERE ip.user_id=? AND ip.status='upcoming' AND p.status='active'",user),
  ]);
  const byId=new Map(existing.map(o=>[o.id,o]));const horizon=plusDays(today,400);const stmts:D1PreparedStatement[]=[];
  for(const p of plans){let date=p.next_date;let n=0;while(date<horizon&&(!p.end_date||date<=p.end_date)){
    if(++n>2000)throw new Error('A schedule has too many missed occurrences. Move its next date forward to continue.');
    const oid='recurring:'+p.id+':'+date;const saved=byId.get(oid);
-   if(!saved||saved.title!==p.title||(saved.paid_cents===0&&(saved.amount_cents!==p.amount_cents||saved.investment_from_savings_cents!==(p.investment_from_savings_cents||0)))||saved.account_id!==p.account_id||saved.destination_account_id!==p.destination_account_id||saved.category_id!==p.category_id||saved.committed!==p.committed||saved.auto_post!==p.auto_post)
-    stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,destination_account_id,category_id,committed,auto_post,investment_from_savings_cents) VALUES(?,?,'recurring',?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET investment_from_savings_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.investment_from_savings_cents ELSE v3_occurrences.investment_from_savings_cents END,title=excluded.title,amount_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.amount_cents ELSE v3_occurrences.amount_cents END,account_id=excluded.account_id,destination_account_id=excluded.destination_account_id,category_id=excluded.category_id,committed=excluded.committed,auto_post=excluded.auto_post`).bind(oid,user,p.id,date,date,p.title,p.type,p.amount_cents,p.account_id,p.destination_account_id,p.category_id,p.committed,p.auto_post,p.investment_from_savings_cents||0));
+   if(!saved||saved.title!==p.title||(saved.paid_cents===0&&saved.amount_cents!==p.amount_cents)||saved.account_id!==p.account_id||saved.destination_account_id!==p.destination_account_id||saved.category_id!==p.category_id||saved.committed!==p.committed||saved.auto_post!==p.auto_post)
+    stmts.push(env.DB.prepare(`INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,account_id,destination_account_id,category_id,committed,auto_post) VALUES(?,?,'recurring',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,amount_cents=CASE WHEN v3_occurrences.paid_cents=0 THEN excluded.amount_cents ELSE v3_occurrences.amount_cents END,account_id=excluded.account_id,destination_account_id=excluded.destination_account_id,category_id=excluded.category_id,committed=excluded.committed,auto_post=excluded.auto_post`).bind(oid,user,p.id,date,date,p.title,p.type,p.amount_cents,p.account_id,p.destination_account_id,p.category_id,p.committed,p.auto_post));
    date=addCalendarInterval(date,p.frequency,p.interval_count,p.anchor_day);
  }}
  for(const p of payments){const oid='installment:'+p.id;const saved=byId.get(oid);
@@ -76,10 +76,8 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
  if(['saving','investment'].includes(o.type)&&!o.destination_account_id)throw new Error('Choose a destination account in the plan before recording this transfer.');
  if(!o.account_id||!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(o.account_id,user).first())throw new Error('Choose an active payment account first.');
  if(o.destination_account_id&&(o.destination_account_id===o.account_id||!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(o.destination_account_id,user).first()))throw new Error('Choose a different active destination account.');
- const savedTotal=o.type==='investment'?(o.investment_from_savings_cents||0):0;
- const investmentFunding=o.amount_cents?Math.round((o.paid_cents+amount)*savedTotal/o.amount_cents)-Math.round(o.paid_cents*savedTotal/o.amount_cents):0;
  const token=id();const txId=matchId||id();const newPaid=o.paid_cents+amount;const status=newPaid>=o.amount_cents?'paid':'partial';
- if(matchId){const tx=await env.DB.prepare("SELECT * FROM transactions WHERE id=? AND user_id=? AND status='posted'").bind(matchId,user).first<MoneyTransaction>();if(!tx||tx.type!==o.type||tx.account_id!==o.account_id||tx.amount_cents!==amount||tx.recurring_plan_id||tx.installment_plan_id||tx.destination_account_id!==o.destination_account_id||(tx.investment_from_savings_cents||0)!==investmentFunding)throw new Error('Choose an unlinked transaction of the same type, account and amount.');}
+ if(matchId){const tx=await env.DB.prepare("SELECT * FROM transactions WHERE id=? AND user_id=? AND status='posted'").bind(matchId,user).first<MoneyTransaction>();if(!tx||tx.type!==o.type||tx.account_id!==o.account_id||tx.amount_cents!==amount||tx.recurring_plan_id||tx.installment_plan_id||tx.destination_account_id!==o.destination_account_id)throw new Error('Choose an unlinked transaction of the same type, account and amount.');}
  const spareSettings=!matchId&&o.type==='expense'?await env.DB.prepare('SELECT spare_enabled,spare_source_id,spare_destination_id,spare_multiplier FROM profiles WHERE user_id=?').bind(user).first<SpareSettings>():null;
  const spare=!matchId&&o.type==='expense'?spareRoundUpCents(amount,o.account_id,false,spareSettings):0;
  const guard='EXISTS(SELECT 1 FROM v3_occurrences WHERE id=? AND user_id=? AND settlement_token=?)';
@@ -88,7 +86,7 @@ export async function settleOccurrence(user:string,oid:string,date:string,amount
  const payment=o.source_kind==='installment'?await env.DB.prepare('SELECT plan_id FROM installment_payments WHERE id=? AND user_id=?').bind(o.source_id,user).first<{plan_id:string}>():null;
  if(matchId)statements.push(env.DB.prepare(`UPDATE transactions SET recurring_plan_id=?,installment_plan_id=?,committed=? WHERE id=? AND user_id=? AND ${guard}`).bind(recurringId,payment?.plan_id||null,o.committed,txId,user,o.id,user,token));
  else {
- statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_monthly,recurring_plan_id,installment_plan_id,spare_change_cents,investment_from_savings_cents) SELECT ?,?,?,?,?,?,?,?,?,?,1,?,?,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,spare,investmentFunding,o.id,user,token));
+ statements.push(env.DB.prepare(`INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id,destination_account_id,category_id,committed,counts_monthly,recurring_plan_id,installment_plan_id,spare_change_cents) SELECT ?,?,?,?,?,?,?,?,?,?,1,?,?,? WHERE ${guard}`).bind(txId,user,o.type,o.title,amount,date,o.account_id,o.destination_account_id,o.category_id,o.committed,recurringId,payment?.plan_id||null,spare,o.id,user,token));
  if(spare)statements.push(env.DB.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND user_id=? AND status='posted')").bind(id(),user,txId,spare,txId,user));
  statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(o.type==='income'?amount:-amount,o.account_id,user,o.id,user,token));
  if(['saving','investment'].includes(o.type))statements.push(env.DB.prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND user_id=? AND ${guard}`).bind(amount,o.destination_account_id,user,o.id,user,token));
@@ -147,7 +145,7 @@ export async function v3Action(user:string,today:string,action:string,p:Record<s
  const version=id();await env.DB.batch([env.DB.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').bind(version,user,today,JSON.stringify(next)),env.DB.prepare('UPDATE v3_periods SET version_id=? WHERE id=? AND user_id=? AND start_date=? AND end_date=?').bind(version,period.id,user,bounds.start,bounds.end),event(user,'configuration','Plan settings updated for the current period. Earlier periods retain their settings.')]);
  }else if(action==='v3Fund'){
  const state=await v3Snapshot(user,today);const amount=cents(p.amount);const max=Math.max(0,state.result.spendable+state.result.totalSpent);
- if(amount>max)throw new Error('Funding cannot exceed spending-account cash plus this periodβ€™s recorded spending.');
+ if(amount>max)throw new Error('Funding cannot exceed spending-account cash plus this period’s recorded spending.');
  await env.DB.batch([env.DB.prepare('UPDATE v3_periods SET funding_cents=? WHERE id=? AND user_id=?').bind(amount,period.id,user),event(user,'funding',`Period funding set to ${amount/100}. No account money was moved.`)]);
  }else if(action==='v3Bucket'){
  const name=String(p.name||'').trim();const target=cents(p.target);const kind=p.kind==='goal'?'goal':'protected';const bucketId=p.id?String(p.id):id();const cat=p.categoryId?String(p.categoryId):null;const destination=p.destinationId?String(p.destinationId):null;const rollover=['none','positive','signed','capped'].includes(String(p.rollover))?String(p.rollover):'none';

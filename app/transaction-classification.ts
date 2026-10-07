@@ -6,25 +6,7 @@ export type ClassifiableTransaction = {
   amount_cents: number;
   committed?: number;
   counts_monthly?: number;
-  investment_from_savings_cents?: number;
 };
-
-export function investmentFromSavings(transaction: ClassifiableTransaction) {
-  return transaction.type === "investment" ? Math.max(0, Math.min(transaction.amount_cents, Number(transaction.investment_from_savings_cents) || 0)) : 0;
-}
-
-// Funding is explicit and persisted; account labels never rewrite history.
-export function parseInvestmentFunding(type: string, amount: number, payload: Record<string, unknown>, fallback = 0) {
-  const invalid = (message: string): never => { const error = new Error(message); error.name = "InvestmentFundingError"; throw error; };
-  if (type !== "investment") return 0;
-  if (payload.investmentFunding === undefined) return Math.max(0, Math.min(amount, fallback));
-  if (payload.investmentFunding === "new") return 0;
-  if (payload.investmentFunding === "existing") return amount;
-  if (payload.investmentFunding !== "mixed") return invalid("Choose how this investment is funded.");
-  const value = Math.round(Number(payload.existingSavingsAmount) * 100);
-  if (!Number.isSafeInteger(value) || value <= 0 || value >= amount) return invalid("Existing savings must be greater than zero and less than the investment amount.");
-  return value;
-}
 
 export function reportingClass(type: string): ReportingClass {
   if (type === "income") return "income";

@@ -1,0 +1,3 @@
+ALTER TABLE transactions DROP COLUMN investment_from_savings_cents;
+ALTER TABLE recurring_plans DROP COLUMN investment_from_savings_cents;
+ALTER TABLE v3_occurrences DROP COLUMN investment_from_savings_cents;

@@ -5,8 +5,6 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
-import { parseInvestmentFunding } from '../app/transaction-classification.ts';
-globalThis.__testInvestmentFunding = parseInvestmentFunding;
 
 const scratch = path.resolve('work/spare-tests');
 fs.mkdirSync(scratch, { recursive: true });
@@ -90,7 +88,6 @@ globalThis.__spareTestSweep = sweepSpare;
 const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8')
   .replace(/^import[^\n]*\r?\n/gm, '');
 compile(`const env = globalThis.__spareTestEnv;
-const parseInvestmentFunding = globalThis.__testInvestmentFunding;
 const getUser = async () => ({ userId: globalThis.__spareTestUser, displayName: 'Test', email: 'test@example.invalid' });
 const usesGoogleAuth = () => false;
 const ensureFinanceSchema = async () => {};
@@ -319,29 +316,4 @@ test('Language settings persist per owner and reject unsupported values', async 
   assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='language-b'").get().ui_language,'en');
   assert.equal((await post('updateLanguage',{language:'xx'})).status,400);
   assert.equal((await post('updateLanguage',{language:'en'})).status,200);
-});
-
-
-test('Investment funding persists through creation, correction and recurring schedules without changing gross balances',async()=>{
- const owner='funding-api-owner';globalThis.__spareTestUser=owner;
- sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
- for(const [id,type,balance] of [['funding-api-main','savings',50000],['funding-api-investment','investment',0]])sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id,owner,id,type,balance);
- const payload={type:'investment',description:'Investment',amount:'100',date:'2026-09-17',accountId:'funding-api-main',destinationAccountId:'funding-api-investment',investmentFunding:'existing'};
- assert.equal((await post('addTransaction',payload)).status,200);
- const original=sqlite.prepare('SELECT * FROM transactions WHERE user_id=?').get(owner);
- assert.equal(original.investment_from_savings_cents,10000);
- assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='funding-api-main'").get().n,40000);
- assert.equal((await post('correctTransaction',{...payload,transactionId:original.id,investmentFunding:'mixed',existingSavingsAmount:'40'})).status,200);
- const current=sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted'").get(owner);
- assert.equal(current.investment_from_savings_cents,4000);
- assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='funding-api-main'").get().n,40000);
- assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='funding-api-investment'").get().n,10000);
- assert.equal((await post('addTransaction',{...payload,investmentFunding:'mixed',existingSavingsAmount:'101'})).status,400);
- const recurring={...payload,title:'Auto investment',nextDate:'2026-09-18',frequency:'daily',autoPost:true,committed:true};
- assert.equal((await post('addRecurring',recurring)).status,200);
- const plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE user_id=?').get(owner);assert.equal(plan.investment_from_savings_cents,10000);
- assert.equal((await post('updateRecurring',{...recurring,planId:plan.id,investmentFunding:'new'})).status,200);
- assert.equal(sqlite.prepare('SELECT investment_from_savings_cents n FROM recurring_plans WHERE id=?').get(plan.id).n,0);
- assert.equal((await post('updateRecurring',{...recurring,planId:plan.id,investmentFunding:'mixed',existingSavingsAmount:'30'})).status,200);
- assert.equal(sqlite.prepare('SELECT investment_from_savings_cents n FROM recurring_plans WHERE id=?').get(plan.id).n,3000);
 });

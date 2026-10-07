@@ -1,4 +1,4 @@
-import { includedInMode, operatingCashEffect, reportingClass, investmentFromSavings, type StatisticsMode } from "./transaction-classification.ts";
+import { includedInMode, operatingCashEffect, reportingClass, type StatisticsMode } from "./transaction-classification.ts";
 
 export type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
 
@@ -6,8 +6,6 @@ export type StatisticsRow = {
   id: string;
   account_id: string | null;
   destination_account_id: string | null;
-  source_account_type?: string | null;
-  destination_account_type?: string | null;
   category_id: string | null;
   category_name: string | null;
   category_color: string | null;
@@ -17,7 +15,6 @@ export type StatisticsRow = {
   date: string;
   committed: number;
   counts_monthly?: number;
-  investment_from_savings_cents?: number;
   recurring_plan_id: string | null;
 };
 
@@ -85,32 +82,18 @@ function round(value: number) {
   return Math.round(Number(value) || 0);
 }
 
-// Account-group cash flows exclude internal reallocations and market valuations.
-export function netSavingsEffect(row: StatisticsRow) {
-  const amount = round(row.amount_cents);
-  const source = ["savings", "investment"].includes(row.source_account_type ?? "");
-  const destination = ["savings", "investment"].includes(row.destination_account_type ?? "");
-  if (["transfer", "saving", "investment"].includes(row.type)) return amount * (Number(destination) - Number(source));
-  if (row.type === "income") return source ? amount : 0;
-  if (["expense", "fee", "installment_payment"].includes(row.type)) return source ? -amount : 0;
-  return 0;
-}
-
 function totals(rows: StatisticsRow[]) {
   let income = 0;
   let spending = 0;
   let saving = 0;
   let investment = 0;
-  let investmentFromExistingSavings = 0;
-  let netSavings = 0;
   for (const row of rows) {
     const amount = round(row.amount_cents);
     const classification = reportingClass(row.type);
-    netSavings += netSavingsEffect(row);
     if (classification === "income") income += amount;
     else if (classification === "spending") spending += amount;
     else if (classification === "saving") saving += amount;
-    else if (classification === "investment") { investment += amount; investmentFromExistingSavings += investmentFromSavings(row); }
+    else if (classification === "investment") investment += amount;
   }
   return {
     income,
@@ -118,13 +101,9 @@ function totals(rows: StatisticsRow[]) {
     netOperatingCashFlow: income - spending,
     saving,
     investment,
-    investmentFromExistingSavings,
-    newInvestment: investment - investmentFromExistingSavings,
-    savedAndInvested: saving + investment - investmentFromExistingSavings,
-    cashRemaining: income - spending - saving - investment + investmentFromExistingSavings,
-    savingsRate: income > 0 ? (saving + investment - investmentFromExistingSavings) / income * 100 : null,
-    netSavings,
-    netSavingsRate: income > 0 ? netSavings / income * 100 : null,
+    savedAndInvested: saving + investment,
+    cashRemaining: income - spending - saving - investment,
+    savingsRate: income > 0 ? (saving + investment) / income * 100 : null,
   };
 }
 
