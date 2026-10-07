@@ -141,6 +141,13 @@
       "when": 1791360222167,
       "tag": "0019_ui_language",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1791363818702,
+      "tag": "0020_investment_funding",
+      "breakpoints": true
     }
   ]
 }

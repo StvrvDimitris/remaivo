@@ -1,5 +1,21 @@
 // UI translations only; user-entered names and descriptions are not translated.
 export const greek: Record<string,string> = {
+  "Investment funding": "Προέλευση επένδυσης",
+  "New contribution": "Νέα εισφορά",
+  "Existing savings": "Υπάρχουσες αποταμιεύσεις",
+  "Part new, part existing savings": "Νέα χρήματα και υπάρχουσες αποταμιεύσεις",
+  "Amount funded from existing savings": "Ποσό από υπάρχουσες αποταμιεύσεις",
+  "Existing savings still count as investment activity, but not as new contributions or a second charge to the Plan. Choose new contribution if this money has not already been set aside.": "Οι υπάρχουσες αποταμιεύσεις καταγράφονται ως επενδυτική δραστηριότητα, αλλά όχι ως νέα εισφορά ή δεύτερη χρέωση του πλάνου. Επιλέξτε νέα εισφορά αν τα χρήματα δεν έχουν ήδη αποταμιευτεί.",
+  "New contributions": "Νέες εισφορές",
+  "Net savings": "Καθαρή αποταμίευση",
+  "of income newly allocated to savings and investments": "του εισοδήματος που διατέθηκε σε νέες αποταμιεύσεις και επενδύσεις",
+  "Income minus expenses, including expenses excluded from the Plan": "Εισόδημα μείον έξοδα, μαζί με όσα εξαιρούνται από το πλάνο",
+  "Savings contributions": "Εισφορές αποταμίευσης",
+  "Amount put into savings; not the remaining account balance": "Ποσό που αποταμιεύτηκε· δεν είναι το υπόλοιπο του λογαριασμού",
+  "Investment contributions": "Επενδυτικές εισφορές",
+  "new money": "νέα χρήματα",
+  "from existing savings": "από υπάρχουσες αποταμιεύσεις",
+
   "Protected allocations do not move money between accounts. They describe its purpose.": "Οι δεσμευμένες κατανομές δεν μεταφέρουν χρήματα μεταξύ λογαριασμών. Περιγράφουν τον σκοπό τους.",
   "A covered payment replaces the unpaid amount or consumes its bucket. It is counted once.": "Η καλυμμένη πληρωμή αντικαθιστά το απλήρωτο ποσό ή καταναλώνει τον φάκελό της. Μετρά μία φορά.",
   "Bucket spending and committed payments are covered separately. Allowance is a pacing guide; review upcoming payments and your plan for cash timing. Weeks stop at the current period boundary.": "Τα έξοδα φακέλων και οι προγραμματισμένες πληρωμές καλύπτονται ξεχωριστά. Το περιθώριο είναι οδηγός ρυθμού· ελέγξτε τις επερχόμενες πληρωμές και το πλάνο για τον χρόνο πληρωμών. Οι εβδομάδες σταματούν στο όριο της τρέχουσας περιόδου.",

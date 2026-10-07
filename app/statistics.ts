@@ -1,4 +1,4 @@
-import { includedInMode, operatingCashEffect, reportingClass, type StatisticsMode } from "./transaction-classification.ts";
+import { includedInMode, operatingCashEffect, reportingClass, investmentFromSavings, type StatisticsMode } from "./transaction-classification.ts";
 
 export type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
 
@@ -15,6 +15,7 @@ export type StatisticsRow = {
   date: string;
   committed: number;
   counts_monthly?: number;
+  investment_from_savings_cents?: number;
   recurring_plan_id: string | null;
 };
 
@@ -87,13 +88,14 @@ function totals(rows: StatisticsRow[]) {
   let spending = 0;
   let saving = 0;
   let investment = 0;
+  let investmentFromExistingSavings = 0;
   for (const row of rows) {
     const amount = round(row.amount_cents);
     const classification = reportingClass(row.type);
     if (classification === "income") income += amount;
     else if (classification === "spending") spending += amount;
     else if (classification === "saving") saving += amount;
-    else if (classification === "investment") investment += amount;
+    else if (classification === "investment") { investment += amount; investmentFromExistingSavings += investmentFromSavings(row); }
   }
   return {
     income,
@@ -101,9 +103,13 @@ function totals(rows: StatisticsRow[]) {
     netOperatingCashFlow: income - spending,
     saving,
     investment,
-    savedAndInvested: saving + investment,
-    cashRemaining: income - spending - saving - investment,
-    savingsRate: income > 0 ? (saving + investment) / income * 100 : null,
+    investmentFromExistingSavings,
+    newInvestment: investment - investmentFromExistingSavings,
+    savedAndInvested: saving + investment - investmentFromExistingSavings,
+    cashRemaining: income - spending - saving - investment + investmentFromExistingSavings,
+    savingsRate: income > 0 ? (saving + investment - investmentFromExistingSavings) / income * 100 : null,
+    netSavings: income - spending,
+    netSavingsRate: income > 0 ? (income - spending) / income * 100 : null,
   };
 }
 

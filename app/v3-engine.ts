@@ -1,10 +1,10 @@
 import { addCalendarInterval } from './finance-dates';
 
 export type MoneyAccount = { id: string; name: string; type: string; balance_cents: number; include_spendable: number; archived: number; currency: string };
-export type MoneyTransaction = { id: string; date: string; amount_cents: number; type: string; category_id: string | null; account_id: string | null; destination_account_id: string | null; counts_monthly: number; committed: number; recurring_plan_id: string | null; installment_plan_id: string | null; description: string; status?: string };
+export type MoneyTransaction = { id: string; date: string; amount_cents: number; investment_from_savings_cents?: number; type: string; category_id: string | null; account_id: string | null; destination_account_id: string | null; counts_monthly: number; committed: number; recurring_plan_id: string | null; installment_plan_id: string | null; description: string; status?: string };
 export type BudgetConfig = { name: string; target: number; period: 'monthly'|'weekly'|'fortnightly'|'payday'|'custom'; anchor: string; end: string; payday: number; allocation: 'even'|'adaptive'|'weighted'; carry: 'none'|'positive'|'signed'|'capped'; carryCap: number; weights: number[]; weekStart: number };
 export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_id: string | null; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
-export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; committed: number; auto_post: number; status: string; transaction_id: string | null };
+export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; investment_from_savings_cents?: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; committed: number; auto_post: number; status: string; transaction_id: string | null };
 export type Assignment = { transaction_id: string; bucket_id: string; amount_cents: number };
 export const plusDays = (date: string, days: number) => new Date(new Date(date+'T12:00:00Z').valueOf()+days*86400000).toISOString().slice(0,10);
 export const daysApart = (a: string,b: string) => Math.round((new Date(b+'T12:00:00Z').valueOf()-new Date(a+'T12:00:00Z').valueOf())/86400000);
@@ -58,7 +58,7 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
   const scheduledRemaining=input.occurrences.filter(o=>
     today<end&&['upcoming','partial'].includes(o.status)&&o.committed===1&&o.due_date<end&&
     ['expense','fee','installment_payment','saving','investment'].includes(o.type)
-  ).reduce((sum,o)=>sum+Math.max(0,o.amount_cents-o.paid_cents),0);
+  ).reduce((sum,o)=>sum+occurrenceBudgetRemaining(o),0);
   // `extra` is already net of bucket spending and scheduled payments in
   // buildBudget, so each remaining allowance is added only once.
   const bucketExtra=today<end?input.buckets.reduce((sum,b)=>sum+(b.released?0:Math.max(0,b.extra)),0):0;
@@ -131,12 +131,22 @@ export function splitWeighted(total:number, weights:number[]) {
   for(let i=0;i<remainder;i++)result[order[i].i]++;
   return result;
 }
-export function consumesBudget(tx:MoneyTransaction) {return (!tx.status||tx.status==='posted')&&tx.counts_monthly!==0&&['expense','installment_payment','saving','investment','fee'].includes(tx.type);}
+export function budgetAmount(tx:MoneyTransaction) {
+  if ((!tx.status || tx.status==='posted') && tx.counts_monthly!==0 && ['expense','installment_payment','saving','investment','fee'].includes(tx.type)) return Math.max(0,tx.amount_cents-(tx.type==='investment'?Math.min(tx.amount_cents,tx.investment_from_savings_cents||0):0));
+  return 0;
+}
+export function occurrenceBudgetRemaining(o:Occurrence) {
+ const saved=o.type==='investment'?Math.min(o.amount_cents,o.investment_from_savings_cents||0):0;
+ const newTotal=o.amount_cents-saved;
+ const paid=Math.min(o.paid_cents,o.amount_cents);
+ return Math.max(0,newTotal-paid+(o.amount_cents?Math.round(paid*saved/o.amount_cents):0));
+}
+export function consumesBudget(tx:MoneyTransaction) {return budgetAmount(tx)>0;}
 export function carryAmount(amount:number,config:BudgetConfig){return config.carry==='signed'?amount:config.carry==='positive'?Math.max(0,amount):config.carry==='capped'?Math.min(Math.max(0,amount),config.carryCap):0;}
 export type EngineInput = {today:string;start:string;end:string;config:BudgetConfig;funding:number;accounts:MoneyAccount[];transactions:MoneyTransaction[];buckets:Bucket[];occurrences:Occurrence[];assignments:Assignment[]};
 export function buildBudget(input:EngineInput) {
   const {today,start,end,config,funding}=input;
-  const counted=input.transactions.filter(t=>consumesBudget(t)&&t.date>=start&&t.date<end&&t.date<=today);
+  const counted=input.transactions.filter(t=>consumesBudget(t)&&t.date>=start&&t.date<end&&t.date<=today).map(t=>({...t,amount_cents:budgetAmount(t)}));
   const active=input.occurrences.filter(o=>['upcoming','partial'].includes(o.status)&&o.due_date<end&&o.type!=='income'&&o.committed===1);
   const transactionAmounts=new Map<string,number>(); const allocationByTx:Record<string,{bucket:string;amount:number}[]>={};
   const explicitByTx=new Map<string,Assignment[]>();for(const a of input.assignments)explicitByTx.set(a.transaction_id,[...(explicitByTx.get(a.transaction_id)||[]),a]);
@@ -152,7 +162,7 @@ export function buildBudget(input:EngineInput) {
   }
   const plansByBucket=new Map<string,number>();let upcoming=0;
   const occurrenceBucket:Record<string,string>={};
-  for(const o of active){const b=sorted.find(b=>b.category_id&&b.category_id===o.category_id)||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=Math.max(0,o.amount_cents-o.paid_cents);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else upcoming+=amount;}
+  for(const o of active){const b=sorted.find(b=>b.category_id&&b.category_id===o.category_id)||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=occurrenceBudgetRemaining(o);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else upcoming+=amount;}
   const buckets=sorted.map(b=>{const spent=transactionAmounts.get(b.id)||0;const planned=plansByBucket.get(b.id)||0;const extra=b.released?0:Math.max(0,b.target_cents-spent-planned);return {...b,spent,planned,extra,remaining:planned+extra,deficit:Math.max(0,spent+planned-b.target_cents),burden:spent+planned+extra};});
   const protectedRemaining=upcoming+buckets.reduce((a,b)=>a+b.remaining,0);
   const totalSpent=counted.reduce((a,b)=>a+b.amount_cents,0);

@@ -258,3 +258,28 @@ test('Partial installment records once, matches existing activity without moving
  await assert.rejects(v3.settleOccurrence(user,'installment:test-payment',base.today));
  await v3.generateOccurrences(user,base.today);assert.equal(sqlite.prepare('SELECT status FROM v3_occurrences WHERE id=?').get('installment:test-payment').status,'paid');
 });
+
+
+test('Investment reallocations affect balances but only new money consumes budget and forecasts',async()=>{
+ const owner='funding-owner';
+ sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('funding-main',?,'Main','savings',20000),('funding-vwce',?,'VWCE','investment',0)").run(owner,owner);
+ sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,destination_account_id,frequency,next_date,investment_from_savings_cents) VALUES('funding-plan',?,'Invest','investment',10001,'funding-main','funding-vwce','monthly','2026-09-17',6001)").run(owner);
+ await v3.generateOccurrences(owner,base.today);
+ const oid='recurring:funding-plan:2026-09-17';
+ const o=sqlite.prepare('SELECT * FROM v3_occurrences WHERE id=?').get(oid);
+ assert.equal(engine.occurrenceBudgetRemaining(o),4000);
+ await v3.settleOccurrence(owner,oid,base.today,3333);
+ const first=sqlite.prepare('SELECT * FROM transactions WHERE user_id=?').get(owner);
+ assert.equal(first.investment_from_savings_cents,2000);
+ await v3.settleOccurrence(owner,oid,base.today,6668);
+ const transactions=sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted'").all(owner);
+ assert.equal(transactions.reduce((s,t)=>s+t.investment_from_savings_cents,0),6001);
+ assert.equal(transactions.reduce((s,t)=>s+engine.budgetAmount(t),0),4000);
+ assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='funding-main'").get().n,9999);
+ assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='funding-vwce'").get().n,10001);
+ const result=engine.buildBudget({...base,transactions,occurrences:[]});
+ assert.equal(result.totalSpent,4000);assert.equal(result.commitmentSpent,4000);
+ const allExisting=occurrence('existing',10000,{type:'investment',investment_from_savings_cents:10000});
+ const forecast=engine.planEndForecast({start:base.start,end:base.end,today:base.today,target:100000,spent:0,transactions:[],occurrences:[allExisting],buckets:[]});
+ assert.equal(forecast.scheduledRemaining,0);
+});

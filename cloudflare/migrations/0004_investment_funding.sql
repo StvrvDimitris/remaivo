@@ -1,0 +1,3 @@
+ALTER TABLE transactions ADD COLUMN investment_from_savings_cents INTEGER NOT NULL DEFAULT 0 CHECK (investment_from_savings_cents >= 0 AND investment_from_savings_cents <= amount_cents AND (type = 'investment' OR investment_from_savings_cents = 0));
+ALTER TABLE recurring_plans ADD COLUMN investment_from_savings_cents INTEGER NOT NULL DEFAULT 0 CHECK (investment_from_savings_cents >= 0 AND investment_from_savings_cents <= amount_cents AND (type = 'investment' OR investment_from_savings_cents = 0));
+ALTER TABLE v3_occurrences ADD COLUMN investment_from_savings_cents INTEGER NOT NULL DEFAULT 0 CHECK (investment_from_savings_cents >= 0 AND investment_from_savings_cents <= amount_cents AND (type = 'investment' OR investment_from_savings_cents = 0));
