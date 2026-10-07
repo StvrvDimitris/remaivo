@@ -82,6 +82,7 @@ export const transactions = sqliteTable("transactions", {
 ]);
 
 export const recurringPlans = sqliteTable("recurring_plans", {
+  countsMonthly: integer("counts_monthly", {mode:"boolean"}).notNull().default(true),
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
   title: text("title").notNull(),

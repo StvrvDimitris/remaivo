@@ -317,3 +317,18 @@ test('Language settings persist per owner and reject unsupported values', async 
   assert.equal((await post('updateLanguage',{language:'xx'})).status,400);
   assert.equal((await post('updateLanguage',{language:'en'})).status,200);
 });
+
+
+test('Recurring budget exclusion saves independently of protection and automation, and can be changed',async()=>{
+ const owner='recurring-budget-api';globalThis.__spareTestUser=owner;
+ sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
+ for(const [id,type] of [['recurring-budget-source','bank'],['recurring-budget-destination','savings']])sqlite.prepare('INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,?)').run(id,owner,id,type);
+ const payload={type:'saving',title:'Savings',amount:'100',nextDate:'2026-09-18',frequency:'monthly',accountId:'recurring-budget-source',destinationAccountId:'recurring-budget-destination',autoPost:true,committed:true,excludeFromBudget:true};
+ let response=await post('addRecurring',payload);assert.equal(response.status,200,JSON.stringify(await response.json()));
+ const plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE user_id=?').get(owner);assert.equal(plan.counts_monthly,0);assert.equal(plan.committed,1);assert.equal(plan.auto_post,1);
+ response=await post('updateRecurring',{...payload,planId:plan.id,excludeFromBudget:false});assert.equal(response.status,200,JSON.stringify(await response.json()));
+ assert.equal(sqlite.prepare('SELECT counts_monthly n FROM recurring_plans WHERE id=?').get(plan.id).n,1);
+ const legacy={...payload,title:'Included by default'};delete legacy.excludeFromBudget;
+ assert.equal((await post('addRecurring',legacy)).status,200);
+ assert.equal(sqlite.prepare("SELECT counts_monthly n FROM recurring_plans WHERE user_id=? AND title='Included by default'").get(owner).n,1);
+});

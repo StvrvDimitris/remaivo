@@ -258,3 +258,24 @@ test('Partial installment records once, matches existing activity without moving
  await assert.rejects(v3.settleOccurrence(user,'installment:test-payment',base.today));
  await v3.generateOccurrences(user,base.today);assert.equal(sqlite.prepare('SELECT status FROM v3_occurrences WHERE id=?').get('installment:test-payment').status,'paid');
 });
+
+
+test('Excluded recurring payments do not reserve or consume budget but still post and move balances',async()=>{
+ const owner='recurring-excluded-owner';
+ for(const [id,type,balance] of [['recurring-excluded-main','bank',20000],['recurring-excluded-vwce','investment',0]])sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id,owner,id,type,balance);
+ sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,destination_account_id,frequency,next_date,counts_monthly,auto_post) VALUES('recurring-excluded-plan',?,'Invest','investment',10000,'recurring-excluded-main','recurring-excluded-vwce','monthly','2026-09-17',0,1)").run(owner);
+ await v3.generateOccurrences(owner,base.today);
+ const oid='recurring:recurring-excluded-plan:2026-09-17';
+ const o=sqlite.prepare('SELECT * FROM v3_occurrences WHERE id=?').get(oid);assert.equal(o.counts_monthly,0);
+ assert.equal(engine.buildBudget({...base,occurrences:[o]}).protectedRemaining,0);
+ assert.equal(engine.planEndForecast({start:base.start,end:base.end,today:base.today,target:100000,spent:0,transactions:[],occurrences:[o],buckets:[]}).scheduledRemaining,0);
+ await v3.reconcileV3(owner,base.today);
+ const txs=sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted'").all(owner);
+ assert.equal(txs.length,1);assert.equal(txs[0].counts_monthly,0);assert.equal(txs[0].amount_cents,10000);
+ assert.equal(engine.buildBudget({...base,transactions:txs}).totalSpent,0);
+ assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='recurring-excluded-main'").get().n,10000);
+ assert.equal(sqlite.prepare("SELECT balance_cents n FROM accounts WHERE id='recurring-excluded-vwce'").get().n,10000);
+ sqlite.prepare("UPDATE recurring_plans SET counts_monthly=1 WHERE id='recurring-excluded-plan'").run();await v3.generateOccurrences(owner,base.today);
+ assert.equal(sqlite.prepare('SELECT counts_monthly n FROM v3_occurrences WHERE id=?').get(oid).n,0);
+ assert.equal(sqlite.prepare("SELECT counts_monthly n FROM v3_occurrences WHERE source_id='recurring-excluded-plan' AND scheduled_date>'2026-09-17' ORDER BY scheduled_date LIMIT 1").get().n,1);
+});

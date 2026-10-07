@@ -1,5 +1,6 @@
 // UI translations only; user-entered names and descriptions are not translated.
 export const greek: Record<string,string> = {
+  "Changes apply to future unpaid occurrences. Already posted transactions keep their budget setting.": "Οι αλλαγές ισχύουν για μελλοντικές πληρωμές χωρίς καταγεγραμμένο ποσό. Οι ήδη καταγεγραμμένες κινήσεις διατηρούν τη ρύθμιση προϋπολογισμού τους.",
   "Protected allocations do not move money between accounts. They describe its purpose.": "Οι δεσμευμένες κατανομές δεν μεταφέρουν χρήματα μεταξύ λογαριασμών. Περιγράφουν τον σκοπό τους.",
   "A covered payment replaces the unpaid amount or consumes its bucket. It is counted once.": "Η καλυμμένη πληρωμή αντικαθιστά το απλήρωτο ποσό ή καταναλώνει τον φάκελό της. Μετρά μία φορά.",
   "Bucket spending and committed payments are covered separately. Allowance is a pacing guide; review upcoming payments and your plan for cash timing. Weeks stop at the current period boundary.": "Τα έξοδα φακέλων και οι προγραμματισμένες πληρωμές καλύπτονται ξεχωριστά. Το περιθώριο είναι οδηγός ρυθμού· ελέγξτε τις επερχόμενες πληρωμές και το πλάνο για τον χρόνο πληρωμών. Οι εβδομάδες σταματούν στο όριο της τρέχουσας περιόδου.",

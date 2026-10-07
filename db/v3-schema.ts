@@ -58,6 +58,7 @@ export const v3_assignments=sqliteTable('v3_assignments',{
 },t=>[uniqueIndex('v3_assignments_user_id_transaction_id_bucket_id_unique').on(t.user_id,t.transaction_id,t.bucket_id)]);
 
 export const v3_occurrences=sqliteTable('v3_occurrences',{
+ counts_monthly: integer('counts_monthly').notNull().default(1),
  id: text('id').primaryKey(),
  user_id: text('user_id').notNull(),
  source_kind: text('source_kind').notNull(),

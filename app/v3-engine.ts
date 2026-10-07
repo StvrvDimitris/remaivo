@@ -4,7 +4,7 @@ export type MoneyAccount = { id: string; name: string; type: string; balance_cen
 export type MoneyTransaction = { id: string; date: string; amount_cents: number; type: string; category_id: string | null; account_id: string | null; destination_account_id: string | null; counts_monthly: number; committed: number; recurring_plan_id: string | null; installment_plan_id: string | null; description: string; status?: string };
 export type BudgetConfig = { name: string; target: number; period: 'monthly'|'weekly'|'fortnightly'|'payday'|'custom'; anchor: string; end: string; payday: number; allocation: 'even'|'adaptive'|'weighted'; carry: 'none'|'positive'|'signed'|'capped'; carryCap: number; weights: number[]; weekStart: number };
 export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_id: string | null; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
-export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; committed: number; auto_post: number; status: string; transaction_id: string | null };
+export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; counts_monthly?: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; committed: number; auto_post: number; status: string; transaction_id: string | null };
 export type Assignment = { transaction_id: string; bucket_id: string; amount_cents: number };
 export const plusDays = (date: string, days: number) => new Date(new Date(date+'T12:00:00Z').valueOf()+days*86400000).toISOString().slice(0,10);
 export const daysApart = (a: string,b: string) => Math.round((new Date(b+'T12:00:00Z').valueOf()-new Date(a+'T12:00:00Z').valueOf())/86400000);
@@ -56,7 +56,7 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
   // Open installments and recurring payments are represented by their unpaid
   // remainder. Their linked, already-posted installments are in `spent`.
   const scheduledRemaining=input.occurrences.filter(o=>
-    today<end&&['upcoming','partial'].includes(o.status)&&o.committed===1&&o.due_date<end&&
+    today<end&&['upcoming','partial'].includes(o.status)&&o.committed===1&&o.counts_monthly!==0&&o.due_date<end&&
     ['expense','fee','installment_payment','saving','investment'].includes(o.type)
   ).reduce((sum,o)=>sum+Math.max(0,o.amount_cents-o.paid_cents),0);
   // `extra` is already net of bucket spending and scheduled payments in
@@ -137,7 +137,7 @@ export type EngineInput = {today:string;start:string;end:string;config:BudgetCon
 export function buildBudget(input:EngineInput) {
   const {today,start,end,config,funding}=input;
   const counted=input.transactions.filter(t=>consumesBudget(t)&&t.date>=start&&t.date<end&&t.date<=today);
-  const active=input.occurrences.filter(o=>['upcoming','partial'].includes(o.status)&&o.due_date<end&&o.type!=='income'&&o.committed===1);
+  const active=input.occurrences.filter(o=>['upcoming','partial'].includes(o.status)&&o.due_date<end&&o.type!=='income'&&o.committed===1&&o.counts_monthly!==0);
   const transactionAmounts=new Map<string,number>(); const allocationByTx:Record<string,{bucket:string;amount:number}[]>={};
   const explicitByTx=new Map<string,Assignment[]>();for(const a of input.assignments)explicitByTx.set(a.transaction_id,[...(explicitByTx.get(a.transaction_id)||[]),a]);
   const sorted=[...input.buckets].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
