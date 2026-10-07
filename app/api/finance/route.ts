@@ -216,7 +216,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
   const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
   const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
   const comparison = (["previousEquivalent", "previousMonth", "previousYear", "none"].includes(text(params.get("comparison"))) ? text(params.get("comparison")) : "previousMonth") as ComparisonMode;
-  const mode = (["spending", "income", "cashflow"].includes(text(params.get("mode"))) ? text(params.get("mode")) : "spending") as StatisticsMode;
+  const mode = (["spending", "income"].includes(text(params.get("mode"))) ? text(params.get("mode")) : "spending") as StatisticsMode;
   const comparisonDates = comparisonRange(from, to, comparison);
   const filters: StatisticsFilters = {
     from,
