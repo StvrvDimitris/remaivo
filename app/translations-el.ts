@@ -393,7 +393,7 @@ export const greek: Record<string,string> = {
   "before your records start": "πριν ξεκινήσουν οι καταχωρίσεις σας",
   "records start": "οι καταχωρίσεις ξεκινούν",
   "Choose more than one day to compare weekdays.": "Επιλέξτε περισσότερες από μία ημέρες για σύγκριση ημερών της εβδομάδας.",
-  "Choose at least four weeks to compare parts of the month.": "Επιλέξτε τουλάχιστον τέσσερις εβδομάδες για σύγκριση τμημάτων του μήνα.",
+  "Choose a month or longer to compare parts of the month.": "Επιλέξτε έναν μήνα ή μεγαλύτερο διάστημα για σύγκριση τμημάτων του μήνα.",
   "Accounts added": "Νέοι λογαριασμοί",
   "Accounts report": "Αναφορά λογαριασμών",
   "Added this period": "Προστέθηκαν αυτή την περίοδο",
