@@ -13,6 +13,9 @@ function money(cents: number, currency: string, locale: string, signed = false) 
   return cents < 0 ? `−${formatted}` : signed && cents > 0 ? `+${formatted}` : formatted;
 }
 const percent = (value: number | null) => value === null ? "—" : `${value.toFixed(1)}%`;
+// Colour only outcomes that are good or bad; direction alone is shown by the sign.
+const tone = (cents: number) => cents > 0 ? "stat-positive" : cents < 0 ? "stat-negative" : undefined;
+const owed = (cents: number) => cents < 0 ? "stat-negative" : undefined;
 
 function shiftPeriod(key: string, step: number) {
   if (key.length === 4) return String(Number(key) + step);
@@ -35,7 +38,7 @@ function AccountRow({ row, currency, locale }: { row: AccountsReportAccount; cur
       <span data-label={tr("Start")}>{money(row.start, currency, locale)}</span>
       <span data-label={tr("In")}>{row.in.total ? money(row.in.total, currency, locale, true) : "—"}</span>
       <span data-label={tr("Out")}>{row.out.total ? money(-row.out.total, currency, locale) : "—"}</span>
-      <b data-label={tr("End")}>{money(row.end, currency, locale)}</b>
+      <b data-label={tr("End")} className={owed(row.end)}>{money(row.end, currency, locale)}</b>
     </button>
     {open && <div className="report-breakdown">{details.map(([key, label]) => <div key={key}><span>{tr(label)}</span><span>{row.in[key] ? money(row.in[key], currency, locale, true) : ""}</span><span>{row.out[key] ? money(-row.out[key], currency, locale) : ""}</span></div>)}</div>}
   </>;
@@ -91,8 +94,8 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
     {loading && !report && <section className="page-card stat-loading">{tr("Adding up your accounts…")}</section>}
     {report && <div className={loading ? "statistics-results is-loading" : "statistics-results"}>
       <section className="stat-summary-grid report-summary">
-        <article><p>{tr("Net worth")}</p><strong>{money(report.netWorth.end, currency, locale)}</strong><small><b className={report.netWorth.change >= 0 ? "stat-positive" : "stat-negative"}>{money(report.netWorth.change, currency, locale, true)}</b>  {tr(report.period.partial ? "so far this period" : "this period")}</small></article>
-        <article><p>{tr("Saved")}</p><strong>{money(report.bridge.saved, currency, locale)}</strong><small>{percent(report.rates.savedPercent)}  {tr("of income · income minus spending")}</small></article>
+        <article><p>{tr("Net worth")}</p><strong>{money(report.netWorth.end, currency, locale)}</strong><small><b className={tone(report.netWorth.change)}>{money(report.netWorth.change, currency, locale, true)}</b>  {tr(report.period.partial ? "so far this period" : "this period")}</small></article>
+        <article><p>{tr("Saved")}</p><strong className={tone(report.bridge.saved)}>{money(report.bridge.saved, currency, locale)}</strong><small>{percent(report.rates.savedPercent)}  {tr("of income · income minus spending")}</small></article>
         <article><p>{tr("Invested")}</p><strong>{money(report.rates.invested, currency, locale)}</strong><small>{percent(report.rates.investedPercent)}  {tr("of income · moved into investment accounts")}</small></article>
       </section>
 
@@ -101,10 +104,10 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
         <div className="report-bridge">
           <div><span>{tr("Income")}</span><b>{money(report.bridge.income, currency, locale, true)}</b></div>
           <div><span>{tr("Spending")}</span><b>{money(-report.bridge.spending, currency, locale)}</b></div>
-          <div className="subtotal"><span>{tr("Saved")}</span><b>{money(report.bridge.saved, currency, locale, true)}</b></div>
+          <div className="subtotal"><span>{tr("Saved")}</span><b className={tone(report.bridge.saved)}>{money(report.bridge.saved, currency, locale, true)}</b></div>
           {report.bridge.accountsAdded !== 0 && <div><span>{tr("Accounts added")}</span><b>{money(report.bridge.accountsAdded, currency, locale, true)}</b></div>}
           {report.bridge.adjustments !== 0 && <div><span>{tr("Balance adjustments")}</span><b>{money(report.bridge.adjustments, currency, locale, true)}</b></div>}
-          <div className="total"><span>{tr("Change in net worth")}</span><b>{money(report.netWorth.change, currency, locale, true)}</b></div>
+          <div className="total"><span>{tr("Change in net worth")}</span><b className={tone(report.netWorth.change)}>{money(report.netWorth.change, currency, locale, true)}</b></div>
         </div>
         <p className="report-note">{tr("Transfers between your own accounts move money without changing net worth, so they never appear here. Investments are counted at the amount you put in; market value is shown separately below.")}</p>
       </section>
@@ -114,10 +117,10 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
         <div className="report-table">
           <div className="report-row report-labels"><span>{tr("Account")}</span><span>{tr("Start")}</span><span>{tr("In")}</span><span>{tr("Out")}</span><span>{tr("End")}</span></div>
           {report.groups.map(group => <div key={group.id} className="report-group">
-            <div className="report-row report-group-row"><span>{tr(groupLabels[group.id])}</span><span data-label={tr("Start")}>{money(group.start, currency, locale)}</span><span data-label={tr("In")}>{group.in ? money(group.in, currency, locale, true) : "—"}</span><span data-label={tr("Out")}>{group.out ? money(-group.out, currency, locale) : "—"}</span><b data-label={tr("End")}>{money(group.end, currency, locale)}</b></div>
+            <div className="report-row report-group-row"><span>{tr(groupLabels[group.id])}</span><span data-label={tr("Start")}>{money(group.start, currency, locale)}</span><span data-label={tr("In")}>{group.in ? money(group.in, currency, locale, true) : "—"}</span><span data-label={tr("Out")}>{group.out ? money(-group.out, currency, locale) : "—"}</span><b data-label={tr("End")} className={owed(group.end)}>{money(group.end, currency, locale)}</b></div>
             {group.accounts.map(row => <AccountRow key={row.id} row={row} currency={currency} locale={locale} />)}
           </div>)}
-          <div className="report-row report-total-row"><span>{tr("Net worth")}</span><span data-label={tr("Start")}>{money(report.netWorth.start, currency, locale)}</span><span /><span /><b data-label={tr("End")}>{money(report.netWorth.end, currency, locale)}</b></div>
+          <div className="report-row report-total-row"><span>{tr("Net worth")}</span><span data-label={tr("Start")}>{money(report.netWorth.start, currency, locale)}</span><span /><span /><b data-label={tr("End")} className={owed(report.netWorth.end)}>{money(report.netWorth.end, currency, locale)}</b></div>
         </div>
         <p className="report-note">{tr("Select an account to split its money in and out by kind.")}</p>
       </section>
