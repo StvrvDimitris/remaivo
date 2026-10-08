@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { getUser, usesGoogleAuth } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
-import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsFilters, type StatisticsRow } from "../../statistics";
+import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow } from "../../statistics";
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
@@ -244,9 +244,11 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
   const requestedTo = calendarDate(params.get("to"));
   const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
   const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
-  const comparison = (["previousEquivalent", "previousMonth", "previousYear", "none"].includes(text(params.get("comparison"))) ? text(params.get("comparison")) : "previousMonth") as ComparisonMode;
+  const period = (["today", "week", "month", "year", "last7", "last30", "custom"].includes(text(params.get("period"))) ? text(params.get("period")) : "custom") as ComparisonPeriod;
+  const requestedComparison = (["previousEquivalent", "previousMonth", "previousYear", "none"].includes(text(params.get("comparison"))) ? text(params.get("comparison")) : "previousEquivalent") as ComparisonMode;
+  const comparison = effectiveComparison(requestedComparison, period, from, to);
   const mode = (["spending", "income"].includes(text(params.get("mode"))) ? text(params.get("mode")) : "spending") as StatisticsMode;
-  const comparisonDates = comparisonRange(from, to, comparison);
+  const comparisonDates = comparisonRange(from, to, comparison, period);
   const filters: StatisticsFilters = {
     from,
     to,
@@ -285,16 +287,20 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
   };
 
-  const [currentRows, comparisonRows] = await env.DB.batch([
+  const [currentRows, comparisonRows, firstRows] = await env.DB.batch([
     prepareRows(from, to),
     comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color FROM transactions t WHERE 0"),
+    env.DB.prepare("SELECT MIN(date) AS date FROM transactions WHERE user_id = ? AND status = 'posted'").bind(user.userId),
   ]);
-  return buildStatistics({
+  // A comparison period before tracking began has no records, so its changes would be meaningless.
+  const trackingStart = (firstRows.results[0] as { date: string | null } | undefined)?.date ?? null;
+  const comparisonCoverage = !comparisonDates ? null : !trackingStart || comparisonDates.to < trackingStart ? "none" : comparisonDates.from < trackingStart ? "partial" : "full";
+  return { trackingStart, comparisonCoverage, ...buildStatistics({
     rows: currentRows.results as StatisticsRow[],
     comparisonRows: comparisonRows.results as StatisticsRow[],
     filters,
     currency: String(profile.currency || "EUR"),
-  });
+  }) };
 }
 
 function balanceStatements(userId: string, transaction: Record<string, unknown>, direction: 1 | -1, guard?: { id: string; status: string }) {

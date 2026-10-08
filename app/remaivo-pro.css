@@ -485,6 +485,7 @@ html[data-theme="midnight"] {
 .v3-app .statistics-page .statistics-controls { padding:12px 20px; border-color:var(--theme-line); align-items:center; flex-direction:row; flex-wrap:wrap; }
 .v3-app .statistics-page .statistics-controls > label { display:flex; align-items:center; gap:10px; min-width:0; text-transform:none; font-size:13px; font-weight:400; }
 .v3-app .statistics-page .statistics-controls select { width:auto; min-height:36px; max-width:100%; font-size:13px; }
+.v3-app .statistics-page .comparison-range { font-size:12px; font-weight:500; color:var(--theme-muted); }
 .v3-app .statistics-page :is(.quick-filters,.mode-switch,.mini-toggle) { padding:2px; gap:2px; background:var(--theme-soft); border-radius:8px; }
 .v3-app .statistics-page :is(.quick-filters,.mode-switch,.mini-toggle) button { min-height:30px; padding:0 11px; border-radius:6px; font-size:12.5px; font-weight:500; white-space:nowrap; }
 .v3-app .statistics-page button:focus-visible { outline:2px solid var(--theme-focus); outline-offset:3px; }

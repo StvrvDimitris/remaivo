@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildStatistics, comparisonRange, shiftCalendarMonth, shiftCalendarYear } from "../app/statistics.ts";
+import { buildStatistics, comparisonOptions, comparisonRange, effectiveComparison, shiftCalendarMonth, shiftCalendarYear } from "../app/statistics.ts";
 import { reportingClass } from "../app/transaction-classification.ts";
 
 test("canonical reporting classes prevent installment and transfer double counting", () => {
@@ -17,6 +17,31 @@ test("comparison ranges use inclusive equal periods and clamped calendar shifts"
   assert.deepEqual(comparisonRange("2026-07-25", "2026-08-10", "previousMonth"), { from: "2026-06-25", to: "2026-07-10" });
   assert.equal(shiftCalendarMonth("2026-03-31", -1), "2026-02-28");
   assert.equal(shiftCalendarYear("2028-02-29", -1), "2027-02-28");
+});
+
+test("comparisons follow the selected range and never overlap it", () => {
+  // "Previous" means the same days so far in the previous day, week, month or year.
+  assert.deepEqual(comparisonRange("2026-10-08", "2026-10-08", "previousEquivalent", "today"), { from: "2026-10-07", to: "2026-10-07" });
+  assert.deepEqual(comparisonRange("2026-10-05", "2026-10-08", "previousEquivalent", "week"), { from: "2026-09-28", to: "2026-10-01" });
+  assert.deepEqual(comparisonRange("2026-10-01", "2026-10-08", "previousEquivalent", "month"), { from: "2026-09-01", to: "2026-09-08" });
+  assert.deepEqual(comparisonRange("2026-01-01", "2026-10-08", "previousEquivalent", "year"), { from: "2025-01-01", to: "2025-10-08" });
+  assert.deepEqual(comparisonRange("2026-09-09", "2026-10-08", "previousEquivalent", "last30"), { from: "2026-08-10", to: "2026-09-08" });
+  // A year compared with "the same dates last month" would mostly compare the year with itself.
+  assert.deepEqual(comparisonOptions("year", "2026-01-01", "2026-10-08"), ["previousEquivalent"]);
+  assert.equal(effectiveComparison("previousMonth", "year", "2026-01-01", "2026-10-08"), "previousEquivalent");
+  assert.deepEqual(comparisonRange("2026-01-01", "2026-10-08", "previousMonth", "year"), { from: "2025-01-01", to: "2025-10-08" });
+  assert.deepEqual(comparisonOptions("month", "2026-10-01", "2026-10-08"), ["previousEquivalent", "previousYear"]);
+  // Custom ranges only offer shifts that land wholly before the range.
+  assert.deepEqual(comparisonOptions("custom", "2026-01-01", "2026-06-30"), ["previousEquivalent", "previousYear"]);
+  assert.deepEqual(comparisonOptions("custom", "2025-01-01", "2026-06-30"), ["previousEquivalent"]);
+  assert.deepEqual(comparisonOptions("custom", "2026-09-01", "2026-09-20"), ["previousEquivalent", "previousMonth", "previousYear"]);
+  for (const period of ["today", "week", "month", "year", "last7", "last30", "custom"]) {
+    for (const mode of ["previousEquivalent", "previousMonth", "previousYear"]) {
+      const range = comparisonRange("2026-01-01", "2026-10-08", mode, period);
+      assert.ok(range.to < "2026-01-01", `${period}/${mode}`);
+    }
+  }
+  assert.equal(comparisonRange("2026-10-01", "2026-10-08", "none", "month"), null);
 });
 
 test("statistics separate spending, contributions, cash flow, and market-neutral allocations", () => {

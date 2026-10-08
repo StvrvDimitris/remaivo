@@ -68,14 +68,37 @@ export function shiftCalendarYear(value: string, years: number) {
   return dateKey(target);
 }
 
-export function comparisonRange(from: string, to: string, comparison: ComparisonMode) {
+export type ComparisonPeriod = "today" | "week" | "month" | "year" | "last7" | "last30" | "custom";
+type ShiftMode = Exclude<ComparisonMode, "none">;
+
+function shiftedRange(from: string, to: string, mode: ShiftMode, period: ComparisonPeriod) {
+  if (mode === "previousMonth") return { from: shiftCalendarMonth(from, -1), to: shiftCalendarMonth(to, -1) };
+  if (mode === "previousYear") return { from: shiftCalendarYear(from, -1), to: shiftCalendarYear(to, -1) };
+  // "Previous" follows the range: the day, week, month or year before, covering the same days so far.
+  if (period === "today") return { from: addCalendarDays(from, -1), to: addCalendarDays(to, -1) };
+  if (period === "week") return { from: addCalendarDays(from, -7), to: addCalendarDays(to, -7) };
+  if (period === "month") return { from: shiftCalendarMonth(from, -1), to: shiftCalendarMonth(to, -1) };
+  if (period === "year") return { from: shiftCalendarYear(from, -1), to: shiftCalendarYear(to, -1) };
+  const comparisonTo = addCalendarDays(from, -1);
+  return { from: addCalendarDays(comparisonTo, -(inclusiveDayCount(from, to) - 1)), to: comparisonTo };
+}
+
+// Comparisons that are distinct for this range and never overlap it.
+export function comparisonOptions(period: ComparisonPeriod, from: string, to: string): ShiftMode[] {
+  const candidates: ShiftMode[] = period === "year" ? ["previousEquivalent"] : period === "custom" ? ["previousEquivalent", "previousMonth", "previousYear"] : ["previousEquivalent", "previousYear"];
+  return candidates.filter((mode) => shiftedRange(from, to, mode, period).to < from);
+}
+
+export function effectiveComparison(comparison: ComparisonMode, period: ComparisonPeriod, from: string, to: string): ComparisonMode {
+  if (comparison === "none") return "none";
+  return comparisonOptions(period, from, to).includes(comparison) ? comparison : "previousEquivalent";
+}
+
+export function comparisonRange(from: string, to: string, comparison: ComparisonMode, period: ComparisonPeriod = "custom") {
   if (comparison === "none") return null;
-  if (comparison === "previousEquivalent") {
-    const comparisonTo = addCalendarDays(from, -1);
-    return { from: addCalendarDays(comparisonTo, -(inclusiveDayCount(from, to) - 1)), to: comparisonTo };
-  }
-  if (comparison === "previousMonth") return { from: shiftCalendarMonth(from, -1), to: shiftCalendarMonth(to, -1) };
-  return { from: shiftCalendarYear(from, -1), to: shiftCalendarYear(to, -1) };
+  const mode = effectiveComparison(comparison, period, from, to);
+  // An equal-length period immediately before always fits, even if the range and its label disagree.
+  return mode === "none" || !comparisonOptions(period, from, to).includes(mode as ShiftMode) ? shiftedRange(from, to, "previousEquivalent", "custom") : shiftedRange(from, to, mode, period);
 }
 
 function round(value: number) {
