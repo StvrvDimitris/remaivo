@@ -4,7 +4,8 @@ import type { BudgetConfig } from "../app/v3-engine";
 import { ensureFinanceSchema } from "./ensure";
 
 type SetupAccount = { name?: unknown; type?: unknown; balance?: unknown; creditLimit?: unknown; color?: unknown; includeSpendable?: unknown };
-type SetupPayload = { language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
+type SetupPlan = { target?: unknown; period?: unknown; payday?: unknown; anchor?: unknown; allocation?: unknown; carry?: unknown; carryCap?: unknown; weights?: unknown };
+type SetupPayload = { language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; plan?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
 
 const categories = [
   ["Groceries", "expense", "#d8ead7"],
@@ -18,11 +19,52 @@ const categories = [
   ["Other income", "income", "#d9e9ec"],
 ] as const;
 
+// Balances may be negative: an overdrawn account, or a credit card that is in your favour.
+function signedMoneyCents(value: unknown) {
+  const number = Number(value);
+  const amount = Math.round(number * 100);
+  if (!Number.isFinite(number) || !Number.isSafeInteger(amount)) throw new Error("Enter a valid balance.");
+  return amount;
+}
+
 function moneyCents(value: unknown) {
   const number = Number(value);
   const amount = Math.round(number * 100);
   if (!Number.isFinite(number) || !Number.isSafeInteger(amount) || amount < 0) throw new Error("Enter a valid nonnegative amount.");
   return amount;
+}
+
+const defaultWeights = [1, 1, 1, 1, 1, 1.4, 1.4];
+const validDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+
+function setupConfig(payload: SetupPayload, weekStart: number, today: string, monthStart: string): BudgetConfig {
+  const base = { name: "Main plan", anchor: monthStart, end: addCalendarInterval(monthStart, "monthly"), payday: 1, carryCap: 0, weights: defaultWeights, weekStart };
+  if (!payload.plan || typeof payload.plan !== "object") {
+    // Earlier clients sent a monthly amount with adaptive or fixed pacing.
+    const budget = (payload.budgets || {}) as { monthly?: unknown };
+    const allocation = payload.budgetMode === "fixed_split" ? "even" : "adaptive";
+    const carry: BudgetConfig["carry"] = allocation === "adaptive" ? "none" : payload.carryMode === "stack_unused" ? "positive" : payload.carryMode === "stack_signed" ? "signed" : "none";
+    return { ...base, target: moneyCents(budget.monthly ?? 0), period: "monthly", allocation, carry };
+  }
+  const plan = payload.plan as SetupPlan;
+  const period = String(plan.period || "monthly");
+  if (!["monthly", "payday", "weekly", "fortnightly"].includes(period)) throw new Error("Choose a supported budget period.");
+  const allocation = String(plan.allocation || "adaptive");
+  if (!["adaptive", "even", "weighted"].includes(allocation)) throw new Error("Choose a supported pacing.");
+  const carry = allocation === "adaptive" ? "none" : String(plan.carry || "none");
+  if (!["none", "positive", "signed", "capped"].includes(carry)) throw new Error("Choose a supported carry setting.");
+  const weights = Array.isArray(plan.weights) && plan.weights.length === 7 ? plan.weights.map((weight) => Math.max(0.1, Math.min(10, Number(weight) || 1))) : defaultWeights;
+  return {
+    ...base,
+    target: moneyCents(plan.target ?? 0),
+    period: period as BudgetConfig["period"],
+    anchor: ["weekly", "fortnightly"].includes(period) ? (validDate(plan.anchor) && String(plan.anchor) <= today ? String(plan.anchor) : today) : monthStart,
+    payday: Math.max(1, Math.min(31, Math.round(Number(plan.payday) || 1))),
+    allocation: allocation as BudgetConfig["allocation"],
+    carry: carry as BudgetConfig["carry"],
+    carryCap: carry === "capped" ? moneyCents(plan.carryCap ?? 0) : 0,
+    weights,
+  };
 }
 
 export async function createCurrentPlan(userId: string, payload: SetupPayload) {
@@ -38,14 +80,10 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
   const rawAccounts = payload.accounts;
   if (!Array.isArray(rawAccounts) || rawAccounts.length < 1 || rawAccounts.length > 30) throw new Error("Add between 1 and 30 accounts.");
   const accounts = rawAccounts as SetupAccount[];
-  const budget = (payload.budgets || {}) as { monthly?: unknown };
-  const target = moneyCents(budget.monthly ?? 0);
-  const allocation = payload.budgetMode === "fixed_split" ? "even" : "adaptive";
-  const carry: BudgetConfig["carry"] = allocation === "adaptive" ? "none" : payload.carryMode === "stack_unused" ? "positive" : payload.carryMode === "stack_signed" ? "signed" : "none";
   const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
   const today = financialToday(timezone);
   const monthStart = `${today.slice(0, 7)}-01`;
-  const config: BudgetConfig = { name: "Main plan", target, period: "monthly", anchor: monthStart, end: addCalendarInterval(monthStart, "monthly"), payday: 1, allocation, carry, carryCap: 0, weights: [1, 1, 1, 1, 1, 1.4, 1.4], weekStart };
+  const config = setupConfig(payload, weekStart, today, monthStart);
 
   const open = "EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND setup_complete = 0)";
   const statements: D1PreparedStatement[] = [
@@ -58,7 +96,8 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
     if (!["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].includes(type)) throw new Error("Choose a valid account type.");
     const name = String(input.name || "").trim().slice(0, 120);
     if (!name) throw new Error("Give each account a name.");
-    const balance = moneyCents(input.balance || 0) * (type === "credit" ? -1 : 1);
+    // Credit cards are entered as the amount owed.
+    const balance = signedMoneyCents(input.balance || 0) * (type === "credit" ? -1 : 1);
     const creditLimit = input.creditLimit ? moneyCents(input.creditLimit) : null;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(input.color)) ? String(input.color) : "#1f5b4e";
     const spendable = typeof input.includeSpendable === "boolean" ? input.includeSpendable : !["savings", "investment", "credit"].includes(type);

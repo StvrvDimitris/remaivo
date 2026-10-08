@@ -492,6 +492,9 @@ button { color: inherit; }
 .setup-panel h2 { margin: 8px 0 12px; font-size: clamp(29px, 3vw, 42px); letter-spacing: -.05em; }
 .setup-panel > p:not(.eyebrow) { max-width: 600px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .setup-form { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.setup-weights { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.setup-panel > .setup-note { margin-top: 16px; }
+@media (max-width: 640px) { .setup-weights { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .setup-note { grid-column: 1 / -1; padding: 15px; border-radius: 11px; display: flex; gap: 10px; background: #e7efe4; }
 .setup-note > span { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--green); color: #fff; font-size: 9px; }
 .setup-note p { margin: 0; display: grid; gap: 3px; }

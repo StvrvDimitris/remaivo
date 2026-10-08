@@ -28,6 +28,12 @@ async function currentUser(): Promise<FinanceUser | null> {
   return null;
 }
 
+// Account balances may be negative (an overdraft, or a credit card in your favour).
+function signedCents(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.round(number * 100) : 0;
+}
+
 function cents(value: unknown) {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) return 0;
@@ -485,9 +491,9 @@ export async function POST(request: Request) {
     } else if (action === "setup") {
       await createCurrentPlan(user.userId, payload);
     } else if (action === "addAccount") {
-      const amount = cents(payload.balance);
       const type = text(payload.type, "bank");
-      const signedAmount = type === "credit" ? -amount : amount;
+      // Credit cards are entered as the amount owed.
+      const signedAmount = signedCents(payload.balance) * (type === "credit" ? -1 : 1);
       const accountId = crypto.randomUUID();
       const statements = [env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(accountId, user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId)];
       if (signedAmount) statements.push(ledgerEntry(user.userId, `opening:${accountId}`, "opening_balance", accountId, signedAmount, actionToday, "Opening balance"));
@@ -498,7 +504,7 @@ export async function POST(request: Request) {
       if (account.type === "investment") return Response.json({ error: "Record an investment account's market value as a value snapshot instead." }, { status: 409 });
       const date = calendarDate(payload.date) || actionToday;
       if (date > actionToday) return Response.json({ error: "Use today or an earlier date for recorded activity. Add a plan for future payments." }, { status: 400 });
-      const target = cents(payload.balance) * (account.type === "credit" ? -1 : 1);
+      const target = signedCents(payload.balance) * (account.type === "credit" ? -1 : 1);
       const difference = target - Number(account.balance_cents);
       if (!difference) return Response.json({ error: "This balance already matches Remaivo." }, { status: 400 });
       // Both statements require the balance read above, so a concurrent change aborts the adjustment.

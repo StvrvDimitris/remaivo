@@ -147,3 +147,16 @@ test('Opening balances and adjustments cannot be rewritten through transaction c
   assert.equal(sqlite.prepare('SELECT status FROM transactions WHERE id = ?').get(opening.id).status, 'posted');
   assert.equal(ledgerTotal(sqlite, main.id), balance(sqlite, main.id));
 });
+
+test('Overdrawn accounts and cards in credit can be added and updated with negative amounts', async () => {
+  assert.equal((await post('addAccount', { name: 'Overdraft', type: 'bank', balance: '-50' })).status, 200);
+  assert.equal((await post('addAccount', { name: 'Refunded card', type: 'credit', balance: '-20' })).status, 200);
+  const overdraft = accountNamed('Overdraft'), refunded = accountNamed('Refunded card');
+  assert.deepEqual([overdraft.balance_cents, refunded.balance_cents], [-5000, 2000]);
+  assert.deepEqual(entries(overdraft.id, 'opening_balance').map(t => [t.account_id, t.destination_account_id, t.amount_cents]), [[overdraft.id, null, 5000]]);
+  assert.equal((await post('adjustBalance', { accountId: overdraft.id, balance: '-12.5' })).status, 200);
+  assert.equal(balance(sqlite, overdraft.id), -1250);
+  assert.equal((await post('adjustBalance', { accountId: refunded.id, balance: '15' })).status, 200);
+  assert.equal(balance(sqlite, refunded.id), -1500);
+  for (const account of [overdraft, refunded]) assert.equal(ledgerTotal(sqlite, account.id), balance(sqlite, account.id), account.name);
+});

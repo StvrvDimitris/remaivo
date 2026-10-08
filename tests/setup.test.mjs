@@ -96,3 +96,32 @@ test("setup saves the selected UI language without changing opening money", asyn
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS amount FROM transactions WHERE user_id='greek-owner' AND type!='opening_balance'").get().amount,0);
   assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='fresh-owner'").get().ui_language,"en");
 });
+
+test("setup can create a payday Plan with weekday pacing, a chosen week start and signed balances", async () => {
+  await createCurrentPlan("plan-owner", {
+    currency: "EUR", timezone: "Europe/Athens", weekStart: 0,
+    accounts: [
+      { name: "Overdrawn", type: "bank", balance: "-25.50", includeSpendable: true, color: "#1f5b4e" },
+      { name: "Card in credit", type: "credit", balance: "-10", includeSpendable: false, color: "#4c8b98" },
+    ],
+    plan: { target: "900", period: "payday", payday: "25", allocation: "weighted", carry: "capped", carryCap: "50", weights: [1, 1, 1, 1, 1, 2, 2] },
+  });
+  const config = JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='plan-owner'").get().config_json);
+  assert.deepEqual({ target: config.target, period: config.period, payday: config.payday, allocation: config.allocation, carry: config.carry, carryCap: config.carryCap, weights: config.weights, weekStart: config.weekStart },
+    { target: 90000, period: "payday", payday: 25, allocation: "weighted", carry: "capped", carryCap: 5000, weights: [1, 1, 1, 1, 1, 2, 2], weekStart: 0 });
+  assert.equal(sqlite.prepare("SELECT week_start FROM profiles WHERE user_id='plan-owner'").get().week_start, 0);
+  const balances = sqlite.prepare("SELECT name, balance_cents FROM accounts WHERE user_id='plan-owner' ORDER BY name").all().map(row => ({ ...row }));
+  assert.deepEqual(balances, [{ name: "Card in credit", balance_cents: 1000 }, { name: "Overdrawn", balance_cents: -2550 }]);
+  const openings = sqlite.prepare("SELECT amount_cents, account_id IS NULL AS money_in FROM transactions WHERE user_id='plan-owner' AND type='opening_balance' ORDER BY amount_cents").all().map(row => ({ ...row }));
+  assert.deepEqual(openings, [{ amount_cents: 1000, money_in: 1 }, { amount_cents: 2550, money_in: 0 }]);
+});
+
+test("setup uses adaptive pacing without carry, anchors weekly plans and rejects unsupported periods", async () => {
+  await createCurrentPlan("weekly-owner", { ...payload, plan: { target: "200", period: "weekly", anchor: "2099-01-01", allocation: "adaptive", carry: "signed" } });
+  const config = JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='weekly-owner'").get().config_json);
+  assert.equal(config.period, "weekly");
+  assert.equal(config.carry, "none");
+  assert.notEqual(config.anchor, "2099-01-01");
+  await assert.rejects(createCurrentPlan("custom-owner", { ...payload, plan: { target: "100", period: "custom" } }), /supported budget period/);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM profiles WHERE user_id='custom-owner'").get().n, 0);
+});
