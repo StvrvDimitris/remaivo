@@ -12,13 +12,13 @@ export class ArchiveError extends Error {
 // is deliberately not offered as an archived item.
 // D1 caps compound SELECT terms; keep each UNION group below that limit.
 const archiveQuery = `
-  SELECT id, user_id, 'account' AS kind, name, type AS detail, balance_cents AS amount_cents, currency FROM accounts WHERE archived = 1
-  UNION ALL SELECT id, user_id, 'category', name, kind, NULL, NULL FROM categories WHERE archived = 1
-  UNION ALL SELECT id, user_id, 'goal', name, CASE WHEN account_id IS NULL THEN 'Independent tracking' ELSE 'Linked account goal' END, target_cents, NULL FROM goals WHERE archived = 1
+  SELECT id, user_id, 'account' AS kind, name, type AS detail, balance_cents AS amount_cents, currency, archived_at FROM accounts WHERE archived = 1
+  UNION ALL SELECT id, user_id, 'category', name, kind, NULL, NULL, archived_at FROM categories WHERE archived = 1
+  UNION ALL SELECT id, user_id, 'goal', name, CASE WHEN account_id IS NULL THEN 'Independent tracking' ELSE 'Linked account goal' END, target_cents, NULL, archived_at FROM goals WHERE archived = 1
   UNION ALL SELECT * FROM (
-    SELECT id, user_id, 'recurring', title, frequency || ' · next date ' || next_date, amount_cents, NULL FROM recurring_plans WHERE active = 0
-    UNION ALL SELECT id, user_id, 'installment', title, 'Unpaid balance', MAX(0, total_cents - paid_cents), NULL FROM installment_plans WHERE status = 'archived'
-    UNION ALL SELECT id, user_id, 'bucket', name, CASE WHEN kind = 'goal' THEN 'Goal allocation' ELSE 'Protected spending' END, target_cents, NULL FROM v3_bucket_templates WHERE archived = 1
+    SELECT id, user_id, 'recurring', title, frequency || ' · next date ' || next_date, amount_cents, NULL, archived_at FROM recurring_plans WHERE active = 0
+    UNION ALL SELECT id, user_id, 'installment', title, 'Unpaid balance', MAX(0, total_cents - paid_cents), NULL, archived_at FROM installment_plans WHERE status = 'archived'
+    UNION ALL SELECT id, user_id, 'bucket', name, CASE WHEN kind = 'goal' THEN 'Goal allocation' ELSE 'Protected spending' END, target_cents, NULL, archived_at FROM v3_bucket_templates WHERE archived = 1
   )
 `;
 
@@ -32,7 +32,7 @@ export async function listArchive(user: string, params: URLSearchParams) {
   const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM (${archiveQuery}) ${filter}`).bind(...args).first<{total: number}>();
   const total = Number(count?.total || 0), totalPages = Math.max(1, Math.ceil(total / 25));
   const page = Math.min(requestedPage, totalPages);
-  const result = await env.DB.prepare(`SELECT id, kind, name, detail, amount_cents, currency FROM (${archiveQuery}) ${filter} ORDER BY LOWER(name), kind, id LIMIT 25 OFFSET ?`).bind(...args, (page - 1) * 25).all<ArchiveItem>();
+  const result = await env.DB.prepare(`SELECT id, kind, name, detail, amount_cents, currency FROM (${archiveQuery}) ${filter} ORDER BY archived_at IS NULL, archived_at DESC, LOWER(name), kind, id LIMIT 25 OFFSET ?`).bind(...args, (page - 1) * 25).all<ArchiveItem>();
   return { items: result.results, total, page, totalPages };
 }
 
@@ -58,7 +58,7 @@ export async function restoreArchive(user: string, today: string, payload: Recor
   await requireActive("accounts", item.destination_account_id || item.linked_credit_account_id);
   await requireActive("categories", item.category_id);
   if (kind === "account" || kind === "category" || kind === "goal") {
-    await env.DB.prepare(`UPDATE ${table} SET archived = 0 WHERE id = ? AND user_id = ? AND archived = 1`).bind(id, user).run();
+    await env.DB.prepare(`UPDATE ${table} SET archived = 0, archived_at = NULL WHERE id = ? AND user_id = ? AND archived = 1`).bind(id, user).run();
     return;
   }
   if (kind === "bucket") {
@@ -73,7 +73,7 @@ export async function restoreArchive(user: string, today: string, payload: Recor
       if (conflict) throw new ArchiveError(`“${conflict.name}” already uses one of this bucket’s categories. Change its categories before restoring this bucket.`);
     }
     await env.DB.batch([
-      env.DB.prepare("UPDATE v3_bucket_templates SET archived = 0 WHERE id = ? AND user_id = ? AND archived = 1").bind(id, user),
+      env.DB.prepare("UPDATE v3_bucket_templates SET archived = 0, archived_at = NULL WHERE id = ? AND user_id = ? AND archived = 1").bind(id, user),
       env.DB.prepare(`INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET released = 0`)
         .bind(`${period.id}:${id}`, user, period.id, id, item.name, item.kind, item.category_ids, item.target_cents, item.priority, item.rollover, item.rollover_cap, item.destination_id),
@@ -87,7 +87,7 @@ export async function restoreArchive(user: string, today: string, payload: Recor
   if (kind === "recurring") {
     if (item.end_date && nextDate > String(item.end_date)) throw new ArchiveError(`This plan ended on ${item.end_date}. Create a new plan if you want it to continue.`);
     await env.DB.batch([
-      env.DB.prepare("UPDATE recurring_plans SET active = 1, auto_post = 0, next_date = ?, anchor_day = ? WHERE id = ? AND user_id = ? AND active = 0")
+      env.DB.prepare("UPDATE recurring_plans SET active = 1, archived_at = NULL, auto_post = 0, next_date = ?, anchor_day = ? WHERE id = ? AND user_id = ? AND active = 0")
         .bind(nextDate, nextDate === item.next_date ? item.anchor_day : Number(nextDate.slice(8)), id, user),
       env.DB.prepare(`UPDATE v3_occurrences SET status = CASE WHEN paid_cents > 0 THEN 'partial' ELSE 'upcoming' END, auto_post = 0
         WHERE user_id = ? AND source_kind = 'recurring' AND source_id = ? AND status = 'cancelled' AND scheduled_date >= ? AND (? IS NULL OR scheduled_date <= ?)`)
@@ -97,7 +97,7 @@ export async function restoreArchive(user: string, today: string, payload: Recor
   }
   const payments = await env.DB.prepare("SELECT id FROM installment_payments WHERE user_id = ? AND plan_id = ? AND status IN ('cancelled', 'upcoming') ORDER BY sequence").bind(user, id).all<{id: string}>();
   if (!payments.results.length || Number(item.paid_cents) >= Number(item.total_cents)) throw new ArchiveError("This plan has no unpaid payments to restore. Its paid history is already preserved.");
-  const statements = [env.DB.prepare("UPDATE installment_plans SET status = 'active', auto_post = 0 WHERE id = ? AND user_id = ? AND status = 'archived'").bind(id, user)];
+  const statements = [env.DB.prepare("UPDATE installment_plans SET status = 'active', archived_at = NULL, auto_post = 0 WHERE id = ? AND user_id = ? AND status = 'archived'").bind(id, user)];
   payments.results.forEach((payment, index) => {
     const date = index === 0 ? nextDate : addCalendarInterval(nextDate, String(item.frequency), index);
     statements.push(env.DB.prepare("UPDATE installment_payments SET status = 'upcoming', due_date = ? WHERE id = ? AND user_id = ? AND status IN ('cancelled', 'upcoming')").bind(date, payment.id, user));

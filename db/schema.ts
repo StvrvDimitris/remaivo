@@ -29,6 +29,7 @@ export const accounts = sqliteTable("accounts", {
   color: text("color").notNull().default("#1f5b4e"),
   includeSpendable: integer("include_spendable", { mode: "boolean" }).notNull().default(true),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_accounts_user_active").on(table.userId, table.archived)]);
 
@@ -49,6 +50,7 @@ export const categories = sqliteTable("categories", {
   kind: text("kind").notNull(),
   color: text("color").notNull().default("#cfe9d7"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("idx_categories_user_kind").on(table.userId, table.kind),
@@ -99,6 +101,7 @@ export const recurringPlans = sqliteTable("recurring_plans", {
   autoPost: integer("auto_post", { mode: "boolean" }).notNull().default(false),
   committed: integer("committed", { mode: "boolean" }).notNull().default(true),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_recurring_user_next").on(table.userId, table.nextDate)]);
 
@@ -117,6 +120,7 @@ export const installmentPlans = sqliteTable("installment_plans", {
   linkedCreditAccountId: text("linked_credit_account_id"),
   autoPost: integer("auto_post", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_installment_plans_user_status").on(table.userId, table.status)]);
 
@@ -147,6 +151,7 @@ export const goals = sqliteTable("goals", {
   baselineCents: integer("baseline_cents").notNull().default(0),
   color: text("color").notNull().default("#dff35f"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_goals_user_kind").on(table.userId, table.kind)]);
 

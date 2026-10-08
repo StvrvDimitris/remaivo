@@ -117,3 +117,12 @@ test('Bucket restore preserves the current allocation and refuses conflicting ca
   assert.equal(row('v3_bucket_periods','current:bucket').target_cents,18000);
   assert.equal(row('v3_bucket_periods','current:bucket').released,0);
 });
+
+test('The archive lists the most recently archived items first, then undated ones by name', async () => {
+  const user = 'order-owner';
+  for (const [id, archivedAt] of [['b-undated', null], ['a-undated', null], ['old', '2026-09-01 10:00:00'], ['new', '2026-10-08 09:00:00']]) {
+    insertAccount(id, user); sqlite.prepare('UPDATE accounts SET archived_at=? WHERE id=?').run(archivedAt, id);
+  }
+  sqlite.prepare("INSERT INTO categories(id,user_id,name,kind,archived,archived_at) VALUES('middle',?,'middle','expense',1,'2026-09-20 08:00:00')").run(user);
+  assert.deepEqual((await listArchive(user, new URLSearchParams())).items.map(item => item.id), ['new', 'middle', 'old', 'a-undated', 'b-undated']);
+});

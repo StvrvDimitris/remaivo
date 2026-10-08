@@ -183,6 +183,13 @@
       "when": 1791445289839,
       "tag": "0025_opening_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791462426320,
+      "tag": "0026_archived_at",
+      "breakpoints": true
     }
   ]
 }

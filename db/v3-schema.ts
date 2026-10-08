@@ -30,7 +30,8 @@ export const v3_bucket_templates=sqliteTable('v3_bucket_templates',{
  rollover: text('rollover').notNull().default('none'),
  rollover_cap: integer('rollover_cap').notNull().default(0),
  destination_id: text('destination_id'),
- archived: integer('archived').notNull().default(0)
+ archived: integer('archived').notNull().default(0),
+ archived_at: text('archived_at')
 });
 
 export const v3_bucket_periods=sqliteTable('v3_bucket_periods',{

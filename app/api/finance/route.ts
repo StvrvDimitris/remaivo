@@ -553,7 +553,7 @@ export async function POST(request: Request) {
     } else if (action === "updateCategory") {
       await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), text(payload.kind, "expense") === "income" ? "income" : "expense", text(payload.color, "#cfe9d7"), payload.categoryId, user.userId).run();
     } else if (action === "archiveCategory") {
-      await env.DB.prepare("UPDATE categories SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.categoryId, user.userId).run();
+      await env.DB.prepare("UPDATE categories SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.categoryId, user.userId).run();
     } else if (action === "addTransaction") {
       const id = crypto.randomUUID();
       const amount = cents(payload.amount);
@@ -671,7 +671,7 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, amount_cents = ?, account_id = ?, destination_account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, end_date = ?, auto_post = ?, committed = ?, counts_monthly = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, amount, payload.accountId || null, payload.destinationAccountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, endDate, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, bool(payload.excludeFromBudget, plan.counts_monthly === 0) ? 0 : 1, payload.planId, user.userId).run();
       await env.DB.prepare("DELETE FROM v3_occurrences WHERE user_id=? AND source_kind='recurring' AND source_id=? AND status='upcoming' AND paid_cents=0").bind(user.userId,payload.planId).run();
     } else if (action === "archiveRecurring") {
-      await env.DB.prepare("UPDATE recurring_plans SET active = 0 WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
+      await env.DB.prepare("UPDATE recurring_plans SET active = 0, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
     } else if (action === "addInstallment") {
       const planId = crypto.randomUUID();
       const total = cents(payload.total);
@@ -725,7 +725,7 @@ export async function POST(request: Request) {
       await env.DB.batch(statements);
     } else if (action === "archiveInstallmentPlan") {
       await env.DB.batch([
-        env.DB.prepare("UPDATE installment_plans SET status = 'archived' WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
+        env.DB.prepare("UPDATE installment_plans SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND status = 'active'").bind(payload.planId, user.userId),
         env.DB.prepare("UPDATE installment_payments SET status = 'cancelled' WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
       ]);
     } else if (action === "updateDefaultExpenseAccount") {
@@ -833,13 +833,13 @@ export async function POST(request: Request) {
         )`).bind(text(payload.entryId), user.userId).run();
       if (!Number(result.meta.changes)) return Response.json({ error: "Goal entry not found." }, { status: 404 });
     } else if (action === "archiveGoal") {
-      await env.DB.prepare("UPDATE goals SET archived = 1 WHERE id = ? AND user_id = ?").bind(payload.goalId, user.userId).run();
+      await env.DB.prepare("UPDATE goals SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.goalId, user.userId).run();
     } else if (action === "archiveAccount") {
       const accountId = text(payload.accountId);
       const blocked = await env.DB.prepare("SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM recurring_plans WHERE user_id = ? AND active = 1 AND (account_id = ? OR destination_account_id = ?)) OR EXISTS (SELECT 1 FROM installment_plans WHERE user_id = ? AND status = 'active' AND (payment_account_id = ? OR linked_credit_account_id = ?)) OR EXISTS (SELECT 1 FROM goals WHERE user_id = ? AND archived = 0 AND account_id = ?) OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND (spare_source_id = ? OR spare_destination_id = ?))").bind(user.userId, accountId, accountId, user.userId, accountId, accountId, user.userId, accountId, user.userId, accountId, accountId).first();
       if (blocked) return Response.json({ error: "Move active plans, goals, and spare-change accounts before archiving this account." }, { status: 409 });
       await env.DB.batch([
-        env.DB.prepare("UPDATE accounts SET archived = 1 WHERE id = ? AND user_id = ?").bind(accountId, user.userId),
+        env.DB.prepare("UPDATE accounts SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(accountId, user.userId),
         env.DB.prepare("UPDATE profiles SET default_expense_account_id = NULL WHERE user_id = ? AND default_expense_account_id = ?").bind(user.userId, accountId),
       ]);
     } else {
