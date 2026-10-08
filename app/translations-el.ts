@@ -392,7 +392,7 @@ export const greek: Record<string,string> = {
   "Nothing recorded in the comparison period": "Δεν υπάρχουν καταχωρίσεις στην περίοδο σύγκρισης",
   "before your records start": "πριν ξεκινήσουν οι καταχωρίσεις σας",
   "records start": "οι καταχωρίσεις ξεκινούν",
-  "Choose at least two weeks to compare weekdays.": "Επιλέξτε τουλάχιστον δύο εβδομάδες για σύγκριση ημερών.",
+  "Choose more than one day to compare weekdays.": "Επιλέξτε περισσότερες από μία ημέρες για σύγκριση ημερών της εβδομάδας.",
   "Choose at least four weeks to compare parts of the month.": "Επιλέξτε τουλάχιστον τέσσερις εβδομάδες για σύγκριση τμημάτων του μήνα.",
   "Accounts added": "Νέοι λογαριασμοί",
   "Accounts report": "Αναφορά λογαριασμών",
