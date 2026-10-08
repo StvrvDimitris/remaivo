@@ -24,7 +24,8 @@ export type InvestmentValueMetrics = {
   flowsAfterSnapshot: number;
 };
 
-const movementTypes = new Set(["transfer", "saving", "investment"]);
+// Two-sided movements, plus one-sided opening balances and adjustments.
+const movementTypes = new Set(["transfer", "saving", "investment", "opening_balance", "balance_adjustment"]);
 
 export function accountFlow(transaction: InvestmentFlow, accountId: string) {
   const amount = Number(transaction.amount_cents) || 0;

@@ -64,6 +64,8 @@ test("fresh setup creates current Plan state directly", async () => {
   assert.deepEqual({ ...profile }, { setup_complete: 1, timezone: "Europe/Athens" });
   const accounts = sqlite.prepare("SELECT type, balance_cents FROM accounts WHERE user_id='fresh-owner' ORDER BY type").all().map(row => ({ ...row }));
   assert.deepEqual(accounts, [{ type: "bank", balance_cents: 140000 }, { type: "credit", balance_cents: -8000 }]);
+  const openings = sqlite.prepare("SELECT a.type, t.amount_cents, t.account_id IS NULL AS money_in FROM transactions t JOIN accounts a ON a.id = COALESCE(t.account_id, t.destination_account_id) WHERE t.user_id='fresh-owner' AND t.type='opening_balance' ORDER BY a.type").all().map(row => ({ ...row }));
+  assert.deepEqual(openings, [{ type: "bank", amount_cents: 140000, money_in: 1 }, { type: "credit", amount_cents: 8000, money_in: 0 }]);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM categories WHERE user_id='fresh-owner'").get().n, 9);
   const config = JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='fresh-owner'").get().config_json);
   assert.equal(config.target, 110000);
@@ -76,6 +78,7 @@ test("fresh setup creates current Plan state directly", async () => {
 test("retry does not duplicate accounts or replace the created Plan", async () => {
   assert.equal(await createCurrentPlan("fresh-owner", { ...payload, budgets: { monthly: "1" } }), false);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM accounts WHERE user_id='fresh-owner'").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM transactions WHERE user_id='fresh-owner' AND type='opening_balance'").get().n, 2);
   const config = JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='fresh-owner'").get().config_json);
   assert.equal(config.target, 110000);
 });
@@ -90,6 +93,6 @@ test("setup saves the selected UI language without changing opening money", asyn
   await createCurrentPlan("greek-owner", {...payload,language:"el"});
   assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='greek-owner'").get().ui_language,"el");
   assert.equal(sqlite.prepare("SELECT SUM(balance_cents) AS amount FROM accounts WHERE user_id='greek-owner'").get().amount,132000);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS amount FROM transactions WHERE user_id='greek-owner'").get().amount,0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS amount FROM transactions WHERE user_id='greek-owner' AND type!='opening_balance'").get().amount,0);
   assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='fresh-owner'").get().ui_language,"en");
 });

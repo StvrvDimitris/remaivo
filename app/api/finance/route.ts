@@ -10,7 +10,7 @@ import { buildStatistics, comparisonRange, type ComparisonMode, type StatisticsF
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
-import type { StatisticsMode } from "../../transaction-classification";
+import { isLedgerType, type StatisticsMode } from "../../transaction-classification";
 
 export const dynamic = "force-dynamic";
 
@@ -187,7 +187,7 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
     bindings.push(search, search, search);
   }
 
-  const fromClause = "FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id AND a.user_id = t.user_id LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id";
+  const fromClause = "FROM transactions t LEFT JOIN accounts a ON a.id = COALESCE(t.account_id, t.destination_account_id) AND a.user_id = t.user_id LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id";
   const whereClause = `WHERE ${where.join(" AND ")}`;
   const totalRow = await env.DB.prepare(`SELECT COUNT(*) AS total ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
   const total = Number(totalRow?.total || 0);
@@ -277,6 +277,12 @@ function balanceStatements(userId: string, transaction: Record<string, unknown>,
   if (type === "income") {
     return [guarded("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
   }
+  if (isLedgerType(type)) {
+    return [
+      ...(transaction.destination_account_id ? [guarded("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?", amount, transaction.destination_account_id, userId)] : []),
+      ...(transaction.account_id ? [guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)] : []),
+    ];
+  }
   if (["transfer", "saving", "investment"].includes(type)) {
     return [
       guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId),
@@ -284,6 +290,12 @@ function balanceStatements(userId: string, transaction: Record<string, unknown>,
     ];
   }
   return [guarded("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?", amount, transaction.account_id, userId)];
+}
+
+// One-account ledger entry: positive amounts add to the account, negative ones subtract.
+function ledgerEntry(userId: string, id: string, type: "opening_balance" | "balance_adjustment", accountId: string, signedCents: number, date: string, description: string, guard?: { sql: string; args: unknown[] }) {
+  return env.DB.prepare(`INSERT INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0, 0${guard ? ` WHERE ${guard.sql}` : ""}`)
+    .bind(id, userId, signedCents < 0 ? accountId : null, signedCents > 0 ? accountId : null, type, description, Math.abs(signedCents), date, ...(guard?.args ?? []));
 }
 
 async function snapshot(user: FinanceUser) {
@@ -440,7 +452,26 @@ export async function POST(request: Request) {
       const amount = cents(payload.balance);
       const type = text(payload.type, "bank");
       const signedAmount = type === "credit" ? -amount : amount;
-      await env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(crypto.randomUUID(), user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId).run();
+      const accountId = crypto.randomUUID();
+      const statements = [env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(accountId, user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId)];
+      if (signedAmount) statements.push(ledgerEntry(user.userId, `opening:${accountId}`, "opening_balance", accountId, signedAmount, actionToday, "Opening balance"));
+      await env.DB.batch(statements);
+    } else if (action === "adjustBalance") {
+      const account = await env.DB.prepare("SELECT id, type, balance_cents FROM accounts WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.accountId), user.userId).first<{ id: string; type: string; balance_cents: number }>();
+      if (!account) return Response.json({ error: "Choose an active account." }, { status: 400 });
+      if (account.type === "investment") return Response.json({ error: "Record an investment account's market value as a value snapshot instead." }, { status: 409 });
+      const date = calendarDate(payload.date) || actionToday;
+      if (date > actionToday) return Response.json({ error: "Use today or an earlier date for recorded activity. Add a plan for future payments." }, { status: 400 });
+      const target = cents(payload.balance) * (account.type === "credit" ? -1 : 1);
+      const difference = target - Number(account.balance_cents);
+      if (!difference) return Response.json({ error: "This balance already matches Remaivo." }, { status: 400 });
+      // Both statements require the balance read above, so a concurrent change aborts the adjustment.
+      const unchanged = { sql: "EXISTS (SELECT 1 FROM accounts WHERE id = ? AND user_id = ? AND balance_cents = ?)", args: [account.id, user.userId, account.balance_cents] };
+      const results = await env.DB.batch([
+        ledgerEntry(user.userId, crypto.randomUUID(), "balance_adjustment", account.id, difference, date, text(payload.description, "Balance adjustment").slice(0, 120), unchanged),
+        env.DB.prepare("UPDATE accounts SET balance_cents = ? WHERE id = ? AND user_id = ? AND balance_cents = ?").bind(target, account.id, user.userId, account.balance_cents),
+      ]);
+      if (!Number(results[0].meta.changes)) return Response.json({ error: "This account changed while you were updating it. Reopen it and try again." }, { status: 409 });
     } else if (action === "updateAccount") {
       const type = ["bank", "savings", "cash", "credit", "investment", "wallet", "custom"].includes(text(payload.type)) ? text(payload.type) : "custom";
       const updated = await env.DB.prepare(`UPDATE accounts SET name = ?, type = ?, credit_limit_cents = ?, color = ?, include_spendable = ?
@@ -504,7 +535,7 @@ export async function POST(request: Request) {
       }
       await env.DB.batch(statements);
     } else if (action === "updateTransaction") {
-      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, actionToday), payload.categoryId || null, payload.transactionId, user.userId).run();
+      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN NULL ELSE ? END WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, actionToday), payload.categoryId || null, payload.transactionId, user.userId).run();
     } else if (action === "correctTransaction") {
       const original = await env.DB.prepare(
         `WITH RECURSIVE correction_chain AS (
@@ -521,6 +552,7 @@ export async function POST(request: Request) {
       const type = text(payload.type, originalType);
       if (!["expense", "income", "transfer", "saving", "investment"].includes(type)) return Response.json({ error: "Choose a valid transaction type." }, { status: 400 });
       if (["installment_payment", "installment_purchase"].includes(originalType)) return Response.json({ error: "Correct installment entries from their pay-later plan." }, { status: 409 });
+      if (isLedgerType(originalType)) return Response.json({ error: "Use Update balance on the account to correct an opening balance or adjustment." }, { status: 409 });
       if (["investment", "saving"].includes(originalType) && String(original.description) === "Spare change sweep") return Response.json({ error: "A completed spare-change sweep needs a separate balancing transaction." }, { status: 409 });
       const oldSpare = await env.DB.prepare("SELECT status, multiplied_cents FROM spare_events WHERE transaction_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1").bind(original.id, user.userId).first<{status:string;multiplied_cents:number}>();
       if (oldSpare?.status === "swept") return Response.json({ error: "This transaction’s spare change has already been swept. Add a balancing transaction instead." }, { status: 409 });

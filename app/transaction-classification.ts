@@ -8,6 +8,12 @@ export type ClassifiableTransaction = {
   counts_monthly?: number;
 };
 
+// Opening balances and balance adjustments only correct where money sits. They
+// touch one account (destination = money in, source = money out) and are never
+// income, spending, a contribution or budget activity.
+export const ledgerTypes = ["opening_balance", "balance_adjustment"] as const;
+export const isLedgerType = (type: string) => (ledgerTypes as readonly string[]).includes(type);
+
 export function reportingClass(type: string): ReportingClass {
   if (type === "income") return "income";
   if (type === "expense" || type === "installment_payment") return "spending";

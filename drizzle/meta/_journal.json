@@ -176,6 +176,13 @@
       "when": 1791440930409,
       "tag": "0024_retire_bucket_category_id",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791445289839,
+      "tag": "0025_opening_balances",
+      "breakpoints": true
     }
   ]
 }

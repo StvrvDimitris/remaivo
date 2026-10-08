@@ -327,6 +327,12 @@ html[data-theme="midnight"] {
 .v3-app .single-check { border: 1px solid var(--theme-border); border-radius: 10px; }
 .v3-app :is(.check-stack, .single-check) label:hover, .v3-app .single-check:hover { background: var(--theme-soft); }
 .v3-app :is(.check-stack, .single-check) input { width: 16px; height: 16px; margin: 1px 0 0; }
+.v3-app .balance-update { display: grid; gap: 8px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--theme-line); }
+.v3-app .balance-update > strong { font-size: .875rem; font-weight: 600; color: var(--theme-text); }
+.v3-app .balance-update > small, .v3-app .balance-update-note { font-size: .8125rem; line-height: 1.5; color: var(--theme-muted); }
+.v3-app .balance-update .form-grid { margin-top: 6px; }
+.v3-app .balance-update-action { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; font-size: .8125rem; color: var(--theme-text-soft); }
+.v3-app .balance-update-note { margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--theme-line); }
 .v3-app .v3-category-picker { display: grid; gap: 6px; min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
 .v3-app .v3-category-picker legend { padding: 0; margin-bottom: 6px; font-size: .8125rem; font-weight: 500; color: var(--theme-text); }
 .v3-app .v3-category-picker .check-stack { max-height: 240px; overflow-y: auto; }

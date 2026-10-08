@@ -65,6 +65,9 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
     const accountId = `opening:${userId}:${index}`;
     statements.push(env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${open}`)
       .bind(accountId, userId, name, type, currency, balance, creditLimit, color, spendable ? 1 : 0, userId));
+    // The starting balance is recorded as a one-account ledger entry: destination = money in, source = money out.
+    if (balance) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly) SELECT ?, ?, ?, ?, 'opening_balance', 'Opening balance', ?, ?, 0, 0 WHERE ${open}`)
+      .bind(`opening:${accountId}`, userId, balance < 0 ? accountId : null, balance > 0 ? accountId : null, Math.abs(balance), today, userId));
   }
   for (const [name, kind, color] of categories) {
     statements.push(env.DB.prepare(`INSERT OR IGNORE INTO categories (id, user_id, name, kind, color) SELECT ?, ?, ?, ?, ? WHERE ${open}`)

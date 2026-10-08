@@ -47,6 +47,7 @@ const ensureFinanceSchema = async () => {};
 const financialToday = () => globalThis.__goalsTestToday ?? '2027-02-01';
 const reconcileV3 = async () => {};
 const v3Snapshot = async () => ({});
+const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
 class ArchiveError extends Error { status = 409; }
 ${routeSource}`;
 fs.writeFileSync(path.join(scratch, 'route.mjs'), ts.transpileModule(source, {
