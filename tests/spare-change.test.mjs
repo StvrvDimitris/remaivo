@@ -69,7 +69,8 @@ globalThis.__spareTestEnv = { DB: {
     sqlite.exec('BEGIN');
     try {
       const results = [];
-      for (const statement of statements) results.push(await statement.run());
+      // Like D1, reads inside a batch return their rows.
+      for (const statement of statements) results.push(/^\s*(SELECT|WITH)/i.test(statement.sql) ? await statement.all() : await statement.run());
       sqlite.exec('COMMIT');
       return results;
     } catch (error) {
@@ -93,6 +94,8 @@ compile(`const env = globalThis.__spareTestEnv;
 const getUser = async () => ({ userId: globalThis.__spareTestUser, displayName: 'Test', email: 'test@example.invalid' });
 const usesGoogleAuth = () => false;
 const ensureFinanceSchema = async () => {};
+const reconcileV3 = async () => {};
+const v3Snapshot = async () => ({});
 const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;
 const sweepSpare = globalThis.__spareTestSweep;
@@ -352,4 +355,22 @@ test('A one-off planned payment ends on its due date, and editing it to repeat r
  assert.equal((await post('updateRecurring',{...payload,planId:plan.id,frequency:'weekly',intervalCount:2})).status,200);
  plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE id=?').get(plan.id);
  assert.equal(plan.end_date,null);assert.equal(plan.frequency,'weekly');assert.equal(plan.interval_count,2);
+});
+
+test('Planning can be turned off and on, and the snapshot carries this month against the same days of last month',async()=>{
+ const owner='planning-toggle';globalThis.__spareTestUser=owner;
+ sqlite.prepare('INSERT INTO profiles(user_id,setup_complete) VALUES(?,1)').run(owner);
+ sqlite.prepare("INSERT INTO accounts(id,user_id,name,type) VALUES('planning-bank',?,'Bank','bank')").run(owner);
+ let response=await post('updatePlanning',{enabled:false});let body=await response.json();assert.equal(response.status,200,JSON.stringify(body));
+ assert.equal(sqlite.prepare('SELECT planning_enabled n FROM profiles WHERE user_id=?').get(owner).n,0);
+ const today=body.today;const {start,previousStart,previousThrough}=body.month;
+ assert.equal(start,today.slice(0,8)+'01');assert.ok(previousStart<start&&previousThrough<start&&previousThrough>=previousStart);
+ const add=(id,type,amount,date)=>sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date) VALUES(?,?,'planning-bank',?,?,?,?)").run(id,owner,type,id,amount,date);
+ add('this-income','income',100000,start);add('this-spend','expense',2500,today);add('this-transfer','transfer',9999,today);
+ add('last-spend','expense',4000,previousStart);add('last-income','income',50000,previousThrough);
+ const lastDay=new Date(Date.UTC(Number(previousStart.slice(0,4)),Number(previousStart.slice(5,7)),0)).toISOString().slice(0,10);
+ if(lastDay>previousThrough)add('last-late','expense',7000,lastDay);
+ response=await post('updatePlanning',{enabled:true});body=await response.json();
+ assert.equal(sqlite.prepare('SELECT planning_enabled n FROM profiles WHERE user_id=?').get(owner).n,1);
+ assert.deepEqual([body.month.income,body.month.spending,body.month.previousIncome,body.month.previousSpending],[100000,2500,50000,4000]);
 });

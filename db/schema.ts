@@ -10,6 +10,7 @@ export const profiles = sqliteTable("profiles", {
   uiTheme: text("ui_theme").notNull().default("indigo"),
   defaultExpenseAccountId: text("default_expense_account_id"),
   setupComplete: integer("setup_complete", { mode: "boolean" }).notNull().default(false),
+  planningEnabled: integer("planning_enabled", { mode: "boolean" }).notNull().default(true),
   spareMultiplier: integer("spare_multiplier").notNull().default(1),
   spareEnabled: integer("spare_enabled", { mode: "boolean" }).notNull().default(false),
   spareSourceId: text("spare_source_id"),

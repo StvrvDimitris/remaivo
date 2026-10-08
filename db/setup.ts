@@ -6,7 +6,7 @@ import { defaultCategories, defaultPlanName, nameLanguage, type NameLanguage } f
 
 type SetupAccount = { name?: unknown; type?: unknown; balance?: unknown; creditLimit?: unknown; color?: unknown; includeSpendable?: unknown };
 type SetupPlan = { target?: unknown; period?: unknown; payday?: unknown; anchor?: unknown; allocation?: unknown; carry?: unknown; carryCap?: unknown; weights?: unknown };
-type SetupPayload = { language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; plan?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
+type SetupPayload = { planning?: unknown; language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; plan?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
 
 
 // Balances may be negative: an overdrawn account, or a credit card that is in your favour.
@@ -78,7 +78,7 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
   const open = "EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND setup_complete = 0)";
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT OR IGNORE INTO profiles (user_id, currency, week_start, timezone, setup_complete) VALUES (?, ?, ?, ?, 0)").bind(userId, currency, weekStart, timezone),
-    env.DB.prepare("UPDATE profiles SET currency = ?, week_start = ?, timezone = ?, ui_language = ? WHERE user_id = ? AND setup_complete = 0").bind(currency, weekStart, timezone, language, userId),
+    env.DB.prepare("UPDATE profiles SET currency = ?, week_start = ?, timezone = ?, ui_language = ?, planning_enabled = ? WHERE user_id = ? AND setup_complete = 0").bind(currency, weekStart, timezone, language, payload.planning === false ? 0 : 1, userId),
   ];
 
   for (const [index, input] of accounts.entries()) {

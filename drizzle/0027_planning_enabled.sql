@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `planning_enabled` integer DEFAULT true NOT NULL;

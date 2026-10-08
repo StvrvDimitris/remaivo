@@ -130,3 +130,10 @@ test("setup uses adaptive pacing without carry, anchors weekly plans and rejects
   await assert.rejects(createCurrentPlan("custom-owner", { ...payload, plan: { target: "100", period: "custom" } }), /supported budget period/);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM profiles WHERE user_id='custom-owner'").get().n, 0);
 });
+
+test("Track only setup turns planning off but keeps a plan behind it", async () => {
+  await createCurrentPlan("tracking-owner", { ...payload, planning: false, plan: { target: "0" } });
+  assert.equal(sqlite.prepare("SELECT planning_enabled FROM profiles WHERE user_id='tracking-owner'").get().planning_enabled, 0);
+  assert.equal(sqlite.prepare("SELECT planning_enabled FROM profiles WHERE user_id='fresh-owner'").get().planning_enabled, 1);
+  assert.equal(JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='tracking-owner'").get().config_json).target, 0);
+});

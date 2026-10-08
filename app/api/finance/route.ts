@@ -350,6 +350,7 @@ async function snapshot(user: FinanceUser) {
 
   await reconcileV3(user.userId, today);
   const monthStart = `${today.slice(0, 7)}-01`;
+  const month = monthToDate(today);
   const [mainRows, v3] = await Promise.all([env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
@@ -412,8 +413,16 @@ async function snapshot(user: FinanceUser) {
       WHERE e.user_id = ? ORDER BY e.date DESC, e.created_at DESC, e.id DESC LIMIT 200`).bind(user.userId),
     env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
+    env.DB.prepare(`SELECT
+        COALESCE(SUM(CASE WHEN date >= ? AND type = 'income' THEN amount_cents END), 0) AS income,
+        COALESCE(SUM(CASE WHEN date >= ? AND type IN ('expense', 'installment_payment') THEN amount_cents END), 0) AS spending,
+        COALESCE(SUM(CASE WHEN date <= ? AND type = 'income' THEN amount_cents END), 0) AS previous_income,
+        COALESCE(SUM(CASE WHEN date <= ? AND type IN ('expense', 'installment_payment') THEN amount_cents END), 0) AS previous_spending
+      FROM transactions WHERE user_id = ? AND status = 'posted' AND date >= ? AND date <= ? AND (date >= ? OR date <= ?)`)
+      .bind(month.start, month.start, month.previousThrough, month.previousThrough, user.userId, month.previousStart, today, month.start, month.previousThrough),
   ]), v3Snapshot(user.userId, today)]);
-  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots] = mainRows;
+  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
+  const totals = (monthTotals.results[0] ?? {}) as Record<string, number>;
 
   return {
     needsSetup: false,
@@ -429,9 +438,19 @@ async function snapshot(user: FinanceUser) {
     goalEntries: goalEntries.results,
     spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
+    // Calendar month to date, with the same days of last month, for tracking without a plan.
+    month: { ...month, income: Number(totals.income) || 0, spending: Number(totals.spending) || 0, previousIncome: Number(totals.previous_income) || 0, previousSpending: Number(totals.previous_spending) || 0 },
     today,
     v3,
   };
+}
+
+function monthToDate(today: string) {
+  const [year, month, day] = today.split("-").map(Number);
+  const previous = new Date(Date.UTC(year, month - 2, 1));
+  const previousDays = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+  const previousStart = previous.toISOString().slice(0, 10);
+  return { start: `${today.slice(0, 7)}-01`, previousStart, previousThrough: `${previousStart.slice(0, 8)}${String(Math.min(day, previousDays)).padStart(2, "0")}` };
 }
 
 export async function GET(request: Request) {
@@ -753,6 +772,9 @@ export async function POST(request: Request) {
     } else if (action === "updateTheme") {
       if (!isUITheme(payload.theme)) return Response.json({ error: "Choose an available theme." }, { status: 400 });
       await env.DB.prepare("UPDATE profiles SET ui_theme = ? WHERE user_id = ?").bind(payload.theme, user.userId).run();
+    } else if (action === "updatePlanning") {
+      // Turning planning off only hides it; the plan, buckets and schedules are kept.
+      await env.DB.prepare("UPDATE profiles SET planning_enabled = ? WHERE user_id = ?").bind(bool(payload.enabled) ? 1 : 0, user.userId).run();
     } else if (action === "updateWeekStart") {
       const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
       await env.DB.prepare("UPDATE profiles SET week_start = ? WHERE user_id = ?").bind(weekStart, user.userId).run();

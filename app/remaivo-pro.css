@@ -858,3 +858,28 @@ html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-mu
   background: var(--theme-raised) !important;
   box-shadow: var(--theme-raised-shadow) !important;
 }
+/* Tracking without a plan: this month's money in and out leads the Overview. */
+.v3-app .v3-month-card { display: grid; gap: 4px; }
+.v3-app .v3-month-card .v3-hero-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.v3-app .v3-month-card .v3-hero-top button { width: auto; height: auto; padding: 0; border: 0; border-radius: 0; background: none; color: var(--theme-accent); font-size: .8125rem; font-weight: 500; }
+.v3-app .v3-month-net { display: block; padding-top: 10px; color: var(--theme-text); font-size: 2.75rem; font-weight: 600; letter-spacing: -.04em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.v3-app .v3-month-net.negative { color: var(--theme-negative); }
+.v3-app .v3-month-card > p { margin: 6px 0 14px; color: var(--theme-muted); font-size: .8125rem; }
+.v3-app .v3-month-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-top: 16px; border-top: 1px solid var(--theme-line); }
+.v3-app .v3-month-grid > div { display: grid; gap: 4px; min-width: 0; }
+.v3-app .v3-month-grid span { color: var(--theme-muted); font-size: .8125rem; }
+.v3-app .v3-month-grid b { color: var(--theme-text); font-size: 1.375rem; font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.v3-app .v3-month-grid small { color: var(--theme-muted); font-size: .75rem; }
+.v3-app .v3-one-column { display: grid; gap: 20px; }
+.v3-app .v3-plan-prompt { display: flex; flex-direction: column; gap: 10px; }
+.v3-app .v3-plan-prompt h2 { margin: 0; font-size: 1.125rem; }
+.v3-app .v3-plan-prompt p { margin: 0; color: var(--theme-muted); font-size: .875rem; line-height: 1.55; }
+.v3-app .v3-plan-prompt > div { display: flex; gap: 10px; flex-wrap: wrap; margin-top: auto; padding-top: 8px; }
+.v3-app .v3-planning-settings { display: grid; gap: 10px; justify-items: start; }
+.v3-app .v3-planning-settings h2, .v3-app .v3-planning-settings p { margin: 0; }
+.v3-app .v3-planning-settings p { color: var(--theme-muted); font-size: .875rem; line-height: 1.55; }
+.v3-app .v3-planning-settings .v3-skip-confirm { margin-top: 4px; justify-self: stretch; }
+@media (max-width: 600px) {
+  .v3-app .v3-month-grid { grid-template-columns: 1fr; gap: 12px; }
+  .v3-app .v3-month-net { font-size: 2.25rem; }
+}
