@@ -20,6 +20,9 @@
   --theme-hover: #fafbfe;
   --theme-surface: #ffffff;
   --theme-on-accent: #ffffff;
+  /* Information cards sit slightly above the workspace. */
+  --theme-raised: var(--theme-surface);
+  --theme-raised-shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 3px 10px rgba(16, 24, 40, .07);
   color-scheme: light;
 }
 html[data-theme="ocean"] {
@@ -36,6 +39,7 @@ html[data-theme="midnight"] {
  --theme-accent:#a4b7ff; --theme-accent-hover:#bdcaff; --theme-focus:#a4b7ff; --theme-accent-soft:#2b3958;
  --theme-hero:#263758; --theme-hero-muted:#c4d0ea; --theme-positive:#83d5b7; --theme-negative:#ffaaa8; --theme-negative-soft:#432b35;
  --theme-chart-secondary:#6d85bf; --theme-chart-muted:#415472;
+ --theme-raised:#202b3e; --theme-raised-shadow:0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .3);
 }
 /* Remaivo: one visual system across the planning workspace and legacy forms. */
 :root {

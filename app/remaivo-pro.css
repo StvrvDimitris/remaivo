@@ -829,3 +829,11 @@ html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-mu
  .v3-app .report-note { padding:4px 16px 14px; }
  .v3-app .report-period-stepper strong { min-width:0; }
 }
+
+/* Raised information cards: a lifted surface and soft shadow separate every card from the
+   workspace behind it (Overview, Plan, Insights, accounts report, accounts and goals).
+   Declared last so it wins over the older card rules, including their !important backgrounds. */
+.v3-app :is(.v3-card, .page-card, .stat-panel, .account-card, .summary-strip, .goal-grid > article, .v3-plan-summary > div, .stat-summary-grid article, .stat-metric-grid article, .allocation-strip > div) {
+  background: var(--theme-raised) !important;
+  box-shadow: var(--theme-raised-shadow) !important;
+}
