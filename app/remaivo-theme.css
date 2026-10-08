@@ -158,7 +158,7 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-allocation-legend div:last-child { padding-left: 20px; }
 .v3-two-columns { grid-template-columns: 1fr 1fr; gap: 20px; }
 .v3-occurrence-list > button { padding: 13px 0; gap: 12px; color: var(--theme-text); border-color: var(--theme-line); }
-.v3-occurrence-list > button { background: var(--paper); }
+.v3-occurrence-list > button { background: transparent; }
 .v3-occurrence-list > button:hover { background: var(--theme-hover); }
 .v3-date-tile { width: 40px; border-radius: 6px; background: var(--theme-soft); border: 1px solid var(--theme-border); padding: 6px 0; }
 .v3-date-tile b { font-size: 1rem; color: var(--theme-text-soft); }
@@ -190,7 +190,7 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-button-group .v3-primary, .v3-button-group .v3-secondary { padding: 9px 12px; min-height: 40px; font-size: .875rem !important; }
 .v3-bucket-labels { color: var(--theme-muted); font-size: .8125rem; }
 .v3-bucket-row { padding: 17px 0; font-size: .875rem; color: var(--theme-text-soft); border-color: var(--theme-line); }
-.v3-bucket-row { background: var(--paper); }
+.v3-bucket-row { background: transparent; }
 .v3-bucket-row:hover:not(.system) { background: var(--theme-hover); }
 .v3-bucket-row strong { color: var(--theme-text); font-size: .875rem; }
 .v3-bucket-row small { color: var(--theme-muted); font-size: .75rem; }
@@ -594,7 +594,9 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 
 /* Theme-aware surfaces shared by the planning and account views. */
 .v3-monogram, .v3-loading button { color: var(--theme-on-accent); }
-.v3-dialog, .v3-source-row, .v3-period-bar button, .v3-inline-filters select { background: var(--paper); }
+.v3-dialog, .v3-period-bar button, .v3-inline-filters select { background: var(--paper); }
+/* Rows inside cards take the card's surface; only their hover state is tinted. */
+.v3-source-row { background: transparent; }
 .v3-equation > div, .v3-equation .total, .v3-source-row, .v3-mini-progress,
 .v3-app :is(.statistics-controls, .allocation-strip > div, .description-list > div, .trend-chart > div, .goal-entry-history, .goal-entry-history article, .valuation-history, .valuation-history article) { border-color: var(--line); }
 .v3-equation .total, .v3-app .ranked-bars > button { color: var(--ink); }
