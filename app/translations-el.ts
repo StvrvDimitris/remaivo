@@ -379,6 +379,9 @@ export const greek: Record<string,string> = {
   "Move an allocation": "Μεταφορά κατανομής",
   "Move money": "Μεταφορά χρημάτων",
   "Match expense categories": "Σύνδεση με κατηγορίες εξόδων",
+  "start": "αρχή",
+  "in": "εισροές",
+  "out": "εκροές",
   // Server messages
   "Give this goal a name.": "Δώστε ένα όνομα σε αυτόν τον στόχο.",
   "Choose a valid goal type.": "Επιλέξτε έγκυρο τύπο στόχου.",

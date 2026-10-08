@@ -811,6 +811,21 @@ html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-mu
 .v3-app .report-breakdown > div { display:grid; grid-template-columns:minmax(150px,2fr) repeat(4,minmax(96px,1fr)); gap:12px; padding:5px 0; font-size:12.5px; color:var(--theme-muted); text-align:right; font-variant-numeric:tabular-nums; }
 .v3-app .report-breakdown > div > :first-child { padding-left:30px; text-align:left; grid-column:1 / 3; }
 .v3-app .report-total-row { border-bottom:0; padding-top:14px; font-weight:600; color:var(--theme-text); }
+.v3-app .report-row-summary { display:none; }
+@media(max-width:600px) {
+ /* Two-line rows on phones: name and end balance, then start, in and out underneath. */
+ .v3-app .report-table { overflow-x:visible; }
+ .v3-app .report-labels { display:none; }
+ .v3-app .report-row { min-width:0; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"name end" "summary summary"; row-gap:3px; column-gap:12px; padding:12px 0; }
+ .v3-app .report-row > :first-child { grid-area:name; }
+ .v3-app .report-row > :is(span[data-label], span:empty) { display:none; }
+ .v3-app .report-row > b { grid-area:end; }
+ .v3-app .report-row-summary { display:block; grid-area:summary; font-size:12px; font-weight:400; line-height:1.45; color:var(--theme-muted); text-align:left; }
+ .v3-app .report-account .report-row-summary { padding-left:30px; }
+ .v3-app .report-breakdown { min-width:0; }
+ .v3-app .report-breakdown > div { grid-template-columns:minmax(0,1fr) auto auto; }
+ .v3-app .report-breakdown > div > :first-child { grid-column:auto; padding-left:30px; }
+}
 .v3-app .report-flows, .v3-app .report-investments { padding:8px 20px 16px; }
 .v3-app .report-flows > div { display:flex; justify-content:space-between; gap:16px; padding:11px 0; border-bottom:1px solid var(--theme-line); font-size:13.5px; color:var(--theme-text); }
 .v3-app .report-flows > div:last-child, .v3-app .report-investments > div:last-child { border-bottom:0; }

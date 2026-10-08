@@ -28,6 +28,15 @@ function periodLabel(report: AccountsReport, locale: string) {
   return new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${report.period.from}T12:00:00Z`));
 }
 
+// Phone layout: the start, in and out columns collapse into one line under the name.
+function RowSummary({ start, moneyIn, moneyOut, currency, locale }: { start: number; moneyIn: number; moneyOut: number; currency: string; locale: string }) {
+  const { t: tr } = useTranslation();
+  const parts = [`${money(start, currency, locale)} ${tr("start")}`];
+  if (moneyIn) parts.push(`${money(moneyIn, currency, locale, true)} ${tr("in")}`);
+  if (moneyOut) parts.push(`${money(-moneyOut, currency, locale)} ${tr("out")}`);
+  return <small className="report-row-summary">{parts.join(" · ")}</small>;
+}
+
 function AccountRow({ row, currency, locale }: { row: AccountsReportAccount; currency: string; locale: string }) {
   const { t: tr } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -39,6 +48,7 @@ function AccountRow({ row, currency, locale }: { row: AccountsReportAccount; cur
       <span data-label={tr("In")}>{row.in.total ? money(row.in.total, currency, locale, true) : "—"}</span>
       <span data-label={tr("Out")}>{row.out.total ? money(-row.out.total, currency, locale) : "—"}</span>
       <b data-label={tr("End")} className={owed(row.end)}>{money(row.end, currency, locale)}</b>
+      <RowSummary start={row.start} moneyIn={row.in.total} moneyOut={row.out.total} currency={currency} locale={locale} />
     </button>
     {open && <div className="report-breakdown">{details.map(([key, label]) => <div key={key}><span>{tr(label)}</span><span>{row.in[key] ? money(row.in[key], currency, locale, true) : ""}</span><span>{row.out[key] ? money(-row.out[key], currency, locale) : ""}</span></div>)}</div>}
   </>;
@@ -117,10 +127,10 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
         <div className="report-table">
           <div className="report-row report-labels"><span>{tr("Account")}</span><span>{tr("Start")}</span><span>{tr("In")}</span><span>{tr("Out")}</span><span>{tr("End")}</span></div>
           {report.groups.map(group => <div key={group.id} className="report-group">
-            <div className="report-row report-group-row"><span>{tr(groupLabels[group.id])}</span><span data-label={tr("Start")}>{money(group.start, currency, locale)}</span><span data-label={tr("In")}>{group.in ? money(group.in, currency, locale, true) : "—"}</span><span data-label={tr("Out")}>{group.out ? money(-group.out, currency, locale) : "—"}</span><b data-label={tr("End")} className={owed(group.end)}>{money(group.end, currency, locale)}</b></div>
+            <div className="report-row report-group-row"><span>{tr(groupLabels[group.id])}</span><span data-label={tr("Start")}>{money(group.start, currency, locale)}</span><span data-label={tr("In")}>{group.in ? money(group.in, currency, locale, true) : "—"}</span><span data-label={tr("Out")}>{group.out ? money(-group.out, currency, locale) : "—"}</span><b data-label={tr("End")} className={owed(group.end)}>{money(group.end, currency, locale)}</b><RowSummary start={group.start} moneyIn={group.in} moneyOut={group.out} currency={currency} locale={locale} /></div>
             {group.accounts.map(row => <AccountRow key={row.id} row={row} currency={currency} locale={locale} />)}
           </div>)}
-          <div className="report-row report-total-row"><span>{tr("Net worth")}</span><span data-label={tr("Start")}>{money(report.netWorth.start, currency, locale)}</span><span /><span /><b data-label={tr("End")} className={owed(report.netWorth.end)}>{money(report.netWorth.end, currency, locale)}</b></div>
+          <div className="report-row report-total-row"><span>{tr("Net worth")}</span><span data-label={tr("Start")}>{money(report.netWorth.start, currency, locale)}</span><span /><span /><b data-label={tr("End")} className={owed(report.netWorth.end)}>{money(report.netWorth.end, currency, locale)}</b><RowSummary start={report.netWorth.start} moneyIn={0} moneyOut={0} currency={currency} locale={locale} /></div>
         </div>
         <p className="report-note">{tr("Select an account to split its money in and out by kind.")}</p>
       </section>
