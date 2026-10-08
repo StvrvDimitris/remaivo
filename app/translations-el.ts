@@ -730,6 +730,8 @@ export const greek: Record<string,string> = {
   "months": "μήνες",
   "years": "χρόνια",
   "Next date": "Επόμενη ημερομηνία",
+  "Once": "Μία φορά",
+  "Due date": "Ημερομηνία πληρωμής",
   "Payment account": "Λογαριασμός πληρωμής",
   "Repayment account": "Λογαριασμός αποπληρωμής",
   "Expense category": "Κατηγορία εξόδου",

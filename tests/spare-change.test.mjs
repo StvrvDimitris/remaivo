@@ -336,3 +336,20 @@ test('Recurring budget exclusion saves independently of protection and automatio
  assert.equal((await post('addRecurring',legacy)).status,200);
  assert.equal(sqlite.prepare("SELECT counts_monthly n FROM recurring_plans WHERE user_id=? AND title='Included by default'").get(owner).n,1);
 });
+
+test('A one-off planned payment ends on its due date, and editing it to repeat removes that end',async()=>{
+ const owner='recurring-once-api';globalThis.__spareTestUser=owner;
+ sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
+ sqlite.prepare('INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,?)').run('recurring-once-source',owner,'Bank','bank');
+ const payload={type:'saving',title:'Barber',amount:'25',nextDate:'2026-10-23',frequency:'once',accountId:'recurring-once-source',destinationAccountId:'recurring-once-source-2'};
+ sqlite.prepare('INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,?)').run('recurring-once-source-2',owner,'Savings','savings');
+ assert.equal((await post('addRecurring',payload)).status,200);
+ let plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE user_id=?').get(owner);
+ assert.equal(plan.end_date,'2026-10-23');assert.equal(plan.next_date,'2026-10-23');
+ assert.equal((await post('updateRecurring',{...payload,planId:plan.id,nextDate:'2026-10-30'})).status,200);
+ plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE id=?').get(plan.id);
+ assert.equal(plan.end_date,'2026-10-30');
+ assert.equal((await post('updateRecurring',{...payload,planId:plan.id,frequency:'weekly',intervalCount:2})).status,200);
+ plan=sqlite.prepare('SELECT * FROM recurring_plans WHERE id=?').get(plan.id);
+ assert.equal(plan.end_date,null);assert.equal(plan.frequency,'weekly');assert.equal(plan.interval_count,2);
+});
