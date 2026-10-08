@@ -418,6 +418,7 @@ export const greek: Record<string,string> = {
   "of income · income minus spending": "του εισοδήματος · έσοδα μείον έξοδα",
   "of income · moved into investment accounts": "του εισοδήματος · σε επενδυτικούς λογαριασμούς",
   "so far": "μέχρι στιγμής",
+  "since": "από",
   "so far this period": "μέχρι στιγμής σε αυτή την περίοδο",
   "this period": "αυτή την περίοδο",
   "Balance adjustment": "Διόρθωση υπολοίπου",

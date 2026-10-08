@@ -10,7 +10,8 @@ export type FlowBreakdown = { income: number; spending: number; transfers: numbe
 export type AccountsReportAccount = { id: string; name: string; type: string; color?: string; archived: boolean; start: number; end: number; in: FlowBreakdown; out: FlowBreakdown };
 export type AccountsReportGroup = { id: ReportGroupId; start: number; end: number; in: number; out: number; accounts: AccountsReportAccount[] };
 export type AccountsReport = {
-  period: { kind: "month" | "year"; key: string; from: string; to: string; partial: boolean };
+  // trackedFrom is set when tracking began inside this period; the report then starts on that day.
+  period: { kind: "month" | "year"; key: string; from: string; to: string; partial: boolean; trackedFrom: string | null };
   firstDate: string | null;
   netWorth: { start: number; end: number; change: number };
   bridge: { income: number; spending: number; saved: number; adjustments: number; accountsAdded: number };
@@ -58,7 +59,11 @@ export function buildAccountsReport(input: {
   snapshots: InvestmentValuationSnapshot[];
   firstDate: string | null;
 }): AccountsReport {
-  const { period } = input;
+  // When tracking began inside this period, start the report on that first tracked day: the
+  // opening balances recorded then are the starting point, not money added during the period.
+  const trackedFrom = input.firstDate && input.firstDate >= input.period.from && input.firstDate <= input.period.to ? input.firstDate : null;
+  const period = { ...input.period, trackedFrom };
+  const startsTracking = (transaction: ReportTransaction) => transaction.type === "opening_balance" && transaction.date === trackedFrom;
   const byId = new Map(input.accounts.map(account => [account.id, account]));
   const rows = input.accounts.map(account => {
     let after = 0;
@@ -67,7 +72,7 @@ export function buildAccountsReport(input: {
       if (transaction.account_id !== account.id && transaction.destination_account_id !== account.id) continue;
       const flow = accountFlow(transaction, account.id);
       if (transaction.date > period.to) { after += flow; continue; }
-      if (transaction.date < period.from) continue;
+      if (transaction.date < period.from || startsTracking(transaction)) continue;
       const kind = classify(transaction);
       if (!kind || !flow) continue;
       const side = flow > 0 ? inFlow : outFlow;

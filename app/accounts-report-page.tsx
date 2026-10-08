@@ -83,7 +83,7 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
       </div>
       <div className="report-period-stepper">
         <button type="button" className="ghost-button" aria-label={tr("Previous period")} disabled={!canGoBack || loading} onClick={() => setPeriod(shiftPeriod(key, -1))}>‹</button>
-        <strong>{report ? periodLabel(report, locale) : "…"}{report?.period.partial && <small>{tr("so far")}</small>}</strong>
+        <strong>{report ? periodLabel(report, locale) : "…"}{report?.period.trackedFrom && report.period.trackedFrom !== report.period.from && <small>{tr("since")} {new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${report.period.trackedFrom}T12:00:00Z`))}</small>}{report?.period.partial && <small>{tr("so far")}</small>}</strong>
         <button type="button" className="ghost-button" aria-label={tr("Next period")} disabled={!canGoForward || loading} onClick={() => setPeriod(shiftPeriod(key, 1))}>›</button>
       </div>
     </section>

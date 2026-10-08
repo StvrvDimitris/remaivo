@@ -86,3 +86,34 @@ test('A year adds up its months, and transfers inside a group never show as flow
   assert.equal(year.netWorth.change, year.bridge.saved + year.bridge.adjustments + year.bridge.accountsAdded);
   assert.equal(year.groupFlows.some(flow => flow.from === flow.to), false);
 });
+
+test('The first tracked period starts on the first tracked day, with its opening balances as the start', () => {
+  const tracked = [
+    { id: 'spend', name: 'Spending', type: 'bank', balance_cents: 90000, archived: 0, created_at: '2026-08-20 10:00:00' },
+    { id: 'safe', name: 'Safe', type: 'savings', balance_cents: 200000, archived: 0, created_at: '2026-08-20 10:00:00' },
+    { id: 'pot', name: 'Pot', type: 'wallet', balance_cents: 10000, archived: 0, created_at: '2026-10-07 10:00:00' },
+  ];
+  const entries = [
+    tx('o-spend', 'opening_balance', 100000, '2026-08-20', null, 'spend'),
+    tx('o-safe', 'opening_balance', 200000, '2026-08-20', null, 'safe'),
+    tx('coffee', 'expense', 500, '2026-08-20', 'spend'),
+    tx('pay', 'income', 30000, '2026-09-01', 'spend'),
+    tx('bills', 'expense', 39500, '2026-09-10', 'spend'),
+    tx('o-pot', 'opening_balance', 10000, '2026-10-07', null, 'pot'),
+  ];
+  const build = key => buildAccountsReport({ period: reportPeriod(key, '2026-10-08'), accounts: tracked, transactions: entries, snapshots: [], firstDate: '2026-08-20' });
+  const year = build('2026');
+  assert.equal(year.period.trackedFrom, '2026-08-20');
+  assert.equal(year.netWorth.start, 300000);
+  // Same-day spending stays in the period; only the later account counts as added.
+  assert.deepEqual({ ...year.bridge }, { income: 30000, spending: 40000, saved: -10000, adjustments: 0, accountsAdded: 10000 });
+  assert.equal(year.netWorth.change, 0);
+  assert.equal(year.netWorth.end, 300000);
+  const august = build('2026-08');
+  assert.equal(august.period.trackedFrom, '2026-08-20');
+  assert.deepEqual([august.netWorth.start, august.netWorth.end, august.bridge.accountsAdded, august.bridge.spending], [300000, 299500, 0, 500]);
+  const september = build('2026-09');
+  assert.equal(september.period.trackedFrom, null);
+  assert.equal(september.netWorth.start, 299500);
+  assert.equal(september.bridge.accountsAdded, 0);
+});
