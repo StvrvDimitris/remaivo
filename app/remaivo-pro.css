@@ -362,6 +362,12 @@ html[data-theme="midnight"] {
 .v3-app .v3-dialog-actions { margin-top: 20px; padding-top: 16px; gap: 6px; border-color: var(--theme-line); }
 .v3-app .v3-dialog-actions button { min-height: 32px; font-weight: 500; color: var(--theme-text-soft); }
 .v3-app .v3-dialog-actions button:hover { color: var(--theme-text); }
+.v3-app .v3-skip-confirm { margin-top: 20px; padding: 14px; border: 1px solid var(--theme-negative); border-radius: 10px; background: var(--theme-negative-soft); display: grid; gap: 12px; }
+.v3-app .v3-skip-confirm p { margin: 0; display: grid; gap: 4px; }
+.v3-app .v3-skip-confirm small { color: var(--theme-text-soft); }
+.v3-app .v3-skip-confirm div { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.v3-app .v3-skip-confirm button { min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--theme-border); background: var(--theme-surface); color: var(--theme-text); font-weight: 500; }
+.v3-app .v3-skip-confirm .v3-danger { border-color: var(--theme-negative); background: var(--theme-negative); color: #fff; }
 .v3-app .v3-dialog-actions button:last-child { color: var(--theme-negative); }
 .v3-app .archive-zone { margin-top: 20px; padding-top: 16px; border-color: var(--theme-line); }
 .v3-app .archive-zone strong { font-size: .8125rem; font-weight: 500; color: var(--theme-text); }
