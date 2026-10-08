@@ -92,3 +92,17 @@ test('Daily allowance and other explanatory dialog notes have Greek translations
   assert.equal(translate(note,'en'),note);
   for (const key of ['Protected allocations do not move money between accounts. They describe its purpose.','A covered payment replaces the unpaid amount or consumes its bucket. It is counted once.']) assert.notEqual(translate(key,'el'),key);
 });
+
+test('Every message the server can send has a Greek version', () => {
+  const sources = ['app/api/finance/route.ts', ...fs.readdirSync('db').filter(name => name.endsWith('.ts')).map(name => `db/${name}`)];
+  for (const file of sources) {
+    for (const match of fs.readFileSync(file, 'utf8').matchAll(/(?:error:\s*|new (?:Error|ArchiveError)\()\s*(["'])((?:(?!\1).)*)\1/g)) {
+      assert.notEqual(translate(match[2], 'el'), match[2], `${file}: ${match[2]}`);
+    }
+  }
+  assert.equal(translate('Choose an active income category.', 'el'), 'Επιλέξτε ενεργή κατηγορία εσόδων.');
+  assert.equal(translate('Coffee already belongs to the Daily Necessities bucket.', 'el'), 'Η κατηγορία «Coffee» ανήκει ήδη στον φάκελο «Daily Necessities».');
+  assert.equal(translate('Restore the linked account “T212 Main Pot” first.', 'el'), 'Επαναφέρετε πρώτα τον συνδεδεμένο λογαριασμό «T212 Main Pot».');
+  assert.equal(translate('This plan ended on 2026-09-30. Create a new plan if you want it to continue.', 'el'), 'Αυτό το πλάνο έληξε στις 2026-09-30. Δημιουργήστε νέο πλάνο αν θέλετε να συνεχιστεί.');
+  assert.equal(translate('Coffee already belongs to the Daily Necessities bucket.', 'en'), 'Coffee already belongs to the Daily Necessities bucket.');
+});

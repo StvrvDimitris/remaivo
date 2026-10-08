@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
 import { reportingClass, isLedgerType } from '../app/transaction-classification.ts';
 import { accountFlow } from '../app/investment-valuations.ts';
+import * as defaultNames from '../app/default-names.ts';
 
 // Every account balance must equal the sum of its posted entries once opening balances exist.
 function ledgerTotal(db, accountId) {
@@ -75,6 +76,7 @@ class Statement {
   async all() { return { results: sqlite.prepare(this.sql).all(...this.args) }; }
   async run() { return { meta: sqlite.prepare(this.sql).run(...this.args) }; }
 }
+globalThis.__ledgerNames = defaultNames;
 globalThis.__ledgerTestEnv = { DB: {
   prepare: sql => new Statement(sql),
   batch: async statements => {
@@ -101,6 +103,7 @@ const financialToday = () => '2026-10-08';
 const reconcileV3 = async () => {};
 const v3Snapshot = async () => ({});
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
+const { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } = globalThis.__ledgerNames;
 class ArchiveError extends Error { status = 409; }
 ${fs.readFileSync('app/api/finance/route.ts', 'utf8').replace(/^import[^\n]*\r?\n/gm, '')}`, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 const { POST } = await import(pathToFileURL(path.join(routeScratch, 'route.mjs')));
@@ -159,4 +162,27 @@ test('Overdrawn accounts and cards in credit can be added and updated with negat
   assert.equal((await post('adjustBalance', { accountId: refunded.id, balance: '15' })).status, 200);
   assert.equal(balance(sqlite, refunded.id), -1500);
   for (const account of [overdraft, refunded]) assert.equal(ledgerTotal(sqlite, account.id), balance(sqlite, account.id), account.name);
+});
+
+test('Switching language renames only the defaults the user never changed', async () => {
+  const category = sqlite.prepare('INSERT INTO categories(id,user_id,name,kind) VALUES(?,?,?,?)');
+  category.run('c-groceries', 'owner', 'Groceries', 'expense');
+  category.run('c-salary', 'owner', 'Salary', 'income');
+  category.run('c-pets', 'owner', 'Pets', 'expense');
+  category.run('c-health', 'owner', 'Health', 'expense');
+  category.run('c-health-el', 'owner', 'Υγεία', 'expense');
+  sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('a-main','owner','Main account','bank',0)").run();
+  sqlite.prepare("INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES('v-main','owner','2026-10-01',?)").run(JSON.stringify({ name: 'Main plan', target: 1 }));
+  sqlite.prepare("INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES('v-custom','owner','2026-10-02',?)").run(JSON.stringify({ name: 'Holiday plan', target: 1 }));
+  const names = () => Object.fromEntries(sqlite.prepare("SELECT id, name FROM categories WHERE user_id='owner' AND id LIKE 'c-%'").all().map(row => [row.id, row.name]));
+  const planName = id => JSON.parse(sqlite.prepare('SELECT config_json FROM v3_versions WHERE id = ?').get(id).config_json).name;
+  assert.equal((await post('updateLanguage', { language: 'el' })).status, 200);
+  // A Greek "Υγεία" already exists, so the English "Health" keeps its name rather than colliding.
+  assert.deepEqual(names(), { 'c-groceries': 'Σούπερ μάρκετ', 'c-salary': 'Μισθός', 'c-pets': 'Pets', 'c-health': 'Health', 'c-health-el': 'Υγεία' });
+  assert.equal(sqlite.prepare("SELECT name FROM accounts WHERE id='a-main'").get().name, 'Κύριος λογαριασμός');
+  assert.deepEqual([planName('v-main'), planName('v-custom')], ['Κύριο πλάνο', 'Holiday plan']);
+  assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='owner'").get().ui_language, 'el');
+  assert.equal((await post('updateLanguage', { language: 'en' })).status, 200);
+  assert.deepEqual(names(), { 'c-groceries': 'Groceries', 'c-salary': 'Salary', 'c-pets': 'Pets', 'c-health': 'Health', 'c-health-el': 'Υγεία' });
+  assert.equal(planName('v-main'), 'Main plan');
 });

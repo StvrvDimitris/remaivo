@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
+import * as defaultNames from '../app/default-names.ts';
+globalThis.__spareNames = defaultNames;
 
 const scratch = path.resolve('work/spare-tests');
 fs.mkdirSync(scratch, { recursive: true });
@@ -95,6 +97,7 @@ const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;
 const sweepSpare = globalThis.__spareTestSweep;
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
+const { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } = globalThis.__spareNames;
 class ArchiveError extends Error { status = 409; }
 ${routeSource}`, 'route.mjs');
 const { POST } = await import(pathToFileURL(path.join(scratch, 'route.mjs')));

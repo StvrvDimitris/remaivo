@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const scratch = path.resolve("work/setup-tests");
 fs.mkdirSync(scratch, { recursive: true });
-for (const [source, target] of [["app/finance-dates.ts", "dates"], ["app/spare-change.ts", "spare-change"], ["app/v3-engine.ts", "engine"], ["db/ensure.ts", "ensure"], ["db/spare.ts", "spare"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
+for (const [source, target] of [["app/default-names.ts", "default-names"], ["app/finance-dates.ts", "dates"], ["app/spare-change.ts", "spare-change"], ["app/v3-engine.ts", "engine"], ["db/ensure.ts", "ensure"], ["db/spare.ts", "spare"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
   const code = fs.readFileSync(source, "utf8")
     .replaceAll('import { env } from "cloudflare:workers";', "const env = globalThis.__setupEnv;")
     .replaceAll("import { env } from 'cloudflare:workers';", "const env = globalThis.__setupEnv;")
@@ -20,7 +20,8 @@ for (const [source, target] of [["app/finance-dates.ts", "dates"], ["app/spare-c
     .replaceAll('"../app/spare-change"', '"./spare-change.mjs"')
     .replaceAll("'../app/spare-change'", "'./spare-change.mjs'")
     .replaceAll("'./spare'", "'./spare.mjs'")
-    .replaceAll('"./v3"', '"./v3.mjs"');
+    .replaceAll('"./v3"', '"./v3.mjs"')
+    .replaceAll('"../app/default-names"', '"./default-names.mjs"');
   const resolved = code.replaceAll('"./ensure"', '"./ensure.mjs"').replaceAll("'./ensure'", "'./ensure.mjs'");
   fs.writeFileSync(path.join(scratch, `${target}.mjs`), ts.transpileModule(resolved, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 }
@@ -95,6 +96,10 @@ test("setup saves the selected UI language without changing opening money", asyn
   assert.equal(sqlite.prepare("SELECT SUM(balance_cents) AS amount FROM accounts WHERE user_id='greek-owner'").get().amount,132000);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS amount FROM transactions WHERE user_id='greek-owner' AND type!='opening_balance'").get().amount,0);
   assert.equal(sqlite.prepare("SELECT ui_language FROM profiles WHERE user_id='fresh-owner'").get().ui_language,"en");
+  const greekCategories = sqlite.prepare("SELECT name FROM categories WHERE user_id='greek-owner' ORDER BY name").all().map(row => row.name);
+  assert.ok(greekCategories.includes("Σούπερ μάρκετ") && greekCategories.includes("Μισθός") && !greekCategories.includes("Groceries"));
+  assert.equal(JSON.parse(sqlite.prepare("SELECT config_json FROM v3_versions WHERE user_id='greek-owner'").get().config_json).name, "Κύριο πλάνο");
+  assert.ok(sqlite.prepare("SELECT name FROM categories WHERE user_id='fresh-owner'").all().some(row => row.name === "Groceries"));
 });
 
 test("setup can create a payday Plan with weekday pacing, a chosen week start and signed balances", async () => {

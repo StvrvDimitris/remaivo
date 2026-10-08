@@ -90,7 +90,7 @@ export function AccountsReportPage({ currency, revision }: { currency: string; r
         <button type="button" className="ghost-button" aria-label={tr("Next period")} disabled={!canGoForward || loading} onClick={() => setPeriod(shiftPeriod(key, 1))}>›</button>
       </div>
     </section>
-    {error && <section className="page-card"><div className="empty-state"><strong>{tr("The accounts report could not load")}</strong><p>{error}</p></div></section>}
+    {error && <section className="page-card"><div className="empty-state"><strong>{tr("The accounts report could not load")}</strong><p>{tr(error)}</p></div></section>}
     {loading && !report && <section className="page-card stat-loading">{tr("Adding up your accounts…")}</section>}
     {report && <div className={loading ? "statistics-results is-loading" : "statistics-results"}>
       <section className="stat-summary-grid report-summary">

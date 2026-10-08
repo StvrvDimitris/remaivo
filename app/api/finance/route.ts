@@ -11,6 +11,7 @@ import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
 import { isLedgerType, type StatisticsMode } from "../../transaction-classification";
+import { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } from "../../default-names";
 import { buildAccountsReport, reportPeriod, type ReportAccount, type ReportTransaction } from "../../accounts-report";
 import type { InvestmentValuationSnapshot } from "../../investment-valuations";
 
@@ -733,7 +734,20 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE profiles SET default_expense_account_id = ? WHERE user_id = ?").bind(accountId, user.userId).run();
     } else if (action === "updateLanguage") {
       if (!["en", "el"].includes(String(payload.language))) return Response.json({ error: "Choose English or Greek." }, { status: 400 });
-      await env.DB.prepare("UPDATE profiles SET ui_language = ? WHERE user_id = ?").bind(payload.language, user.userId).run();
+      // Rename defaults the user never changed, so their names follow the interface language.
+      const language = nameLanguage(payload.language);
+      const statements = [env.DB.prepare("UPDATE profiles SET ui_language = ? WHERE user_id = ?").bind(language, user.userId)];
+      for (const category of defaultCategories) for (const previous of otherNames(category, language)) {
+        statements.push(env.DB.prepare("UPDATE categories SET name = ? WHERE user_id = ? AND kind = ? AND name = ? AND NOT EXISTS (SELECT 1 FROM categories taken WHERE taken.user_id = ? AND taken.kind = ? AND taken.name = ?)")
+          .bind(category[language], user.userId, category.kind, previous, user.userId, category.kind, category[language]));
+      }
+      for (const previous of otherNames(defaultAccountName, language)) {
+        statements.push(env.DB.prepare("UPDATE accounts SET name = ? WHERE user_id = ? AND name = ?").bind(defaultAccountName[language], user.userId, previous));
+      }
+      for (const previous of otherNames(defaultPlanName, language)) {
+        statements.push(env.DB.prepare("UPDATE v3_versions SET config_json = json_set(config_json, '$.name', ?) WHERE user_id = ? AND json_extract(config_json, '$.name') = ?").bind(defaultPlanName[language], user.userId, previous));
+      }
+      await env.DB.batch(statements);
     } else if (action === "updateTheme") {
       if (!isUITheme(payload.theme)) return Response.json({ error: "Choose an available theme." }, { status: 400 });
       await env.DB.prepare("UPDATE profiles SET ui_theme = ? WHERE user_id = ?").bind(payload.theme, user.userId).run();

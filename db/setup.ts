@@ -2,22 +2,12 @@ import { env } from "cloudflare:workers";
 import { addCalendarInterval, financialToday, validTimeZone } from "../app/finance-dates";
 import type { BudgetConfig } from "../app/v3-engine";
 import { ensureFinanceSchema } from "./ensure";
+import { defaultCategories, defaultPlanName, nameLanguage, type NameLanguage } from "../app/default-names";
 
 type SetupAccount = { name?: unknown; type?: unknown; balance?: unknown; creditLimit?: unknown; color?: unknown; includeSpendable?: unknown };
 type SetupPlan = { target?: unknown; period?: unknown; payday?: unknown; anchor?: unknown; allocation?: unknown; carry?: unknown; carryCap?: unknown; weights?: unknown };
 type SetupPayload = { language?: unknown; currency?: unknown; timezone?: unknown; weekStart?: unknown; accounts?: unknown; plan?: unknown; budgets?: unknown; budgetMode?: unknown; carryMode?: unknown };
 
-const categories = [
-  ["Groceries", "expense", "#d8ead7"],
-  ["Eating out", "expense", "#f5ddcf"],
-  ["Transport", "expense", "#d9e9ec"],
-  ["Home & bills", "expense", "#eadfcb"],
-  ["Shopping", "expense", "#ead9e6"],
-  ["Health", "expense", "#d8e7df"],
-  ["Entertainment", "expense", "#e6e0f2"],
-  ["Salary", "income", "#d8ead7"],
-  ["Other income", "income", "#d9e9ec"],
-] as const;
 
 // Balances may be negative: an overdrawn account, or a credit card that is in your favour.
 function signedMoneyCents(value: unknown) {
@@ -37,8 +27,8 @@ function moneyCents(value: unknown) {
 const defaultWeights = [1, 1, 1, 1, 1, 1.4, 1.4];
 const validDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
-function setupConfig(payload: SetupPayload, weekStart: number, today: string, monthStart: string): BudgetConfig {
-  const base = { name: "Main plan", anchor: monthStart, end: addCalendarInterval(monthStart, "monthly"), payday: 1, carryCap: 0, weights: defaultWeights, weekStart };
+function setupConfig(payload: SetupPayload, weekStart: number, today: string, monthStart: string, language: NameLanguage): BudgetConfig {
+  const base = { name: defaultPlanName[language], anchor: monthStart, end: addCalendarInterval(monthStart, "monthly"), payday: 1, carryCap: 0, weights: defaultWeights, weekStart };
   if (!payload.plan || typeof payload.plan !== "object") {
     // Earlier clients sent a monthly amount with adaptive or fixed pacing.
     const budget = (payload.budgets || {}) as { monthly?: unknown };
@@ -83,7 +73,7 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
   const weekStart = Math.max(0, Math.min(6, Math.round(Number(payload.weekStart) || 0)));
   const today = financialToday(timezone);
   const monthStart = `${today.slice(0, 7)}-01`;
-  const config = setupConfig(payload, weekStart, today, monthStart);
+  const config = setupConfig(payload, weekStart, today, monthStart, nameLanguage(language));
 
   const open = "EXISTS (SELECT 1 FROM profiles WHERE user_id = ? AND setup_complete = 0)";
   const statements: D1PreparedStatement[] = [
@@ -108,9 +98,10 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
     if (balance) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO transactions (id, user_id, account_id, destination_account_id, type, description, amount_cents, date, committed, counts_monthly) SELECT ?, ?, ?, ?, 'opening_balance', 'Opening balance', ?, ?, 0, 0 WHERE ${open}`)
       .bind(`opening:${accountId}`, userId, balance < 0 ? accountId : null, balance > 0 ? accountId : null, Math.abs(balance), today, userId));
   }
-  for (const [name, kind, color] of categories) {
+  // Default categories start in the chosen interface language.
+  for (const category of defaultCategories) {
     statements.push(env.DB.prepare(`INSERT OR IGNORE INTO categories (id, user_id, name, kind, color) SELECT ?, ?, ?, ?, ? WHERE ${open}`)
-      .bind(crypto.randomUUID(), userId, name, kind, color, userId));
+      .bind(crypto.randomUUID(), userId, category[nameLanguage(language)], category.kind, category.color, userId));
   }
   statements.push(env.DB.prepare(`INSERT OR IGNORE INTO v3_versions (id, user_id, effective_from, config_json) SELECT ?, ?, '1900-01-01', ? WHERE ${open}`)
     .bind(`initial:${userId}`, userId, JSON.stringify(config), userId));

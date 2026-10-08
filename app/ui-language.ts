@@ -5,7 +5,22 @@ export function normalizeLanguage(value: unknown): UILanguage { return value ===
 export function translate(text: string, language: UILanguage): string {
   if (language !== 'el') return text;
   if (/^Week [1-4]\+?$/.test(text)) return text.replace('Week', 'Εβδομάδα');
-  return greek[text] ?? text;
+  return greek[text] ?? translateMessage(text) ?? text;
+}
+
+// Server messages that include names or dates; names stay as the user wrote them.
+function translateMessage(text: string): string | null {
+  let match = text.match(/^Choose an active (expense|income) category\.$/);
+  if (match) return `Επιλέξτε ενεργή κατηγορία ${match[1] === 'income' ? 'εσόδων' : 'εξόδων'}.`;
+  match = text.match(/^Restore the linked (account|category)(?: “(.+)”)? first\.$/);
+  if (match) return `Επαναφέρετε πρώτα ${match[1] === 'account' ? 'τον συνδεδεμένο λογαριασμό' : 'τη συνδεδεμένη κατηγορία'}${match[2] ? ` «${match[2]}»` : ''}.`;
+  match = text.match(/^“(.+)” already uses one of this bucket’s categories\. Change its categories before restoring this bucket\.$/);
+  if (match) return `Ο φάκελος «${match[1]}» χρησιμοποιεί ήδη μία από τις κατηγορίες αυτού του φακέλου. Αλλάξτε τις κατηγορίες του πριν από την επαναφορά.`;
+  match = text.match(/^This plan ended on (\d{4}-\d{2}-\d{2})\. Create a new plan if you want it to continue\.$/);
+  if (match) return `Αυτό το πλάνο έληξε στις ${match[1]}. Δημιουργήστε νέο πλάνο αν θέλετε να συνεχιστεί.`;
+  match = text.match(/^(.+) already belongs to the (.+) bucket\.$/);
+  if (match) return `Η κατηγορία «${match[1]}» ανήκει ήδη στον φάκελο «${match[2]}».`;
+  return null;
 }
 
 // Only call this for generated Insights commentary, never user-entered text.
