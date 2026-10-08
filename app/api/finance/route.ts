@@ -11,6 +11,8 @@ import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
 import { isLedgerType, type StatisticsMode } from "../../transaction-classification";
+import { buildAccountsReport, reportPeriod, type ReportAccount, type ReportTransaction } from "../../accounts-report";
+import type { InvestmentValuationSnapshot } from "../../investment-valuations";
 
 export const dynamic = "force-dynamic";
 
@@ -199,6 +201,33 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
   ).bind(...bindings, pageSize, (page - 1) * pageSize).all<Record<string, unknown>>();
 
   return { items: rows.results, page, pageSize, total, totalPages, from, to, today };
+}
+
+async function accountsReportResponse(user: FinanceUser, request: Request) {
+  await ensureFinanceSchema();
+  const profile = await env.DB.prepare("SELECT setup_complete, timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<Record<string, unknown>>();
+  const today = financialToday(String(profile?.timezone || "UTC"));
+  if (!profile?.setup_complete) return { needsSetup: true, today };
+  await reconcileV3(user.userId, today);
+  const period = reportPeriod(new URL(request.url).searchParams.get("period"), today);
+  const [accounts, snapshots, first] = await env.DB.batch([
+    env.DB.prepare("SELECT id, name, type, balance_cents, archived, created_at, color FROM accounts WHERE user_id = ?").bind(user.userId),
+    env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? AND snapshot_date <= ?").bind(user.userId, period.to),
+    env.DB.prepare("SELECT MIN(date) AS date FROM transactions WHERE user_id = ? AND status = 'posted'").bind(user.userId),
+  ]);
+  const snapshotRows = snapshots.results as InvestmentValuationSnapshot[];
+  // Value estimates need every entry since each account's latest snapshot, which may predate the period.
+  const latestSnapshots = new Map<string, string>();
+  for (const snapshot of snapshotRows) if ((latestSnapshots.get(snapshot.account_id) ?? "") < snapshot.snapshot_date) latestSnapshots.set(snapshot.account_id, snapshot.snapshot_date);
+  const since = [...latestSnapshots.values()].reduce((earliest, date) => date < earliest ? date : earliest, period.from);
+  const transactions = await env.DB.prepare("SELECT id, type, amount_cents, date, account_id, destination_account_id FROM transactions WHERE user_id = ? AND status = 'posted' AND date >= ?").bind(user.userId, since).all<ReportTransaction>();
+  return buildAccountsReport({
+    period,
+    accounts: accounts.results as ReportAccount[],
+    transactions: transactions.results,
+    snapshots: snapshotRows,
+    firstDate: (first.results[0] as { date: string | null } | undefined)?.date ?? null,
+  });
 }
 
 async function statisticsResponse(user: FinanceUser, request: Request) {
@@ -413,6 +442,7 @@ export async function GET(request: Request) {
     }
     if (view === "transactions") return Response.json(await pagedTransactions(user, request));
     if (view === "statistics") return Response.json(await statisticsResponse(user, request));
+    if (view === "accountsReport") return Response.json(await accountsReportResponse(user, request));
     return Response.json(await snapshot(user));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load your finances." }, { status: error instanceof ArchiveError ? error.status : 500 });
