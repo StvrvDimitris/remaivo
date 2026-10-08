@@ -24,9 +24,9 @@ globalThis.__archiveEnv = { DB: {
   },
 } };
 const scratch = path.resolve('work/archive-tests'); fs.mkdirSync(scratch, { recursive: true });
-for (const [source, destination] of [['app/archive-types.ts', 'types'], ['app/finance-dates.ts', 'dates'], ['db/archive.ts', 'archive']]) {
+for (const [source, destination] of [['app/archive-types.ts', 'types'], ['app/finance-dates.ts', 'dates'], ['app/v3-engine.ts', 'engine'], ['db/archive.ts', 'archive']]) {
   let text = fs.readFileSync(source, 'utf8').replace('import { env } from "cloudflare:workers";', 'const env = globalThis.__archiveEnv;')
-    .replace('"../app/finance-dates"', '"./dates.mjs"').replace('"../app/archive-types"', '"./types.mjs"')
+    .replace('"../app/finance-dates"', '"./dates.mjs"').replace("'./finance-dates'", "'./dates.mjs'").replace('"../app/v3-engine"', '"./engine.mjs"').replace('"../app/archive-types"', '"./types.mjs"')
     .replace('import { currentPeriod } from "./v3";', 'const currentPeriod = async () => ({ period: { id: "current" } });');
   fs.writeFileSync(path.join(scratch, destination + '.mjs'), ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 }
@@ -106,12 +106,12 @@ test('Pay-later restoration reschedules unpaid installments while retaining paid
 
 test('Bucket restore preserves the current allocation and refuses conflicting categories', async () => {
   sqlite.prepare("INSERT INTO categories(id,user_id,name,kind) VALUES('bucket-cat','bucket-owner','Fuel','expense')").run();
-  sqlite.prepare("INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents,archived) VALUES('bucket','bucket-owner','Fuel','protected','bucket-cat',16000,1)").run();
-  sqlite.prepare("INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents,released) VALUES('current:bucket','bucket-owner','current','bucket','Fuel','protected','bucket-cat',18000,1)").run();
-  sqlite.prepare("INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents) VALUES('conflict','bucket-owner','Replacement','protected','bucket-cat',5000)").run();
-  await assert.rejects(() => restoreArchive('bucket-owner',today,{kind:'bucket',id:'bucket'}), /already uses this category/);
+  sqlite.prepare("INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_ids,target_cents,archived) VALUES('bucket','bucket-owner','Fuel','protected','[\"bucket-cat\"]',16000,1)").run();
+  sqlite.prepare("INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,released) VALUES('current:bucket','bucket-owner','current','bucket','Fuel','protected','[\"bucket-cat\"]',18000,1)").run();
+  sqlite.prepare("INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_ids,target_cents) VALUES('conflict','bucket-owner','Replacement','protected','[\"other-cat\",\"bucket-cat\"]',5000)").run();
+  await assert.rejects(() => restoreArchive('bucket-owner',today,{kind:'bucket',id:'bucket'}), /already uses one of this bucket’s categories/);
   assert.equal(row('v3_bucket_templates','bucket').archived,1);
-  sqlite.prepare("UPDATE v3_bucket_templates SET category_id=NULL WHERE id='conflict'").run();
+  sqlite.prepare("UPDATE v3_bucket_templates SET category_ids='[\"other-cat\"]' WHERE id='conflict'").run();
   await restoreArchive('bucket-owner',today,{kind:'bucket',id:'bucket'});
   assert.equal(row('v3_bucket_templates','bucket').archived,0);
   assert.equal(row('v3_bucket_periods','current:bucket').target_cents,18000);

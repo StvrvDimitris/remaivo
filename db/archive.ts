@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { addCalendarInterval } from "../app/finance-dates";
 import { archiveKinds, type ArchiveItem, type ArchiveKind } from "../app/archive-types";
+import { parseCategoryIds } from "../app/v3-engine";
 import { currentPeriod } from "./v3";
 
 export class ArchiveError extends Error {
@@ -62,17 +63,20 @@ export async function restoreArchive(user: string, today: string, payload: Recor
   }
   if (kind === "bucket") {
     const { period } = await currentPeriod(user, today);
-    if (item.category_id) {
-      const conflict = await env.DB.prepare(`SELECT name FROM v3_bucket_templates WHERE user_id = ? AND archived = 0 AND category_id = ? AND id != ?
-        UNION ALL SELECT name FROM v3_bucket_periods WHERE user_id = ? AND period_id = ? AND category_id = ? AND bucket_id != ? LIMIT 1`)
-        .bind(user, item.category_id, id, user, period.id, item.category_id, id).first<{name: string}>();
-      if (conflict) throw new ArchiveError(`“${conflict.name}” already uses this category. Change its category before restoring this bucket.`);
+    const categoryIds = parseCategoryIds(item.category_ids);
+    for (const categoryId of categoryIds) await requireActive("categories", categoryId);
+    if (categoryIds.length) {
+      const others = await env.DB.prepare(`SELECT name, category_ids FROM v3_bucket_templates WHERE user_id = ? AND archived = 0 AND id != ?
+        UNION ALL SELECT name, category_ids FROM v3_bucket_periods WHERE user_id = ? AND period_id = ? AND bucket_id != ?`)
+        .bind(user, id, user, period.id, id).all<{name: string; category_ids: string}>();
+      const conflict = others.results.find(other => parseCategoryIds(other.category_ids).some(categoryId => categoryIds.includes(categoryId)));
+      if (conflict) throw new ArchiveError(`“${conflict.name}” already uses one of this bucket’s categories. Change its categories before restoring this bucket.`);
     }
     await env.DB.batch([
       env.DB.prepare("UPDATE v3_bucket_templates SET archived = 0 WHERE id = ? AND user_id = ? AND archived = 1").bind(id, user),
-      env.DB.prepare(`INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id)
+      env.DB.prepare(`INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET released = 0`)
-        .bind(`${period.id}:${id}`, user, period.id, id, item.name, item.kind, item.category_id, item.target_cents, item.priority, item.rollover, item.rollover_cap, item.destination_id),
+        .bind(`${period.id}:${id}`, user, period.id, id, item.name, item.kind, item.category_ids, item.target_cents, item.priority, item.rollover, item.rollover_cap, item.destination_id),
     ]);
     return;
   }

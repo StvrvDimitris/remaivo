@@ -3,9 +3,16 @@ import { addCalendarInterval } from './finance-dates';
 export type MoneyAccount = { id: string; name: string; type: string; balance_cents: number; include_spendable: number; archived: number; currency: string };
 export type MoneyTransaction = { id: string; date: string; amount_cents: number; type: string; category_id: string | null; account_id: string | null; destination_account_id: string | null; counts_monthly: number; committed: number; recurring_plan_id: string | null; installment_plan_id: string | null; description: string; status?: string };
 export type BudgetConfig = { name: string; target: number; period: 'monthly'|'weekly'|'fortnightly'|'payday'|'custom'; anchor: string; end: string; payday: number; allocation: 'even'|'adaptive'|'weighted'; carry: 'none'|'positive'|'signed'|'capped'; carryCap: number; weights: number[]; weekStart: number };
-export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_id: string | null; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
+export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_ids: string[]; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
 export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; counts_monthly?: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; committed: number; auto_post: number; status: string; transaction_id: string | null };
 export type Assignment = { transaction_id: string; bucket_id: string; amount_cents: number };
+// Buckets store their matched categories as a JSON array of category IDs.
+export function parseCategoryIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (typeof value !== 'string' || !value) return [];
+  try { return parseCategoryIds(JSON.parse(value)); } catch { return []; }
+}
+export const coversCategory = (bucket: Pick<Bucket,'category_ids'>, categoryId: string | null) => Boolean(categoryId && bucket.category_ids.includes(categoryId));
 export const plusDays = (date: string, days: number) => new Date(new Date(date+'T12:00:00Z').valueOf()+days*86400000).toISOString().slice(0,10);
 export const daysApart = (a: string,b: string) => Math.round((new Date(b+'T12:00:00Z').valueOf()-new Date(a+'T12:00:00Z').valueOf())/86400000);
 export function planPace(input:{start:string;end:string;today:string;target:number;spent:number}){
@@ -26,7 +33,7 @@ export type PlanEndForecastInput = {
   start: string; end: string; today: string;
   target: number; spent: number;
   transactions: MoneyTransaction[]; occurrences: Occurrence[];
-  buckets: (Pick<Bucket,'id'|'kind'|'category_id'|'destination_id'|'released'> & {spent:number;planned:number;extra:number})[];
+  buckets: (Pick<Bucket,'id'|'kind'|'category_ids'|'destination_id'|'released'> & {spent:number;planned:number;extra:number})[];
   allocationByTx?: Record<string,{bucket:string;amount:number}[]>;
   firstRecordedDate?: string;
 };
@@ -74,7 +81,7 @@ export function planEndForecast(input:PlanEndForecastInput):PlanEndForecast|null
     if(index>=0&&index<sampleDays){
       const allocations=input.allocationByTx?.[t.id];
       const matchesBucket=input.buckets.some(b=>
-        Boolean(b.category_id&&b.category_id===t.category_id)||
+        coversCategory(b,t.category_id)||
         Boolean(b.kind==='goal'&&b.destination_id&&b.destination_id===t.destination_account_id)
       );
       // Use the exact current-period split when available. For older periods,
@@ -141,7 +148,7 @@ export function buildBudget(input:EngineInput) {
   const transactionAmounts=new Map<string,number>(); const allocationByTx:Record<string,{bucket:string;amount:number}[]>={};
   const explicitByTx=new Map<string,Assignment[]>();for(const a of input.assignments)explicitByTx.set(a.transaction_id,[...(explicitByTx.get(a.transaction_id)||[]),a]);
   const sorted=[...input.buckets].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
-  const matched=(tx:MoneyTransaction)=>sorted.find(b=>b.category_id&&b.category_id===tx.category_id)||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===tx.destination_account_id);
+  const matched=(tx:MoneyTransaction)=>sorted.find(b=>coversCategory(b,tx.category_id))||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===tx.destination_account_id);
   let everydaySpent=0,commitmentSpent=0;
   for(const tx of counted){
     const splits=explicitByTx.get(tx.id);let used=0;
@@ -152,7 +159,7 @@ export function buildBudget(input:EngineInput) {
   }
   const plansByBucket=new Map<string,number>();let upcoming=0;
   const occurrenceBucket:Record<string,string>={};
-  for(const o of active){const b=sorted.find(b=>b.category_id&&b.category_id===o.category_id)||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=Math.max(0,o.amount_cents-o.paid_cents);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else upcoming+=amount;}
+  for(const o of active){const b=sorted.find(b=>coversCategory(b,o.category_id))||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=Math.max(0,o.amount_cents-o.paid_cents);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else upcoming+=amount;}
   const buckets=sorted.map(b=>{const spent=transactionAmounts.get(b.id)||0;const planned=plansByBucket.get(b.id)||0;const extra=b.released?0:Math.max(0,b.target_cents-spent-planned);return {...b,spent,planned,extra,remaining:planned+extra,deficit:Math.max(0,spent+planned-b.target_cents),burden:spent+planned+extra};});
   const protectedRemaining=upcoming+buckets.reduce((a,b)=>a+b.remaining,0);
   const totalSpent=counted.reduce((a,b)=>a+b.amount_cents,0);

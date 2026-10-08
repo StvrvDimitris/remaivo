@@ -327,6 +327,12 @@ html[data-theme="midnight"] {
 .v3-app .single-check { border: 1px solid var(--theme-border); border-radius: 10px; }
 .v3-app :is(.check-stack, .single-check) label:hover, .v3-app .single-check:hover { background: var(--theme-soft); }
 .v3-app :is(.check-stack, .single-check) input { width: 16px; height: 16px; margin: 1px 0 0; }
+.v3-app .v3-category-picker { display: grid; gap: 6px; min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
+.v3-app .v3-category-picker legend { padding: 0; margin-bottom: 6px; font-size: .8125rem; font-weight: 500; color: var(--theme-text); }
+.v3-app .v3-category-picker .check-stack { max-height: 240px; overflow-y: auto; }
+.v3-app .v3-category-picker .check-stack label:has(input:disabled) { cursor: not-allowed; color: var(--theme-muted); }
+.v3-app .v3-category-picker label small { display: block; font-size: .75rem; color: var(--theme-muted); }
+.v3-app .v3-category-picker > small { font-size: .75rem; line-height: 1.5; color: var(--theme-muted); }
 .v3-app .v3-check { margin-top: 12px; padding: 11px 14px; border: 1px solid var(--theme-border); border-radius: 10px; color: var(--theme-text); }
 .v3-app :is(.budget-form-note, .correction-note, .installment-preview, .locked-summary) { padding: 12px 14px; border: 0; border-radius: 10px; background: var(--theme-soft); color: var(--theme-text-soft); }
 .v3-app :is(.budget-form-note, .correction-note) > span { color: var(--theme-muted); font-size: 1rem; }

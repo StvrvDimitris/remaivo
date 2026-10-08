@@ -23,7 +23,7 @@ const config={name:'Test',target:100000,period:'monthly',anchor:'2026-09-01',end
 const account={id:'cash',name:'Cash',type:'checking',currency:'EUR',archived:0,include_spendable:1,balance_cents:100000};
 const tx=(id,amount,extra={})=>({id,date:'2026-09-17',amount_cents:amount,type:'expense',category_id:null,account_id:'cash',destination_account_id:null,counts_monthly:1,committed:0,recurring_plan_id:null,installment_plan_id:null,description:id,status:'posted',...extra});
 const occurrence=(id,amount,extra={})=>({id,source_kind:'recurring',source_id:id,scheduled_date:'2026-09-20',due_date:'2026-09-20',title:id,type:'expense',amount_cents:amount,paid_cents:0,account_id:'cash',destination_account_id:null,category_id:null,committed:1,auto_post:0,status:'upcoming',transaction_id:null,...extra});
-const bucket={id:'food',name:'Food',kind:'protected',category_id:'groceries',target_cents:20000,released:0,priority:0,rollover:'none',rollover_cap:0,destination_id:null};
+const bucket={id:'food',name:'Food',kind:'protected',category_ids:['groceries'],target_cents:20000,released:0,priority:0,rollover:'none',rollover_cap:0,destination_id:null};
 const base={today:'2026-09-17',start:'2026-09-01',end:'2026-10-01',config,funding:100000,accounts:[account],transactions:[],buckets:[],occurrences:[],assignments:[]};
 
 test('Cent allocation conserves the full amount, dates clamp at calendar boundaries',()=>{
@@ -73,10 +73,10 @@ test('The zero-MAD fallback preserves a recurring weekly shop while softening an
 });
 test('Released, active and overspent buckets add only unspent allowance while keeping every actual charge',()=>{
  const today='2026-09-18',start='2026-09-01',end='2026-10-01';
- const fuel={...bucket,id:'fuel',name:'Fuel',category_id:'fuel',target_cents:15800,released:1};
- const food={...bucket,id:'food',name:'Food',category_id:'food',target_cents:30000,released:0};
- const goal={...bucket,id:'goal',name:'Savings milestone',kind:'goal',category_id:null,destination_id:'savings',target_cents:10000,released:0};
- const over={...bucket,id:'over',name:'Already overspent',category_id:'other',target_cents:10000,released:0};
+ const fuel={...bucket,id:'fuel',name:'Fuel',category_ids:['fuel'],target_cents:15800,released:1};
+ const food={...bucket,id:'food',name:'Food',category_ids:['food'],target_cents:30000,released:0};
+ const goal={...bucket,id:'goal',name:'Savings milestone',kind:'goal',category_ids:[],destination_id:'savings',target_cents:10000,released:0};
+ const over={...bucket,id:'over',name:'Already overspent',category_ids:['other'],target_cents:10000,released:0};
  const fuelTx=tx('fuel-charge',15800,{date:'2026-09-17',category_id:'fuel'});
  const foodTx=tx('food-shop',5000,{date:'2026-09-10',category_id:'food'});
  const everydayTx=tx('coffee',1000,{date:'2026-09-15'});
@@ -135,6 +135,16 @@ test('Protected spending and commitments overlap once; released money, splits an
  r=engine.buildBudget({...base,buckets:[{...bucket,released:1}],transactions:[tx('food',5000,{category_id:'groceries'})],occurrences:[occurrence('foodplan',7000,{category_id:'groceries'})]});assert.equal(r.available,88000);
  r=engine.buildBudget({...base,buckets:[bucket],transactions:[tx('mixed',25000)],assignments:[{transaction_id:'mixed',bucket_id:'food',amount_cents:15000}]});assert.equal(r.everydaySpent,10000);assert.equal(r.available,70000);
  r=engine.buildBudget({...base,buckets:[bucket],transactions:[tx('food',30000,{category_id:'groceries'}),tx('old',20000,{status:'corrected'}),tx('excluded',10000,{counts_monthly:0})]});assert.equal(r.buckets[0].deficit,10000);assert.equal(r.available,70000);
+});
+test('A bucket with several categories covers spending and plans from each of them once',()=>{
+ const multi={...bucket,category_ids:['groceries','household']};
+ const r=engine.buildBudget({...base,buckets:[multi],transactions:[tx('market',4000,{category_id:'groceries'}),tx('soap',1500,{category_id:'household'}),tx('fun',3000,{category_id:'leisure'})],occurrences:[occurrence('delivery',2000,{category_id:'household'})]});
+ assert.equal(r.buckets[0].spent,5500);assert.equal(r.buckets[0].planned,2000);assert.equal(r.buckets[0].extra,12500);
+ assert.equal(r.everydaySpent,3000);assert.equal(r.upcoming,0);
+ assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);
+ assert.deepEqual(engine.parseCategoryIds('["a","b"]'),['a','b']);
+ assert.deepEqual(engine.parseCategoryIds('not json'),[]);
+ assert.deepEqual(engine.parseCategoryIds(null),[]);
 });
 test('Daily and weekly guidance use one pool',()=>{
  for(const mode of ['adaptive','even','weighted'])for(const carry of ['none','positive','signed','capped']){const r=engine.buildBudget({...base,config:{...config,allocation:mode,carry,carryCap:10000},transactions:[tx('food',6000)]});assert.equal(r.available,94000);assert.equal(r.daily.spent,6000);assert.equal(r.weekly.spent,6000);}
@@ -243,6 +253,23 @@ test('Create, move, release and configure use cash limits and reject invalid dat
  await assert.rejects(v3.v3Action(user,base.today,'v3Fund',{amount:'999999'}));
  await v3.v3Action(user,base.today,'v3Configure',{...config,target:'1000',carryCap:'0'});
  await assert.rejects(v3.v3Action(user,base.today,'v3Configure',{...config,target:'1000',anchor:'2026-02-30'}));
+});
+test('Buckets save several categories, refuse shared or inactive ones, and keep archived links already in use',async()=>{
+ const owner='multi-owner';
+ sqlite.prepare("INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES('multi-version',?,'2026-09-01',?)").run(owner,JSON.stringify(config));
+ for(const [id,kind] of [['m-food','expense'],['m-home','expense'],['m-fuel','expense'],['m-salary','income']])sqlite.prepare("INSERT INTO categories(id,user_id,name,kind) VALUES(?,?,?,?)").run(id,owner,id.slice(2),kind);
+ await v3.v3Action(owner,base.today,'v3Bucket',{id:undefined,name:'Essentials',target:'200',kind:'protected',categoryIds:['m-food','m-home','m-food']});
+ const essentials=sqlite.prepare("SELECT * FROM v3_bucket_templates WHERE user_id=? AND name='Essentials'").get(owner);
+ assert.deepEqual(JSON.parse(essentials.category_ids),['m-food','m-home']);
+ let s=await v3.v3Snapshot(owner,base.today);assert.deepEqual(s.result.buckets[0].category_ids,['m-food','m-home']);
+ await assert.rejects(v3.v3Action(owner,base.today,'v3Bucket',{name:'Groceries',target:'50',kind:'protected',categoryIds:['m-fuel','m-home']}),/home already belongs to the Essentials bucket/);
+ await assert.rejects(v3.v3Action(owner,base.today,'v3Bucket',{name:'Pay',target:'50',kind:'protected',categoryIds:['m-salary']}),/active expense categories/);
+ sqlite.prepare("UPDATE categories SET archived=1 WHERE id='m-home'").run();
+ await v3.v3Action(owner,base.today,'v3Bucket',{id:essentials.id,name:'Essentials',target:'250',kind:'protected',categoryIds:['m-food','m-home','m-fuel']});
+ s=await v3.v3Snapshot(owner,base.today);assert.deepEqual(s.result.buckets[0].category_ids,['m-food','m-home','m-fuel']);assert.equal(s.result.buckets[0].target_cents,25000);
+ await assert.rejects(v3.v3Action(owner,base.today,'v3Bucket',{name:'Later',target:'10',kind:'protected',categoryIds:['m-home']}),/active expense categories/);
+ await v3.v3Action(owner,base.today,'v3Bucket',{id:essentials.id,name:'Essentials',target:'250',kind:'protected',categoryIds:[]});
+ assert.equal(sqlite.prepare('SELECT category_ids FROM v3_bucket_templates WHERE id=?').get(essentials.id).category_ids,'[]');
 });
 test('Partial installment records once, matches existing activity without moving cash twice, settles, reschedules',async()=>{
  const a=sqlite.prepare('SELECT * FROM accounts LIMIT 1').get();const pid='test-installment';

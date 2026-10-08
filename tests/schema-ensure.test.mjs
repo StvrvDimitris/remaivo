@@ -60,12 +60,33 @@ test('migrations leave only the current finance tables and columns', () => {
     installment_plans: ['include_daily_weekly'],
     installment_payments: ['paid_transaction_id'],
     spare_events: ['destination_account_id', 'base_cents'],
+    v3_bucket_templates: ['category_id'],
+    v3_bucket_periods: ['category_id'],
   })) {
     const columns = new Set(sqlite.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
     assert.ok(removed.every(name => !columns.has(name)), table);
   }
   const goalColumns = new Set(sqlite.prepare('PRAGMA table_info(goals)').all().map(row => row.name));
   assert.ok(['tracking_mode', 'start_date', 'end_date', 'baseline_cents'].every(name => goalColumns.has(name)));
+});
+
+test('bucket category migrations carry a single linked category into the category list', () => {
+  const check = (directory, files, upgrade) => {
+    const db = new DatabaseSync(':memory:');
+    for (const name of files) db.exec(fs.readFileSync(path.join(directory, name), 'utf8'));
+    db.exec(`INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents) VALUES('linked','u','Food','protected','food',100),('manual','u','Spare','protected',NULL,100);
+      INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents) VALUES('p:linked','u','p','linked','Food','protected','food',100)`);
+    for (const name of upgrade) db.exec(fs.readFileSync(path.join(directory, name), 'utf8'));
+    const ids = table => Object.fromEntries(db.prepare(`SELECT id, category_ids FROM ${table}`).all().map(row => [row.id, row.category_ids]));
+    assert.deepEqual(ids('v3_bucket_templates'), { linked: '["food"]', manual: '[]' }, directory);
+    assert.deepEqual(ids('v3_bucket_periods'), { 'p:linked': '["food"]' }, directory);
+    const columns = db.prepare('PRAGMA table_info(v3_bucket_templates)').all().map(row => row.name);
+    assert.ok(!columns.includes('category_id'), directory);
+  };
+  const drizzle = fs.readdirSync('drizzle').filter(name => name.endsWith('.sql')).sort();
+  check('drizzle', drizzle.filter(name => name < '0023'), drizzle.filter(name => name >= '0023'));
+  const cloudflare = fs.readdirSync('cloudflare/migrations').filter(name => name.endsWith('.sql')).sort();
+  check('cloudflare/migrations', cloudflare.filter(name => name < '0007'), cloudflare.filter(name => name >= '0007'));
 });
 
 test('a cold Worker reads an existing schema without replaying migrations', async () => {

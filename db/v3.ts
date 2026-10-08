@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
-import { buildBudget, consumesBudget, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
+import { buildBudget, consumesBudget, parseCategoryIds, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 import { spareRoundUpCents, type SpareSettings } from '../app/spare-change';
 import { autoSweepSpare } from './spare';
 
@@ -9,6 +9,7 @@ const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bi
 const cents=(value:unknown)=>{const n=Math.round(Number(value??0)*100);if(!Number.isSafeInteger(n)||n<0)throw new Error('Enter a valid nonnegative amount.');return n;};
 const validDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;
 const id=()=>crypto.randomUUID();
+const readBuckets=<T extends {category_ids:unknown}>(list:T[])=>list.map(b=>({...b,category_ids:parseCategoryIds(b.category_ids)}));
 const event=(user:string,kind:string,detail:string)=>env.DB.prepare('INSERT INTO v3_events (id,user_id,kind,detail) VALUES (?,?,?,?)').bind(id(),user,kind,detail);
 
 export async function currentPeriod(user:string,today:string){
@@ -25,18 +26,18 @@ export async function currentPeriod(user:string,today:string){
    const actuals=await rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? AND date<=?",user,bounds.start,bounds.end,today);
    const cash=accounts.filter(a=>a.include_spendable&&a.type!=='investment').reduce((a,b)=>a+b.balance_cents,0);
    const funding=Math.max(0,Math.min(desired.target,cash+actuals.filter(consumesBudget).reduce((a,b)=>a+b.amount_cents,0)));
-   const periodId=id();const templates=await rows<Bucket>('SELECT * FROM v3_bucket_templates WHERE user_id=? AND archived=0 ORDER BY priority',user);
+   const periodId=id();const templates=readBuckets(await rows<Bucket>('SELECT * FROM v3_bucket_templates WHERE user_id=? AND archived=0 ORDER BY priority',user));
    const stmts=[env.DB.prepare('INSERT OR IGNORE INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)').bind(periodId,user,bounds.start,bounds.end,version.id,funding)];
    for(const b of templates){let rollover=0;const previous=await env.DB.prepare('SELECT bp.*,p.start_date,p.end_date FROM v3_bucket_periods bp JOIN v3_periods p ON p.id=bp.period_id WHERE bp.user_id=? AND bp.bucket_id=? AND p.end_date<=? ORDER BY p.end_date DESC LIMIT 1').bind(user,b.id,bounds.start).first<Bucket&{start_date:string;end_date:string;period_id:string}>();
     if(previous&&b.rollover!=='none'&&!previous.released){
-      const pastBuckets=await rows<Bucket>('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=?',user,previous.period_id);
+      const pastBuckets=readBuckets(await rows<Bucket>('SELECT bucket_id AS id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=?',user,previous.period_id));
       const pastTransactions=await rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?",user,previous.start_date,previous.end_date);
       const pastAssignments=await rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user);
       const past=buildBudget({today:plusDays(previous.end_date,-1),start:previous.start_date,end:previous.end_date,config:desired,funding:0,accounts:[],transactions:pastTransactions,buckets:pastBuckets,occurrences:[],assignments:pastAssignments});
       const used=past.buckets.find(x=>x.id===b.id)?.spent||0;const left=previous.target_cents-used;
       rollover=b.rollover==='signed'?left:b.rollover==='capped'?Math.min(Math.max(0,left),b.rollover_cap):Math.max(0,left);
     }
-    stmts.push(env.DB.prepare('INSERT OR IGNORE INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM v3_periods WHERE id=?)').bind(periodId+':'+b.id,user,periodId,b.id,b.name,b.kind,b.category_id,Math.max(0,b.target_cents+rollover),b.priority,b.rollover,b.rollover_cap,b.destination_id,periodId));
+    stmts.push(env.DB.prepare('INSERT OR IGNORE INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM v3_periods WHERE id=?)').bind(periodId+':'+b.id,user,periodId,b.id,b.name,b.kind,JSON.stringify(b.category_ids),Math.max(0,b.target_cents+rollover),b.priority,b.rollover,b.rollover_cap,b.destination_id,periodId));
    }await env.DB.batch(stmts);period=await env.DB.prepare('SELECT * FROM v3_periods WHERE user_id=? AND start_date=? AND end_date=?').bind(user,bounds.start,bounds.end).first();
  }
  if(!period)throw new Error('Could not open the budget period.');
@@ -118,7 +119,7 @@ export async function v3Snapshot(user:string,today:string){
   env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?").bind(user,period.start_date,period.end_date),
   env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id").bind(user,plusDays(today,-28),today),
   env.DB.prepare("SELECT date FROM transactions WHERE user_id=? AND status='posted' AND date<=? ORDER BY date LIMIT 1").bind(user,today),
-  env.DB.prepare('SELECT bucket_id AS id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid').bind(user,period.id),
+  env.DB.prepare('SELECT bucket_id AS id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid').bind(user,period.id),
   env.DB.prepare("SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN ('upcoming','partial')) ORDER BY due_date,id").bind(user,period.start_date),
   env.DB.prepare('SELECT * FROM v3_assignments WHERE user_id=?').bind(user),
   env.DB.prepare('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20').bind(user),
@@ -127,7 +128,7 @@ export async function v3Snapshot(user:string,today:string){
  const transactions=transactionRows.results as MoneyTransaction[];
  const trendTransactions=trendRows.results as MoneyTransaction[];
  const firstRecorded=firstRecordedRows.results[0] as {date:string}|undefined;
- const buckets=bucketRows.results as Bucket[];
+ const buckets=readBuckets(bucketRows.results as Bucket[]);
  const occurrences=occurrenceRows.results as Occurrence[];
  const assignments=assignmentRows.results as Assignment[];
  const events=eventRows.results as {id:string;kind:string;detail:string;created_at:string}[];
@@ -148,13 +149,21 @@ export async function v3Action(user:string,today:string,action:string,p:Record<s
  if(amount>max)throw new Error('Funding cannot exceed spending-account cash plus this period’s recorded spending.');
  await env.DB.batch([env.DB.prepare('UPDATE v3_periods SET funding_cents=? WHERE id=? AND user_id=?').bind(amount,period.id,user),event(user,'funding',`Period funding set to ${amount/100}. No account money was moved.`)]);
  }else if(action==='v3Bucket'){
- const name=String(p.name||'').trim();const target=cents(p.target);const kind=p.kind==='goal'?'goal':'protected';const bucketId=p.id?String(p.id):id();const cat=p.categoryId?String(p.categoryId):null;const destination=p.destinationId?String(p.destinationId):null;const rollover=['none','positive','signed','capped'].includes(String(p.rollover))?String(p.rollover):'none';
+ const name=String(p.name||'').trim();const target=cents(p.target);const kind=p.kind==='goal'?'goal':'protected';const bucketId=p.id?String(p.id):id();const cats=[...new Set((Array.isArray(p.categoryIds)?p.categoryIds:[]).map(String).filter(Boolean))];const destination=p.destinationId?String(p.destinationId):null;const rollover=['none','positive','signed','capped'].includes(String(p.rollover))?String(p.rollover):'none';
  if(!name||name.length>100)throw new Error('Give the bucket a name, up to 100 characters.');
  if(p.id&&!await env.DB.prepare('SELECT id FROM v3_bucket_templates WHERE id=? AND user_id=?').bind(bucketId,user).first())throw new Error('Bucket not found.');
- if(cat){if(!await env.DB.prepare("SELECT id FROM categories WHERE id=? AND user_id=? AND archived=0 AND kind='expense'").bind(cat,user).first())throw new Error('Choose an active expense category.');if(await env.DB.prepare('SELECT id FROM v3_bucket_templates WHERE user_id=? AND category_id=? AND archived=0 AND id!=?').bind(user,cat,bucketId).first())throw new Error('That category already belongs to another bucket.');}
+ if(cats.length>50)throw new Error('Choose up to 50 categories for one bucket.');
+ if(cats.length){
+  const existing=p.id?parseCategoryIds((await env.DB.prepare('SELECT category_ids FROM v3_bucket_templates WHERE id=? AND user_id=?').bind(bucketId,user).first<{category_ids:string}>())?.category_ids):[];
+  const known=new Map((await rows<{id:string;name:string;kind:string;archived:number}>('SELECT id,name,kind,archived FROM categories WHERE user_id=?',user)).map(c=>[c.id,c]));
+  // Archived categories may stay on a bucket that already uses them, but cannot be newly added.
+  for(const c of cats){const cat=known.get(c);if(!cat||cat.kind!=='expense'||(cat.archived&&!existing.includes(c)))throw new Error('Choose active expense categories.');}
+  const others=readBuckets(await rows<{name:string;category_ids:string}>('SELECT name,category_ids FROM v3_bucket_templates WHERE user_id=? AND archived=0 AND id!=?',user,bucketId));
+  for(const other of others){const shared=cats.find(c=>other.category_ids.includes(c));if(shared)throw new Error(`${known.get(shared)!.name} already belongs to the ${other.name} bucket.`);}
+ }
  if(destination&&!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(destination,user).first())throw new Error('Choose an active destination.');
  const priority=Number(p.priority)||0;const cap=cents(p.rolloverCap);
- await env.DB.batch([env.DB.prepare('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,category_id=excluded.category_id,target_cents=excluded.target_cents,priority=excluded.priority,rollover=excluded.rollover,rollover_cap=excluded.rollover_cap,destination_id=excluded.destination_id').bind(bucketId,user,name,kind,cat,target,priority,rollover,cap,destination),env.DB.prepare('INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents,priority,rollover,rollover_cap,destination_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET name=excluded.name,kind=excluded.kind,category_id=excluded.category_id,target_cents=excluded.target_cents,priority=excluded.priority,rollover=excluded.rollover,rollover_cap=excluded.rollover_cap,destination_id=excluded.destination_id').bind(period.id+':'+bucketId,user,period.id,bucketId,name,kind,cat,target,priority,rollover,cap,destination),event(user,'allocation',`${name} assigned ${target/100}. Matching activity and planned payments are covered inside this amount.`)]);
+ await env.DB.batch([env.DB.prepare('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,category_ids=excluded.category_ids,target_cents=excluded.target_cents,priority=excluded.priority,rollover=excluded.rollover,rollover_cap=excluded.rollover_cap,destination_id=excluded.destination_id').bind(bucketId,user,name,kind,JSON.stringify(cats),target,priority,rollover,cap,destination),env.DB.prepare('INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET name=excluded.name,kind=excluded.kind,category_ids=excluded.category_ids,target_cents=excluded.target_cents,priority=excluded.priority,rollover=excluded.rollover,rollover_cap=excluded.rollover_cap,destination_id=excluded.destination_id').bind(period.id+':'+bucketId,user,period.id,bucketId,name,kind,JSON.stringify(cats),target,priority,rollover,cap,destination),event(user,'allocation',`${name} assigned ${target/100}. Matching activity and planned payments are covered inside this amount.`)]);
  }else if(action==='v3Release'||action==='v3Reopen'||action==='v3ArchiveBucket'){
  const bid=String(p.id);const stmts=[env.DB.prepare('UPDATE v3_bucket_periods SET released=? WHERE user_id=? AND period_id=? AND bucket_id=?').bind(action==='v3Reopen'?0:1,user,period.id,bid),event(user,'allocation',action==='v3Reopen'?'Bucket protection restored.':'Unused bucket protection released to everyday spending.')];if(action==='v3ArchiveBucket')stmts.push(env.DB.prepare('UPDATE v3_bucket_templates SET archived=1 WHERE id=? AND user_id=?').bind(bid,user));await env.DB.batch(stmts);
  }else if(action==='v3Move'){

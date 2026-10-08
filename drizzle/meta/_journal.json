@@ -162,6 +162,20 @@
       "when": 1791366415473,
       "tag": "0022_recurring_budget_inclusion",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791440924721,
+      "tag": "0023_bucket_category_lists",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791440930409,
+      "tag": "0024_retire_bucket_category_id",
+      "breakpoints": true
     }
   ]
 }

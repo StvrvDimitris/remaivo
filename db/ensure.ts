@@ -22,6 +22,8 @@ const retiredColumns: Record<string, string[]> = {
   installment_plans: ["include_daily_weekly"],
   installment_payments: ["paid_transaction_id"],
   spare_events: ["destination_account_id", "base_cents"],
+  v3_bucket_templates: ["category_id"],
+  v3_bucket_periods: ["category_id"],
 };
 
 let schemaReady: Promise<void> | null = null;

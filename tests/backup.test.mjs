@@ -96,8 +96,8 @@ function seed(user, prefix) {
   insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
   insert('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)', version, user, '2026-09-01', '{"target":100000,"period":"monthly"}');
   insert('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)', period, user, '2026-09-01', '2026-10-01', version, 100000);
-  insert('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_id,target_cents) VALUES(?,?,?,?,?,?)', bucket, user, `${prefix} food`, 'protected', category, 20000);
-  insert('INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_id,target_cents) VALUES(?,?,?,?,?,?,?,?)', `${prefix}-bucket-period`, user, period, bucket, `${prefix} food`, 'protected', category, 20000);
+  insert('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_ids,target_cents) VALUES(?,?,?,?,?,?)', bucket, user, `${prefix} food`, 'protected', JSON.stringify([category]), 20000);
+  insert('INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents) VALUES(?,?,?,?,?,?,?,?)', `${prefix}-bucket-period`, user, period, bucket, `${prefix} food`, 'protected', JSON.stringify([category]), 20000);
   insert('INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES(?,?,?,?,?)', `${prefix}-assignment`, user, transaction, bucket, 1750);
   insert('INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,paid_cents,account_id,category_id,status,transaction_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', occurrence, user, 'recurring', recurring, '2026-09-20', '2026-09-20', `${prefix} groceries`, 'expense', 1750, 1750, account, category, 'paid', transaction);
   insert('INSERT INTO v3_events(id,user_id,kind,detail) VALUES(?,?,?,?)', `${prefix}-event`, user, 'allocation', `${prefix} allocation`);
