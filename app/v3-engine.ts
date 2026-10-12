@@ -149,20 +149,24 @@ export function buildBudget(input:EngineInput) {
   const explicitByTx=new Map<string,Assignment[]>();for(const a of input.assignments)explicitByTx.set(a.transaction_id,[...(explicitByTx.get(a.transaction_id)||[]),a]);
   const sorted=[...input.buckets].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
   const matched=(tx:MoneyTransaction)=>sorted.find(b=>coversCategory(b,tx.category_id))||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===tx.destination_account_id);
-  let everydaySpent=0,commitmentSpent=0;
+  // Contributions (saving and investment) sit inside the commitment totals; they are also
+  // counted on their own so the Plan can show them apart from bills.
+  const isContribution=(type:string)=>type==='saving'||type==='investment';
+  let everydaySpent=0,commitmentSpent=0,contributionSpent=0;
   for(const tx of counted){
     const splits=explicitByTx.get(tx.id);let used=0;
     if(splits?.length)for(const s of splits.filter(s=>sorted.some(b=>b.id===s.bucket_id))){const amount=Math.min(tx.amount_cents-used,Math.max(0,s.amount_cents));used+=amount;transactionAmounts.set(s.bucket_id,(transactionAmounts.get(s.bucket_id)||0)+amount);(allocationByTx[tx.id]??=[]).push({bucket:s.bucket_id,amount});}
     else {const bucket=matched(tx);if(bucket){used=tx.amount_cents;transactionAmounts.set(bucket.id,(transactionAmounts.get(bucket.id)||0)+used);allocationByTx[tx.id]=[{bucket:bucket.id,amount:used}];}}
     const remainder=tx.amount_cents-used;
-    if(remainder>0){const kind=tx.installment_plan_id||tx.committed===1||['saving','investment'].includes(tx.type)?'commitments':'everyday';if(kind==='everyday')everydaySpent+=remainder;else commitmentSpent+=remainder;(allocationByTx[tx.id]??=[]).push({bucket:kind,amount:remainder});}
+    if(remainder>0){const kind=tx.installment_plan_id||tx.committed===1||['saving','investment'].includes(tx.type)?'commitments':'everyday';if(kind==='everyday')everydaySpent+=remainder;else{commitmentSpent+=remainder;if(isContribution(tx.type))contributionSpent+=remainder;}(allocationByTx[tx.id]??=[]).push({bucket:kind,amount:remainder});}
   }
-  const plansByBucket=new Map<string,number>();let upcoming=0;
+  const plansByBucket=new Map<string,number>();let upcoming=0,contributionUpcoming=0;
   const occurrenceBucket:Record<string,string>={};
-  for(const o of active){const b=sorted.find(b=>coversCategory(b,o.category_id))||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=Math.max(0,o.amount_cents-o.paid_cents);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else upcoming+=amount;}
+  for(const o of active){const b=sorted.find(b=>coversCategory(b,o.category_id))||sorted.find(b=>b.kind==='goal'&&b.destination_id&&b.destination_id===o.destination_account_id);const amount=Math.max(0,o.amount_cents-o.paid_cents);occurrenceBucket[o.id]=b?.id||'commitments';if(b)plansByBucket.set(b.id,(plansByBucket.get(b.id)||0)+amount);else{upcoming+=amount;if(isContribution(o.type))contributionUpcoming+=amount;}}
   const buckets=sorted.map(b=>{const spent=transactionAmounts.get(b.id)||0;const planned=plansByBucket.get(b.id)||0;const extra=b.released?0:Math.max(0,b.target_cents-spent-planned);return {...b,spent,planned,extra,remaining:planned+extra,deficit:Math.max(0,spent+planned-b.target_cents),burden:spent+planned+extra};});
   const protectedRemaining=upcoming+buckets.reduce((a,b)=>a+b.remaining,0);
   const totalSpent=counted.reduce((a,b)=>a+b.amount_cents,0);
+  const totalContributed=counted.filter(t=>isContribution(t.type)).reduce((a,b)=>a+b.amount_cents,0);
   const everydayAllocation=funding-commitmentSpent-upcoming-buckets.reduce((a,b)=>a+b.burden,0);
   const available=everydayAllocation-everydaySpent;
   const actualRemaining=funding-totalSpent;
@@ -181,5 +185,5 @@ export function buildBudget(input:EngineInput) {
   const daily=todayIndex>=0?guidance(today,plusDays(today,1),spentToday):{base:0,carry:0,spent:0,remaining:0};
   const weekly=todayIndex>=0?guidance(ws,we,spentWeek):{base:0,carry:0,spent:0,remaining:0};
   const spendable=input.accounts.filter(a=>!a.archived&&a.include_spendable&&a.type!=='investment').reduce((s,a)=>s+a.balance_cents,0);
-  return {start,end,funding,target:config.target,unfunded:Math.max(0,config.target-funding),totalSpent,everydaySpent,commitmentSpent,upcoming,protectedRemaining,actualRemaining,everydayAllocation,available,buckets,daily,weekly,weekStart:ws,weekEnd:we,spendable,cashShortfall:Math.max(0,actualRemaining-spendable),allocationByTx,occurrenceBucket,dates,slices};
+  return {start,end,funding,target:config.target,unfunded:Math.max(0,config.target-funding),totalSpent,totalContributed,everydaySpent,commitmentSpent,contributionSpent,upcoming,contributionUpcoming,protectedRemaining,actualRemaining,everydayAllocation,available,buckets,daily,weekly,weekStart:ws,weekEnd:we,spendable,cashShortfall:Math.max(0,actualRemaining-spendable),allocationByTx,occurrenceBucket,dates,slices};
 }

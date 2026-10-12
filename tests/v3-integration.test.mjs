@@ -323,3 +323,8 @@ test('A recurring payment closes with less or more than planned, and a partly pa
  assert.deepEqual({...occurrence('mark-done')},{status:'paid',paid_cents:500});assert.notEqual(next('mark-done'),base.today);
  await assert.rejects(v3.v3Action(user,base.today,'v3Close',{id:`recurring:mark-done:${base.today}`}),/not available/);
 });
+test('Savings and investment contributions are reported apart from other commitments without changing totals',()=>{
+ const r=engine.buildBudget({...base,buckets:[],transactions:[tx('bill',4000,{committed:1}),tx('vwce',2000,{type:'investment'}),tx('pot',1000,{type:'saving'}),tx('lunch',500)],occurrences:[occurrence('rent',30000),occurrence('auto-invest',2300,{type:'investment'})]});
+ assert.deepEqual([r.commitmentSpent,r.contributionSpent,r.upcoming,r.contributionUpcoming,r.totalSpent,r.totalContributed],[7000,3000,32300,2300,7500,3000]);
+ assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);
+});
