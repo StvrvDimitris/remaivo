@@ -306,3 +306,20 @@ test('Excluded recurring payments do not reserve or consume budget but still pos
  assert.equal(sqlite.prepare('SELECT counts_monthly n FROM v3_occurrences WHERE id=?').get(oid).n,0);
  assert.equal(sqlite.prepare("SELECT counts_monthly n FROM v3_occurrences WHERE source_id='recurring-excluded-plan' AND scheduled_date>'2026-09-17' ORDER BY scheduled_date LIMIT 1").get().n,1);
 });
+test('A recurring payment closes with less or more than planned, and a partly paid one can be marked as done',async()=>{
+ const account=sqlite.prepare("SELECT id FROM accounts WHERE user_id=? AND archived=0 AND type!='investment' ORDER BY id LIMIT 1").get(user).id;
+ for(const id of ['close-less','close-more','mark-done'])sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,interval_count,next_date,committed,auto_post) VALUES(?,?,?,'expense',1200,?,'weekly',2,?,1,0)").run(id,user,id,account,base.today);
+ await v3.generateOccurrences(user,base.today);
+ const occurrence=id=>sqlite.prepare('SELECT status,paid_cents FROM v3_occurrences WHERE id=?').get(`recurring:${id}:${base.today}`);
+ const next=id=>sqlite.prepare('SELECT next_date FROM recurring_plans WHERE id=?').get(id).next_date;
+ await v3.settleOccurrence(user,`recurring:close-less:${base.today}`,base.today,1000,undefined,true);
+ assert.deepEqual({...occurrence('close-less')},{status:'paid',paid_cents:1000});assert.notEqual(next('close-less'),base.today);
+ await v3.settleOccurrence(user,`recurring:close-more:${base.today}`,base.today,1500);
+ assert.deepEqual({...occurrence('close-more')},{status:'paid',paid_cents:1500});
+ assert.equal(sqlite.prepare("SELECT amount_cents FROM transactions WHERE recurring_plan_id='close-more'").get().amount_cents,1500);
+ await v3.settleOccurrence(user,`recurring:mark-done:${base.today}`,base.today,500);
+ assert.deepEqual({...occurrence('mark-done')},{status:'partial',paid_cents:500});assert.equal(next('mark-done'),base.today);
+ await v3.v3Action(user,base.today,'v3Close',{id:`recurring:mark-done:${base.today}`});
+ assert.deepEqual({...occurrence('mark-done')},{status:'paid',paid_cents:500});assert.notEqual(next('mark-done'),base.today);
+ await assert.rejects(v3.v3Action(user,base.today,'v3Close',{id:`recurring:mark-done:${base.today}`}),/not available/);
+});

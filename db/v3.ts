@@ -71,13 +71,15 @@ export async function generateOccurrences(user:string,today:string){
  if(cancellations.length)await env.DB.batch(cancellations);
 }
 
-export async function settleOccurrence(user:string,oid:string,date:string,amountInput?:number,matchId?:string){
+// A recurring payment can be closed with whatever was actually paid, less or more than planned.
+// Installments are debt, so they only accept amounts up to what is still owed.
+export async function settleOccurrence(user:string,oid:string,date:string,amountInput?:number,matchId?:string,close=false){
  const o=await env.DB.prepare("SELECT * FROM v3_occurrences WHERE id=? AND user_id=? AND status IN ('upcoming','partial')").bind(oid,user).first<Occurrence>();if(!o)throw new Error('This payment is already settled or no longer available.');
- const amount=amountInput??(o.amount_cents-o.paid_cents);if(amount<=0||amount>o.amount_cents-o.paid_cents)throw new Error('Enter an amount between zero and the unpaid balance.');
+ const left=o.amount_cents-o.paid_cents;const amount=amountInput??left;const flexible=o.source_kind==='recurring';if(amount<=0||(!flexible&&amount>left))throw new Error('Enter an amount between zero and the unpaid balance.');
  if(['saving','investment'].includes(o.type)&&!o.destination_account_id)throw new Error('Choose a destination account in the plan before recording this transfer.');
  if(!o.account_id||!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(o.account_id,user).first())throw new Error('Choose an active payment account first.');
  if(o.destination_account_id&&(o.destination_account_id===o.account_id||!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(o.destination_account_id,user).first()))throw new Error('Choose a different active destination account.');
- const token=id();const txId=matchId||id();const newPaid=o.paid_cents+amount;const status=newPaid>=o.amount_cents?'paid':'partial';
+ const token=id();const txId=matchId||id();const newPaid=o.paid_cents+amount;const status=newPaid>=o.amount_cents||(flexible&&close)?'paid':'partial';
  if(matchId){const tx=await env.DB.prepare("SELECT * FROM transactions WHERE id=? AND user_id=? AND status='posted'").bind(matchId,user).first<MoneyTransaction>();if(!tx||tx.type!==o.type||tx.account_id!==o.account_id||tx.amount_cents!==amount||tx.recurring_plan_id||tx.installment_plan_id||tx.destination_account_id!==o.destination_account_id)throw new Error('Choose an unlinked transaction of the same type, account and amount.');}
  const spareSettings=!matchId&&o.type==='expense'?await env.DB.prepare('SELECT spare_enabled,spare_source_id,spare_destination_id,spare_multiplier FROM profiles WHERE user_id=?').bind(user).first<SpareSettings>():null;
  const spare=!matchId&&o.type==='expense'?spareRoundUpCents(amount,o.account_id,false,spareSettings):0;
@@ -170,7 +172,11 @@ export async function v3Action(user:string,today:string,action:string,p:Record<s
  const amount=cents(p.amount);const from=String(p.from),to=String(p.to);if(!amount||from===to)throw new Error('Choose different buckets and a positive amount.');const state=await v3Snapshot(user,today);const source=state.result.buckets.find(b=>b.id===from);const dest=state.result.buckets.find(b=>b.id===to);if(from!=='everyday'&&!source||to!=='everyday'&&!dest)throw new Error('Bucket not found.');if(amount>(from==='everyday'?state.result.available:source!.extra))throw new Error('Only unused, unscheduled money can be reassigned.');
  const stmts:D1PreparedStatement[]=[];if(source)stmts.push(env.DB.prepare('UPDATE v3_bucket_periods SET target_cents=target_cents-? WHERE user_id=? AND period_id=? AND bucket_id=?').bind(amount,user,period.id,from));if(dest)stmts.push(env.DB.prepare('UPDATE v3_bucket_periods SET target_cents=target_cents+?,released=0 WHERE user_id=? AND period_id=? AND bucket_id=?').bind(amount,user,period.id,to));stmts.push(event(user,'allocation',`${amount/100} reassigned from ${source?.name||'Everyday'} to ${dest?.name||'Everyday'} for this period.`));await env.DB.batch(stmts);
  }else if(action==='v3Settle'){
- const date=String(p.date||today);if(!validDate(date)||date>today)throw new Error('Record a payment on today or an earlier actual payment date.');await settleOccurrence(user,String(p.id),date,p.amount===undefined?undefined:cents(p.amount),p.matchId?String(p.matchId):undefined);
+ const date=String(p.date||today);if(!validDate(date)||date>today)throw new Error('Record a payment on today or an earlier actual payment date.');await settleOccurrence(user,String(p.id),date,p.amount===undefined?undefined:cents(p.amount),p.matchId?String(p.matchId):undefined,p.close===true);
+ }else if(action==='v3Close'){
+ // A partly paid recurring payment that needs nothing more: release the rest.
+ const o=await env.DB.prepare("SELECT * FROM v3_occurrences WHERE id=? AND user_id=? AND status='partial' AND source_kind='recurring'").bind(p.id,user).first<Occurrence>();if(!o)throw new Error('Occurrence not available.');
+ await env.DB.batch([env.DB.prepare("UPDATE v3_occurrences SET status='paid' WHERE id=? AND user_id=? AND status='partial'").bind(o.id,user),event(user,'schedule',`${o.title}: marked as done.`)]);await advancePlan(user,o.source_id);
  }else if(action==='v3Skip'||action==='v3Reschedule'){
  const o=await env.DB.prepare("SELECT * FROM v3_occurrences WHERE id=? AND user_id=? AND status IN ('upcoming','partial')").bind(p.id,user).first<Occurrence>();if(!o)throw new Error('Occurrence not available.');if(action==='v3Skip'){if(o.source_kind==='installment')throw new Error('Installment debt cannot be skipped. Reschedule the payment or edit the purchase.');if(o.paid_cents)throw new Error('A partially paid occurrence cannot be skipped.');await env.DB.prepare("UPDATE v3_occurrences SET status='skipped' WHERE id=? AND user_id=?").bind(o.id,user).run();await advancePlan(user,o.source_id);}else{const date=String(p.date);if(!validDate(date)||date<today)throw new Error('Choose today or a future due date.');await env.DB.prepare('UPDATE v3_occurrences SET due_date=? WHERE id=? AND user_id=?').bind(date,o.id,user).run();}await event(user,'schedule',`${o.title}: ${action==='v3Skip'?'occurrence skipped':'due date changed'}.`).run();
  }else if(action==='v3Assign'){

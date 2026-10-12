@@ -63,8 +63,8 @@ export function formatPlanEvent(event: { kind: string; detail: string }, languag
     const date = new Intl.DateTimeFormat('el-GR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${match[3]}T12:00:00Z`));
     return `${match[1]}: καταγράφηκαν ${amount(match[2])} στις ${date}${match[4] ? ', με σύνδεση υπάρχουσας κίνησης' : ''}.`;
   }
-  if (kind === 'schedule' && (match = detail.match(/^(.*): (occurrence skipped|due date changed)\.$/)))
-    return `${match[1]}: ${match[2] === 'occurrence skipped' ? 'η προγραμματισμένη πληρωμή παραλείφθηκε' : 'η προθεσμία πληρωμής άλλαξε'}.`;
+  if (kind === 'schedule' && (match = detail.match(/^(.*): (occurrence skipped|due date changed|marked as done)\.$/)))
+    return `${match[1]}: ${match[2] === 'occurrence skipped' ? 'η προγραμματισμένη πληρωμή παραλείφθηκε' : match[2] === 'marked as done' ? 'σημειώθηκε ως ολοκληρωμένη' : 'η προθεσμία πληρωμής άλλαξε'}.`;
   if (kind === 'assignment' && (match = detail.match(/^(.*): funding assignments updated\.$/)))
     return `${match[1]}: οι κατανομές χρηματοδότησης ενημερώθηκαν.`;
   return translate(detail, language);
