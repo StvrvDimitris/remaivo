@@ -40,3 +40,7 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# self-hosted data
+/data/
+/remaivo-data/

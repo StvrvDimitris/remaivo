@@ -390,7 +390,7 @@ export const greek: Record<string,string> = {
   "Enter a valid target amount.": "Εισαγάγετε έγκυρο ποσό στόχου.",
   "Enter a valid starting amount.": "Εισαγάγετε έγκυρο αρχικό ποσό.",
   "Choose a valid start and end date for this goal.": "Επιλέξτε έγκυρη ημερομηνία έναρξης και λήξης για αυτόν τον στόχο.",
-  "Sign in with ChatGPT to continue.": "Συνδεθείτε με το ChatGPT για να συνεχίσετε.",
+  "Sign in to continue.": "Συνδεθείτε για να συνεχίσετε.",
   "Use today or an earlier date for recorded activity. Add a plan for future payments.": "Χρησιμοποιήστε τη σημερινή ή προηγούμενη ημερομηνία για καταγεγραμμένες κινήσεις. Προσθέστε πλάνο για μελλοντικές πληρωμές.",
   "Enter a valid amount, date and repetition interval.": "Εισαγάγετε έγκυρο ποσό, ημερομηνία και διάστημα επανάληψης.",
   "Choose an active payment account.": "Επιλέξτε ενεργό λογαριασμό πληρωμής.",

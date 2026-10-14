@@ -33,6 +33,11 @@ const localBindingConfig = {
     : [],
 };
 
+// REMAIVO_HOST selects the deployment at build time: unset for Sites,
+// "cloudflare" for the Google-login Worker, "selfhost" for the Docker image.
+const host = process.env.REMAIVO_HOST;
+const wranglerConfig = { cloudflare: "./wrangler.cloudflare.jsonc", selfhost: "./wrangler.selfhost.jsonc" }[host ?? ""];
+
 export default defineConfig(async () => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
@@ -49,11 +54,11 @@ export default defineConfig(async () => {
       : undefined,
     plugins: [
       vinext(),
-      ...(process.env.REMAIVO_HOST === "cloudflare" ? [] : [sites()]),
+      ...(wranglerConfig ? [] : [sites()]),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        ...(process.env.REMAIVO_HOST === "cloudflare"
-          ? { configPath: "./wrangler.cloudflare.jsonc" }
+        ...(wranglerConfig
+          ? { configPath: wranglerConfig }
           : { config: localBindingConfig }),
       }),
     ],

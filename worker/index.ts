@@ -1,7 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { authenticateRequest, handleGoogleAuth } from "./google-auth";
+import { authenticateRequest, handleGoogleAuth, stripIdentityHeaders } from "./google-auth";
+import { authenticatePasswordRequest, handlePasswordAuth, sameOrigin } from "./password-auth";
 import { enforceRateLimit } from "./rate-limit";
 
 interface WorkerEnv extends Env {
@@ -32,8 +33,11 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // Env types are generated from the Cloudflare config; the self-hosted
+    // build sets AUTH_PROVIDER to "password" instead.
+    const authProvider: string = env.AUTH_PROVIDER;
 
-    if (env.AUTH_PROVIDER === "google") {
+    if (authProvider === "google") {
       const limited = await enforceRateLimit(request, env);
       if (limited) return limited;
       const authResponse = await handleGoogleAuth(request, env);
@@ -42,6 +46,15 @@ const worker = {
         return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
       }
       request = await authenticateRequest(request, env);
+    } else if (authProvider === "password") {
+      const limited = await enforceRateLimit(request, env, { sharedLogin: true });
+      if (limited) return limited;
+      const authResponse = await handlePasswordAuth(request, env);
+      if (authResponse) return authResponse;
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !sameOrigin(request, env)) {
+        return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
+      }
+      request = await authenticatePasswordRequest(request, env, stripIdentityHeaders(request));
     }
 
     if (url.pathname === "/_vinext/image") {
@@ -82,7 +95,7 @@ const worker = {
         },
       });
     }
-    if (env.AUTH_PROVIDER === "google" && !url.pathname.startsWith("/_next/") && !url.pathname.startsWith("/assets/")) {
+    if ((authProvider === "google" || authProvider === "password") && !url.pathname.startsWith("/_next/") && !url.pathname.startsWith("/assets/")) {
       const headers = new Headers(response.headers);
       headers.set("Cache-Control", "private, no-store");
       headers.set("Referrer-Policy", "no-referrer");

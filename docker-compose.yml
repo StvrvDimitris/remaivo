@@ -1,0 +1,12 @@
+services:
+  remaivo:
+    build: .
+    container_name: remaivo
+    restart: unless-stopped
+    ports:
+      - "5007:5007"
+    volumes:
+      - ./remaivo-data:/data
+    # environment:
+    #   # Set this when Remaivo is served from a public URL (behind HTTPS).
+    #   APP_ORIGIN: https://money.example.com

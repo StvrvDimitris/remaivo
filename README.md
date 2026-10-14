@@ -2,6 +2,10 @@
 
 Remaivo is a personal finance Site with accounts, transactions, a current Plan, scheduled payments, savings, and Insights. It stores signed-in users' records in the Sites D1 database declared as `DB` in `.openai/hosting.json`.
 
+## Self-hosting
+
+Want your own private copy? Run `docker compose up -d` and open <http://localhost:5007>. You'll choose a password on first visit. See [selfhost/README.md](selfhost/README.md).
+
 ## Development
 
 Use Node.js 22.13 or later and pnpm:

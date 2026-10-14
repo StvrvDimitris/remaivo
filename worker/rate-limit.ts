@@ -7,7 +7,7 @@ export function rateLimitGroup(pathname: string) {
   if (pathname === "/") return "page";
   return null;
 }
-export async function enforceRateLimit(request: Request, env: Limiters): Promise<Response | null> {
+export async function enforceRateLimit(request: Request, env: Limiters, options: { sharedLogin?: boolean } = {}): Promise<Response | null> {
   const group = rateLimitGroup(new URL(request.url).pathname);
   if (!group) return null;
   // Cloudflare overwrites this header at the public edge. Never use caller-
@@ -22,7 +22,9 @@ export async function enforceRateLimit(request: Request, env: Limiters): Promise
     page: env.PAGE_RATE_LIMIT,
   }[group];
   try {
-    const { success } = await limiter.limit({ key: `${group}:${ip}` });
+    // A self-hosted server is not behind Cloudflare's edge, so the client IP
+    // cannot be trusted; password attempts then share one server-wide counter.
+    const { success } = await limiter.limit({ key: options.sharedLogin && group === "login" ? "login:server" : `${group}:${ip}` });
     if (success) return null;
     if (group === "finance") return Response.json({ error: "Too many requests. Please wait a minute and try again." }, { status: 429, headers });
     return new Response("Too many requests. Please wait a minute, then return to Remaivo and try again.", {

@@ -92,7 +92,7 @@ const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8')
   .replace(/^import[^\n]*\r?\n/gm, '');
 compile(`const env = globalThis.__spareTestEnv;
 const getUser = async () => ({ userId: globalThis.__spareTestUser, displayName: 'Test', email: 'test@example.invalid' });
-const usesGoogleAuth = () => false;
+const usesWorkerAuth = () => false;
 const ensureFinanceSchema = async () => {};
 const reconcileV3 = async () => {};
 const v3Snapshot = async () => ({});
