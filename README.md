@@ -8,7 +8,7 @@ Remaivo is a personal finance app with accounts, transactions, a spending Plan, 
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/StvrvDimitris/remaivo)
 
-Cloudflare copies the project into your account, creates the database and asks for your password. See [cloudflare/README.md](cloudflare/README.md).
+Cloudflare copies the project into your account and creates the database. On your first visit you choose your password, using a one-time setup code from your Worker's logs. See [cloudflare/README.md](cloudflare/README.md).
 
 **With Docker (Render, a home server, a Raspberry Pi):**
 

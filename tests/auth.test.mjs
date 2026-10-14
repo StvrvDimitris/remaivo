@@ -37,23 +37,40 @@ const post = (env, fields, headers = {}) => handleAuth(new Request(origin + '/au
 const sessionCookie = response => response.headers.get('set-cookie')?.split(';')[0];
 const whoami = async (env, cookie) => (await authenticate(new Request(origin + '/', { headers: { cookie, 'x-remaivo-user-id': 'spoofed' } }), env)).headers.get('x-remaivo-user-id');
 
-test('A self-hosted server without a password secret asks for one on first visit, once', async () => {
+for (const platform of ['selfhost', 'cloudflare']) test(`On ${platform}, the first visit chooses the password, but only with the setup code from the logs`, async () => {
   const { sqlite, DB } = database();
-  const env = { DB, REMAIVO_PLATFORM: 'selfhost' };
-  assert.match(await (await handleAuth(new Request(origin + '/auth/login'), env)).text(), /Choose a password/);
-  assert.equal((await post(env, { password: 'short', confirm: 'short' })).status, 400);
-  assert.equal((await post(env, { password: 'long enough', confirm: 'different!' })).status, 400);
+  const env = { DB, REMAIVO_PLATFORM: platform };
+  const logged = [];
+  const log = console.log;
+  console.log = line => logged.push(String(line));
+  const form = await (await handleAuth(new Request(origin + '/auth/login'), env)).text();
+  console.log = log;
+  assert.match(form, /Choose a password/);
+  assert.match(form, /Setup code/);
+  const code = sqlite.prepare('SELECT code FROM auth_setup').get().code;
+  assert.match(code, /^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
+  assert.ok(logged.some(line => line.includes(code)), 'the code is written to the server log');
+  assert.doesNotMatch(form, new RegExp(code), 'the page never shows the code');
+
+  // A stranger who found the address cannot claim it.
+  assert.equal((await post(env, { password: 'claim it now', confirm: 'claim it now' })).status, 400);
+  assert.equal((await post(env, { code: 'AAAA-AAAA', password: 'claim it now', confirm: 'claim it now' })).status, 400);
+  assert.equal((await post(env, { code, password: 'short', confirm: 'short' })).status, 400);
+  assert.equal((await post(env, { code, password: 'long enough', confirm: 'different!' })).status, 400);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM auth_password').get().n, 0);
 
-  const created = await post(env, { name: ' Sam ', password: 'long enough', confirm: 'long enough', return_to: '/?view=plan' });
+  // Codes are read back case- and dash-insensitively.
+  const created = await post(env, { code: code.toLowerCase().replace('-', ' '), name: ' Sam ', password: 'long enough', confirm: 'long enough', return_to: '/?view=plan' });
   assert.equal(created.status, 303);
   assert.equal(created.headers.get('location'), '/?view=plan');
   assert.doesNotMatch(created.headers.get('set-cookie'), /Secure/, 'plain-HTTP home servers need a non-Secure cookie');
   assert.equal(await whoami(env, sessionCookie(created)), 'owner');
   assert.equal(sqlite.prepare('SELECT display_name FROM auth_identities').get().display_name, 'Sam');
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM auth_setup').get().n, 0, 'the code is used up');
+  assert.equal(sqlite.prepare('SELECT iterations FROM auth_password').get().iterations, platform === 'cloudflare' ? 10000 : 100000);
 
   // The setup form is gone; a second "setup" is just a wrong password.
-  assert.equal((await post(env, { password: 'attacker pw', confirm: 'attacker pw' })).status, 401);
+  assert.equal((await post(env, { code, password: 'attacker pw', confirm: 'attacker pw' })).status, 401);
   assert.equal((await post(env, { password: 'long enough' })).status, 303);
 });
 
@@ -80,12 +97,8 @@ test('HTTPS gets Secure cookies and sign-out revokes the session', async () => {
   assert.equal(await whoami(env, cookie), null);
 });
 
-test('On Cloudflare the password must be a secret, and changing it signs everyone out', async () => {
+test('A REMAIVO_PASSWORD secret replaces setup, is never stored, and changing it signs everyone out', async () => {
   const { sqlite, DB } = database();
-  const missing = await handleAuth(new Request(origin + '/auth/login'), { DB, REMAIVO_PLATFORM: 'cloudflare' });
-  assert.equal(missing.status, 503);
-  assert.match(await missing.text(), /REMAIVO_PASSWORD/);
-  assert.equal((await post({ DB, REMAIVO_PLATFORM: 'cloudflare' }, { password: 'claim it!', confirm: 'claim it!' })).status, 503, 'nobody can claim a fresh public URL');
   assert.equal((await handleAuth(new Request(origin + '/auth/login'), { DB, REMAIVO_PLATFORM: 'cloudflare', REMAIVO_PASSWORD: 'short' })).status, 503);
 
   const env = { DB, REMAIVO_PLATFORM: 'cloudflare', REMAIVO_PASSWORD: 'first password' };

@@ -26,7 +26,7 @@ Or with Compose, from a clone of this repo:
 docker compose up -d
 ```
 
-Open <http://localhost:5007>. On the first visit Remaivo asks you to **choose a password**. That password protects the server from then on.
+Open <http://localhost:5007>. On the first visit Remaivo asks you to **choose a password**, together with a one-time **setup code** that only the server's log shows (`docker logs remaivo`, or the terminal you started it from). That password protects the server from then on.
 
 Your data is in the `remaivo-data` volume (with Compose, the `./remaivo-data` folder). Back it up, or use the JSON export inside the app.
 
@@ -48,7 +48,7 @@ Data goes to `./data` unless you set `DATA_DIR`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `REMAIVO_PASSWORD` | _(unset)_ | The server password, at least 8 characters. When set, it's applied on every start, there's no first-visit setup, and changing it signs everyone out. When unset, you choose the password on first visit. |
+| `REMAIVO_PASSWORD` | _(unset)_ | The server password, at least 8 characters. When set, there's no first-visit setup, it's never stored, and changing it signs everyone out. When unset, you choose the password on first visit with the setup code from the log. |
 | `REMAIVO_NAME` | `Owner` | Your name in the app, used when you first sign in. |
 | `PORT` | `5007` | Port to listen on. |
 | `DATA_DIR` | `/data` in Docker, `./data` otherwise | Where the SQLite database is kept. |
@@ -60,7 +60,7 @@ Every Remaivo server has **one owner and one password**, like Actual Budget. Any
 
 ## Putting it on the internet
 
-- **Set `REMAIVO_PASSWORD`**, or choose the password right after starting. Without it, the first visitor chooses the password (same as Actual Budget).
+- Choosing the password on first visit needs the setup code from the server's log, so a stranger who finds the address can't claim it. Or set `REMAIVO_PASSWORD` and skip setup entirely.
 - Use HTTPS. Put Remaivo behind Caddy, nginx, Traefik, or a Cloudflare Tunnel / Tailscale. Over HTTPS the session cookie is marked `Secure`; on plain HTTP (e.g. your home network) it isn't, so it still works.
 - Login attempts are limited to 10 per minute **per server** (not per visitor), since a self-hosted server can't trust client IPs. A flood of bad attempts can lock you out for a minute but can't guess the password.
 
@@ -78,7 +78,7 @@ money.example.com {
 docker compose exec remaivo node selfhost/server.mjs reset-password
 ```
 
-(Without Docker: `node selfhost/server.mjs reset-password`.) This clears the password and signs everyone out. Your finance data is untouched; the next visit asks for a new password. If you use `REMAIVO_PASSWORD`, just change that setting instead.
+(Without Docker: `node selfhost/server.mjs reset-password`.) This clears the password and signs everyone out. Your finance data is untouched; the next visit asks for a new password and a fresh setup code from the log. If you use `REMAIVO_PASSWORD`, just change that setting instead.
 
 ## Updating
 

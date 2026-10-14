@@ -1,8 +1,10 @@
 // One Remaivo server belongs to one owner, who signs in with a single password.
 //
-// The password comes from the REMAIVO_PASSWORD secret when it is set (always on
-// Cloudflare, optional for Docker). Without it, a self-hosted server asks for
-// a password on first visit and stores it as a PBKDF2 hash in D1.
+// The password is chosen on first visit and stored as a PBKDF2 hash in D1,
+// like Actual Budget. A server's address may already be public at that point,
+// so choosing it also needs a one-time setup code that only the server's logs
+// show. Hosts that prefer configuration can set the REMAIVO_PASSWORD secret
+// instead; it then is the password and no setup happens.
 //
 // Sessions are random tokens stored only as SHA-256 hashes. Each hash also
 // covers a key derived from the current password, so changing the password
@@ -17,8 +19,12 @@ const OWNER_SUB = "password:owner";
 const OWNER_EMAIL = "owner@remaivo.local";
 const SESSION = "rmv-session";
 const MIN_LENGTH = 8;
-// workerd rejects PBKDF2 above 100,000 iterations.
-const ITERATIONS = 100_000;
+// workerd rejects PBKDF2 above 100,000 iterations. Cloudflare's free plan allows
+// about 10 ms of CPU per request, so a Worker there uses fewer; the count is
+// stored with each hash.
+const iterations = (env: AuthEnv) => env.REMAIVO_PLATFORM === "cloudflare" ? 10_000 : 100_000;
+// No 0/O or 1/I/L, so a code copied from a log is read back correctly.
+const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const lifetime = 30 * 24 * 60 * 60;
 const encoder = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
@@ -93,6 +99,22 @@ async function credentialKey(env: AuthEnv): Promise<string | null> {
 }
 const sessionHash = (token: string, key: string) => sha256(token + "." + key);
 
+// The one-time setup code, created on the first visit to the setup page and
+// written to the server log each time that page is shown.
+async function setupCode(env: AuthEnv) {
+  const select = () => env.DB.prepare("SELECT code FROM auth_setup WHERE id = 1").first<{ code: string }>();
+  let row = await select();
+  if (!row) {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const code = Array.from(bytes, b => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("").replace(/^(.{4})/, "$1-");
+    await env.DB.prepare("INSERT OR IGNORE INTO auth_setup (id, code) VALUES (1, ?)").bind(code).run();
+    row = await select();
+  }
+  console.log(`Remaivo setup code: ${row!.code}  (enter it on the "Welcome to Remaivo" page to choose your password)`);
+  return row!.code;
+}
+const normalCode = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, "");
+
 // The owner keeps the user ID their data was created under. A server that
 // already holds one person's data (for example after leaving Google sign-in)
 // continues with that person's ID; a new server uses "owner".
@@ -120,7 +142,7 @@ function page(title: string, body: string, status = 200) {
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Remaivo</title>
 <style>body{font:16px system-ui,sans-serif;background:#f6f7f9;color:#14171f;margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:#fff;border-radius:16px;box-shadow:0 1px 3px #0001}
 h1{font-size:22px;margin:0 0 8px}p{color:#555;margin:0 0 18px}label{display:block;font-size:14px;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px 12px;font:inherit;border:1px solid #ccd;border-radius:8px}
-button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:#fff;background:#14171f;border:0;border-radius:8px;cursor:pointer}.error{color:#b42318}a{color:inherit}code{font-size:14px}
+button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:#fff;background:#14171f;border:0;border-radius:8px;cursor:pointer}.error{color:#b42318}.hint{font-size:13px;margin:6px 0 0}a{color:inherit}code{font-size:13px}
 @media (prefers-color-scheme:dark){body{background:#0f1115;color:#eef}main{background:#181b22;box-shadow:none}p{color:#aab}input{background:#0f1115;color:#eef;border-color:#334}button{background:#eef;color:#14171f}.error{color:#f97066}}</style>
 <main>${body}</main></html>`;
   return new Response(html, { status, headers: pageHeaders });
@@ -129,9 +151,11 @@ function form(returnTo: string, setup: boolean, message = "") {
   const error = message ? `<p class="error" role="alert">${escape(message)}</p>` : "";
   const name = setup ? '<label for="name">Your name</label><input id="name" name="name" autocomplete="name" maxlength="120" placeholder="Optional">' : "";
   const confirm = setup ? '<label for="confirm">Confirm password</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" required>' : "";
+  const code = setup ? '<label for="code">Setup code</label><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required>'
+    + '<p class="hint">You will find it in this server\'s logs. On Cloudflare: Workers &amp; Pages, your Worker, Logs, Live, then reload this page. With Docker: <code>docker logs remaivo</code>.</p>' : "";
   return `<h1>${setup ? "Welcome to Remaivo" : "Sign in"}</h1>
 <p>${setup ? `Choose a password to protect this Remaivo server. Use at least ${MIN_LENGTH} characters.` : "Enter your Remaivo password."}</p>${error}
-<form method="post" action="/auth/login"><input type="hidden" name="return_to" value="${escape(returnTo)}">${name}
+<form method="post" action="/auth/login"><input type="hidden" name="return_to" value="${escape(returnTo)}">${code}${name}
 <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="${setup ? "new-password" : "current-password"}"${setup ? "" : " autofocus"} required>${confirm}
 <button>${setup ? "Set password" : "Sign in"}</button></form>`;
 }
@@ -169,14 +193,12 @@ export async function handleAuth(request: Request, env: AuthEnv): Promise<Respon
   if (url.pathname !== "/auth/login") return page("Not found", '<h1>Page not found.</h1><p><a href="/">Back to Remaivo</a></p>', 404);
   const envPassword = env.REMAIVO_PASSWORD;
   if (envPassword && envPassword.length < MIN_LENGTH) return page("Password too short", `<h1>Password too short</h1><p>The <code>REMAIVO_PASSWORD</code> setting must be at least ${MIN_LENGTH} characters.</p>`, 503);
-  // On Cloudflare the URL is public from the first second, so the password
-  // must come from the secret; a first-visit setup form could be claimed by anyone.
-  if (!envPassword && env.REMAIVO_PLATFORM === "cloudflare") {
-    return page("Set a password", `<h1>Almost ready</h1><p>This Remaivo server has no password yet. Add a secret named <code>REMAIVO_PASSWORD</code> (at least ${MIN_LENGTH} characters) to the Worker in your Cloudflare dashboard, then reload this page.</p>`, 503);
-  }
   const stored = envPassword ? null : await storedPassword(env);
   const setup = !envPassword && !stored;
-  if (request.method === "GET") return page(setup ? "Set up" : "Sign in", form(safeReturnPath(url.searchParams.get("return_to")), setup));
+  if (request.method === "GET") {
+    if (setup) await setupCode(env);
+    return page(setup ? "Set up" : "Sign in", form(safeReturnPath(url.searchParams.get("return_to")), setup));
+  }
   if (request.method !== "POST") return page("Error", "<h1>Method not allowed.</h1>", 405);
   if (!sameOrigin(request, env)) return page("Error", "<h1>Request origin is not allowed.</h1>", 403);
 
@@ -185,18 +207,27 @@ export async function handleAuth(request: Request, env: AuthEnv): Promise<Respon
   const returnTo = safeReturnPath(String(data?.get("return_to") ?? "/"));
 
   if (setup) {
+    const expected = await env.DB.prepare("SELECT code FROM auth_setup WHERE id = 1").first<{ code: string }>();
+    if (!expected || !sameText(normalCode(String(data?.get("code") ?? "")), normalCode(expected.code))) {
+      await setupCode(env);
+      return page("Set up", form(returnTo, true, "That setup code is not correct. Check the server's logs for the current code."), 400);
+    }
     if (password.length < MIN_LENGTH) return page("Set up", form(returnTo, true, `Use at least ${MIN_LENGTH} characters.`), 400);
     if (password !== String(data?.get("confirm") ?? "")) return page("Set up", form(returnTo, true, "The passwords do not match."), 400);
     const salt = randomToken();
-    const hash = await derive(password, salt, ITERATIONS);
+    const count = iterations(env);
+    const hash = await derive(password, salt, count);
     // INSERT OR IGNORE: if two first-visit setups race, only the first wins.
-    const created = await env.DB.prepare("INSERT OR IGNORE INTO auth_password (id, hash, salt, iterations) VALUES (1, ?, ?, ?)").bind(hash, salt, ITERATIONS).run();
+    const [created] = await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO auth_password (id, hash, salt, iterations) VALUES (1, ?, ?, ?)").bind(hash, salt, count),
+      env.DB.prepare("DELETE FROM auth_setup"),
+    ]);
     if (!created.meta.changes) return page("Sign in", form(returnTo, false, "A password was already set. Please sign in."), 409);
     return startSession(request, env, "db:" + hash, returnTo, String(data?.get("name") ?? ""));
   }
 
   // The secret is compared as digests so the comparison takes the same time
-  // whatever the input; Cloudflare's CPU limits rule out PBKDF2 per login there.
+  // whatever the input.
   const correct = envPassword
     ? sameText(await sha256(password), await sha256(envPassword))
     : !!password && sameText(await derive(password, stored!.salt, stored!.iterations), stored!.hash);

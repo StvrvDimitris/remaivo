@@ -23,5 +23,5 @@
   "vars": {
     "REMAIVO_PLATFORM": "cloudflare"
   },
-  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
 }

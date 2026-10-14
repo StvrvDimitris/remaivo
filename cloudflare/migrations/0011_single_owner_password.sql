@@ -1,11 +1,17 @@
--- Remaivo now belongs to one owner who signs in with a password.
--- The password itself is the REMAIVO_PASSWORD secret, or (self-hosted without
--- that secret) this single PBKDF2 hash chosen on first visit.
+-- Remaivo now belongs to one owner who signs in with a password, chosen on
+-- first visit and kept as this single PBKDF2 hash (or set as the
+-- REMAIVO_PASSWORD secret, which is never stored).
 CREATE TABLE IF NOT EXISTS auth_password (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   hash TEXT NOT NULL,
   salt TEXT NOT NULL,
   iterations INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Choosing the first password needs this one-time code from the server's logs.
+CREATE TABLE IF NOT EXISTS auth_setup (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  code TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- A server with exactly one Google identity hands it to the password owner,

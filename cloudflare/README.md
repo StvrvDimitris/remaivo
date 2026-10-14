@@ -6,12 +6,9 @@ Remaivo runs as a Cloudflare Worker with a D1 database. For one person this fits
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/StvrvDimitris/remaivo)
 
-Cloudflare copies this repository into your GitHub account, creates the Worker and its D1 database, and asks for the values in `.dev.vars.example`:
+Cloudflare copies this repository into your GitHub account and creates the Worker and its D1 database. It may offer the optional settings in `.dev.vars.example`; leave them empty to choose your password in the app.
 
-- `REMAIVO_PASSWORD`: your password, at least 8 characters.
-- `REMAIVO_NAME`: optional, your name in the app.
-
-When it finishes, open the `workers.dev` address it shows and sign in. The database tables are created on the first visit.
+When it finishes, open the `workers.dev` address it shows. Remaivo creates its database tables and shows **Welcome to Remaivo**, where you choose your password. That page also asks for a **setup code**: open your Worker in the Cloudflare dashboard, go to **Logs** and switch on **Live**, reload the Remaivo page, and copy the code from the line `Remaivo setup code: XXXX-XXXX`.
 
 The button only works while this repository is public.
 
@@ -21,16 +18,20 @@ The button only works while this repository is public.
 pnpm install
 pnpm exec wrangler login
 pnpm run deploy
-pnpm exec wrangler secret put REMAIVO_PASSWORD
+pnpm exec wrangler tail
 ```
 
-`pnpm run deploy` builds with `wrangler.jsonc` and deploys; Wrangler creates the D1 database on the first deploy.
+`pnpm run deploy` builds with `wrangler.jsonc` and deploys; Wrangler creates the D1 database on the first deploy. Keep `wrangler tail` running, open the address, and copy the setup code it prints.
 
 ## Password
 
-On Cloudflare the password is always the `REMAIVO_PASSWORD` secret. The address is public as soon as it is deployed, so there is no first-visit setup form anybody could claim; until the secret exists, the sign-in page asks you to add it.
+Like Actual Budget, you choose the password on your first visit. Because the address is public as soon as it is deployed, that first visit also needs the one-time setup code from your Worker's logs, so nobody who stumbles on the address can claim it first. The code is used up once your password is set.
 
-To change the password, update the secret in the dashboard (Worker → Settings → Variables and Secrets) or with `wrangler secret put REMAIVO_PASSWORD`. Everyone signed in with the old password is signed out.
+The password is stored as a salted PBKDF2 hash. Cloudflare's free plan allows about 10 ms of CPU per request, so Workers there use 10,000 iterations (self-hosted servers use 100,000).
+
+Prefer to configure it instead? Set the `REMAIVO_PASSWORD` secret (Worker → Settings → Variables and Secrets, or `wrangler secret put REMAIVO_PASSWORD`). It then is the password, no setup page appears, and it is never written to the database. Changing it signs everyone out.
+
+Forgot a password chosen in the app? Delete it and choose a new one on the next visit (with a fresh setup code): `pnpm exec wrangler d1 execute <database> --remote --command "DELETE FROM auth_password"`.
 
 ## Updates
 
@@ -41,7 +42,8 @@ Deploy again. Database migrations in `cloudflare/migrations/` are applied automa
 - Sessions are random tokens stored only as SHA-256 hashes, expire after 30 days, and are revoked on sign-out. Each session hash includes a key derived from the current password, so changing the password ends every session.
 - Cookies are HttpOnly, SameSite=Lax and Secure over HTTPS. Form posts and API writes must come from the app's own origin.
 - Incoming identity headers are always discarded; only the Worker sets them after checking the session.
-- The password secret is compared through SHA-256 digests in constant time and is never written to the database.
+- The setup code is random, never shown on a page, compared in constant time, and covered by the sign-in rate limit.
+- A `REMAIVO_PASSWORD` secret is compared through SHA-256 digests in constant time and is never written to the database.
 
 ## Rate limits
 
