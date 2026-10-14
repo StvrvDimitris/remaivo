@@ -2,8 +2,8 @@ import vinext from "vinext";
 import { defineConfig } from "vite";
 
 // REMAIVO_HOST picks the Worker config at build time:
-//   unset        wrangler.jsonc, a fresh Cloudflare deployment (Deploy to Cloudflare, local dev)
-//   "cloudflare" wrangler.cloudflare.jsonc, the original owner's Cloudflare deployment
+//   unset        wrangler.jsonc, the template for any Cloudflare deployment
+//   "cloudflare" wrangler.cloudflare.jsonc, your own filled-in copy of it (not committed)
 //   "selfhost"   wrangler.selfhost.jsonc, the Docker image
 const configPath = {
   cloudflare: "./wrangler.cloudflare.jsonc",

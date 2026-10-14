@@ -45,3 +45,6 @@ yarn-error.log*
 # self-hosted data
 /data/
 /remaivo-data/
+
+# your own Cloudflare account details (copy of wrangler.jsonc)
+/wrangler.cloudflare.jsonc

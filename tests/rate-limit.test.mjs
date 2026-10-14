@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { enforceRateLimit, rateLimitGroup } from '../worker/rate-limit.ts';
-const config=JSON.parse(fs.readFileSync('wrangler.cloudflare.jsonc','utf8'));
+// The committed Cloudflare template; its comments are whole lines.
+const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8').split('\n').filter(line=>!line.trim().startsWith('//')).join('\n'));
 const bindings=Object.fromEntries(config.ratelimits.map(binding=>[binding.name,binding]));
 function environment() {
   const counters = new Map();
