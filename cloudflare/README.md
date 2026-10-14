@@ -49,6 +49,15 @@ Deploy again. Database migrations in `cloudflare/migrations/` are applied automa
 
 Cloudflare-native rate limiting runs before sign-in and database access: 10 sign-in requests, 120 finance API requests and 60 page loads per minute per visitor IP. Static assets and sign-out are exempt. Rejected requests get HTTP 429 with `Retry-After: 60`; an unavailable limiter fails closed with HTTP 503.
 
-## The original deployment
+## Your own config file
 
-`wrangler.cloudflare.jsonc` is the original owner's deployment (`remaivo-production`). Build it with `REMAIVO_HOST=cloudflare pnpm build`, then deploy with `pnpm exec wrangler deploy --config dist/server/wrangler.json`. It started with Google sign-in; migration `0011_single_owner_password.sql` handed that single Google identity to the password owner with the same user ID, so all existing data carried over.
+`wrangler.jsonc` is a template without any account details, so it works for everyone. To pin your deployment to a specific account, database or domain, copy it to `wrangler.cloudflare.jsonc` (git ignores that name, so your IDs stay on your computer), fill in `account_id`, the D1 `database_id` and optionally `APP_ORIGIN`, then build and deploy with it:
+
+```sh
+REMAIVO_HOST=cloudflare pnpm build
+pnpm exec wrangler deploy --config dist/server/wrangler.json
+```
+
+## Coming from Google sign-in
+
+Earlier versions signed in with Google. Migration `0011_single_owner_password.sql` hands a server's single Google identity to the password owner with the same user ID, so all existing data carries over; the owner then chooses a password on the next visit.

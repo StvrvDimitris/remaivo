@@ -1,7 +1,7 @@
 /* eslint-disable */
-// Worker environment shared by every Remaivo deployment (wrangler.jsonc,
-// wrangler.cloudflare.jsonc, wrangler.selfhost.jsonc). Kept by hand so the
-// type covers all three configs; secrets are optional.
+// Worker environment shared by every Remaivo deployment (wrangler.jsonc, a
+// private wrangler.cloudflare.jsonc copy of it, wrangler.selfhost.jsonc). Kept
+// by hand so the type covers every config; secrets are optional.
 interface __BaseEnv_Env {
 	DB: D1Database;
 	LOGIN_RATE_LIMIT: RateLimit;
