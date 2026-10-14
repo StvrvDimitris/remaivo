@@ -1,0 +1,21 @@
+# "Deploy to Render" blueprint for a self-hosted Remaivo.
+# Render asks for REMAIVO_PASSWORD while deploying, so the public URL is
+# protected from the first second. The disk keeps the database across deploys
+# (Render disks need a paid instance; Starter is the smallest).
+services:
+  - type: web
+    name: remaivo
+    runtime: image
+    image:
+      url: ghcr.io/stvrvdimitris/remaivo:latest
+    plan: starter
+    healthCheckPath: /manifest.webmanifest
+    disk:
+      name: remaivo-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: REMAIVO_PASSWORD
+        sync: false
+      - key: REMAIVO_NAME
+        sync: false

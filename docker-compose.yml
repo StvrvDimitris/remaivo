@@ -1,5 +1,6 @@
 services:
   remaivo:
+    image: ghcr.io/stvrvdimitris/remaivo:latest
     build: .
     container_name: remaivo
     restart: unless-stopped
@@ -8,5 +9,7 @@ services:
     volumes:
       - ./remaivo-data:/data
     # environment:
-    #   # Set this when Remaivo is served from a public URL (behind HTTPS).
+    #   # Fix the password up front instead of choosing it on first visit.
+    #   REMAIVO_PASSWORD: change-me-please
+    #   # Set this when a reverse proxy rewrites the Host header (nginx does).
     #   APP_ORIGIN: https://money.example.com

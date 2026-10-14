@@ -5,6 +5,11 @@
 //   node selfhost/server.mjs                 start the server
 //   node selfhost/server.mjs reset-password  forget the password; the next
 //                                            visit asks for a new one
+//
+// REMAIVO_PASSWORD, when set, is the password: it is applied on every start
+// and the first-visit setup form never appears. One-click hosts use this so
+// a freshly deployed public URL is never left waiting for a password.
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,12 +80,36 @@ async function migrate(db) {
   }
 }
 
+// Matches worker/password-auth.ts: PBKDF2-SHA256, 100k iterations, hex hash,
+// salt used as its UTF-8 string.
+const ITERATIONS = 100_000;
+const derive = (password, salt, iterations) => pbkdf2Sync(password, salt, iterations, 32, "sha256");
+async function applyEnvPassword(db) {
+  const password = process.env.REMAIVO_PASSWORD;
+  if (!password) return;
+  if (password.length < 8) throw new Error("REMAIVO_PASSWORD must be at least 8 characters.");
+  const stored = await db.prepare("SELECT hash, salt, iterations FROM auth_password WHERE id = 1").first();
+  if (stored && timingSafeEqual(derive(password, stored.salt, stored.iterations), Buffer.from(stored.hash, "hex"))) return;
+  const salt = randomBytes(32).toString("base64url");
+  const name = process.env.REMAIVO_NAME?.trim().slice(0, 120) || "Owner";
+  // A changed password signs out every existing session.
+  await db.batch([
+    db.prepare("DELETE FROM auth_sessions"),
+    db.prepare("INSERT OR REPLACE INTO auth_password (id, hash, salt, iterations) VALUES (1, ?, ?, ?)").bind(derive(password, salt, ITERATIONS).toString("hex"), salt, ITERATIONS),
+    db.prepare("INSERT OR IGNORE INTO auth_identities (google_sub, user_id, email, display_name) VALUES ('password:owner', 'owner', 'owner@remaivo.local', ?)").bind(name),
+  ]);
+  console.log(stored ? "Password updated from REMAIVO_PASSWORD; existing sessions were signed out." : "Password set from REMAIVO_PASSWORD.");
+}
+
 try {
   const db = await mf.getD1Database("DB");
   await migrate(db);
+  if (!command) await applyEnvPassword(db);
   if (command === "reset-password") {
     await db.batch([db.prepare("DELETE FROM auth_password"), db.prepare("DELETE FROM auth_sessions")]);
-    console.log("Password cleared and all sessions signed out. Open Remaivo to choose a new password.");
+    console.log(process.env.REMAIVO_PASSWORD
+      ? "All sessions signed out. REMAIVO_PASSWORD is set, so it will be the password again on the next start; change that setting instead."
+      : "Password cleared and all sessions signed out. Open Remaivo to choose a new password.");
     await mf.dispose();
   } else if (command) {
     console.error(`Unknown command: ${command}`);

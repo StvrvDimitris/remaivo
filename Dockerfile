@@ -1,6 +1,8 @@
 # Self-hosted Remaivo: one container, one data volume.
-#   docker run -d -p 5007:5007 -v remaivo-data:/data ghcr.io/<you>/remaivo
-FROM node:22-bookworm-slim AS build
+#   docker run -d -p 5007:5007 -v remaivo-data:/data ghcr.io/stvrvdimitris/remaivo
+# The build output is plain JavaScript, so build once on the native platform
+# and only install the runtime (workerd) per target architecture.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./

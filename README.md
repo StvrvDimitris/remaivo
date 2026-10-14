@@ -4,7 +4,11 @@ Remaivo is a personal finance Site with accounts, transactions, a current Plan, 
 
 ## Self-hosting
 
-Want your own private copy? Run `docker compose up -d` and open <http://localhost:5007>. You'll choose a password on first visit. See [selfhost/README.md](selfhost/README.md).
+Want your own private copy?
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StvrvDimitris/remaivo)
+
+Or run it at home: `docker run -d -p 5007:5007 -v remaivo-data:/data ghcr.io/stvrvdimitris/remaivo` and open <http://localhost:5007>. See [selfhost/README.md](selfhost/README.md).
 
 ## Development
 
