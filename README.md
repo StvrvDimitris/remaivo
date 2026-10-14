@@ -1,18 +1,26 @@
 # Remaivo Personal Finance
 
-Remaivo is a personal finance Site with accounts, transactions, a current Plan, scheduled payments, savings, and Insights. It stores signed-in users' records in the Sites D1 database declared as `DB` in `.openai/hosting.json`.
+Remaivo is a personal finance app with accounts, transactions, a spending Plan, scheduled payments, savings, and Insights. Each Remaivo server belongs to one owner, who signs in with a password. Your data stays in your own database.
 
-## Self-hosting
+## Run your own
 
-Want your own private copy?
+**On Cloudflare (free for personal use):**
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/StvrvDimitris/remaivo)
+
+Cloudflare copies the project into your account, creates the database and asks for your password. See [cloudflare/README.md](cloudflare/README.md).
+
+**With Docker (Render, a home server, a Raspberry Pi):**
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/StvrvDimitris/remaivo)
 
-Or run it at home: `docker run -d -p 5007:5007 -v remaivo-data:/data ghcr.io/stvrvdimitris/remaivo` and open <http://localhost:5007>. See [selfhost/README.md](selfhost/README.md).
+Or at home: `docker run -d -p 5007:5007 -v remaivo-data:/data ghcr.io/stvrvdimitris/remaivo` and open <http://localhost:5007>. See [selfhost/README.md](selfhost/README.md).
+
+Both run the same code: the app is a Cloudflare Worker, and the Docker image runs it on workerd, Cloudflare's open-source runtime.
 
 ## Development
 
-Use Node.js 22.13 or later and pnpm:
+Use Node.js 22.13 or later and pnpm. Copy `.dev.vars.example` to `.dev.vars` and set a password, then:
 
 ```sh
 pnpm install
@@ -22,6 +30,8 @@ pnpm lint
 pnpm build
 ```
 
-The UI lives in `app/`; `app/api/finance/route.ts` handles authenticated finance requests. `db/setup.ts` creates the current Plan directly for new users. `db/v3.ts` reconciles the Plan, buckets, and scheduled payments. `db/backup.ts` produces the user-scoped JSON export.
+The UI lives in `app/`; `app/api/finance/route.ts` handles authenticated finance requests. `worker/auth.ts` is the password sign-in and `worker/migrate.ts` brings the database up to date on startup. `db/setup.ts` creates the current Plan directly for new owners. `db/v3.ts` reconciles the Plan, buckets, and scheduled payments. `db/backup.ts` produces the JSON export.
 
-The live schema is defined in `db/schema.ts` and `db/v3-schema.ts`. Generate a new migration with `pnpm db:generate` after changing either model. Keep already applied files in `drizzle/` immutable: Sites applies new migrations before publishing the next Worker. Runtime code checks schema availability but does not create or alter tables.
+`REMAIVO_HOST` picks the Worker config at build time: unset uses `wrangler.jsonc` (a fresh Cloudflare deployment), `cloudflare` uses `wrangler.cloudflare.jsonc` (the original owner's deployment), and `selfhost` uses `wrangler.selfhost.jsonc` (the Docker image).
+
+The live schema is defined in `db/schema.ts` and `db/v3-schema.ts`. Every schema change needs a migration in `cloudflare/migrations/`, which every deployment applies, plus the matching `pnpm db:generate` migration in `drizzle/`, which the tests use. Keep already applied migration files unchanged.

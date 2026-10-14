@@ -1,6 +1,8 @@
 # Self-hosting Remaivo
 
-Run your own private Remaivo server, the same way you'd run Actual Budget: one container, one folder of data, one password. No Google sign-in, no Cloudflare account, no cloud database.
+Run your own private Remaivo server, the same way you'd run Actual Budget: one container, one folder of data, one password. No Cloudflare account needed.
+
+Prefer not to run a server at all? Remaivo also deploys to Cloudflare's free plan in one click; see [cloudflare/README.md](../cloudflare/README.md).
 
 ## One-click cloud hosting
 
@@ -47,14 +49,14 @@ Data goes to `./data` unless you set `DATA_DIR`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `REMAIVO_PASSWORD` | _(unset)_ | The server password, at least 8 characters. When set, it's applied on every start, there's no first-visit setup, and changing it signs everyone out. When unset, you choose the password on first visit. |
-| `REMAIVO_NAME` | `Owner` | Your name in the app. Only used together with `REMAIVO_PASSWORD`. |
+| `REMAIVO_NAME` | `Owner` | Your name in the app, used when you first sign in. |
 | `PORT` | `5007` | Port to listen on. |
 | `DATA_DIR` | `/data` in Docker, `./data` otherwise | Where the SQLite database is kept. |
 | `APP_ORIGIN` | _(unset)_ | The public URL, e.g. `https://money.example.com`. Set it when a reverse proxy rewrites the `Host` header (nginx does this by default). |
 
 ## Who it's for
 
-A self-hosted server has **one owner and one password**, like Actual Budget. Anyone with the password sees the same data, so it suits one person or a household sharing finances. The public Cloudflare deployment with per-person Google accounts is unchanged and still lives in `wrangler.cloudflare.jsonc`.
+Every Remaivo server has **one owner and one password**, like Actual Budget. Anyone with the password sees the same data, so it suits one person or a household sharing finances. For separate finances, run a separate server.
 
 ## Putting it on the internet
 
@@ -86,7 +88,7 @@ docker compose pull && docker compose up -d
 
 On Render, use **Manual Deploy → Deploy latest reference** to pull the newest image. If you built the image yourself, `git pull && docker compose up -d --build`.
 
-Database migrations run automatically on start.
+Database migrations run automatically after each update.
 
 ## Publishing the image (maintainers)
 
@@ -94,4 +96,4 @@ Database migrations run automatically on start.
 
 ## How it works
 
-The app is a Cloudflare Worker. In self-hosted mode it runs on [workerd](https://github.com/cloudflare/workerd), Cloudflare's open-source runtime, through Miniflare. The Worker's `DB` binding is a local SQLite file under `DATA_DIR`. `selfhost/server.mjs` applies `cloudflare/migrations/` then `selfhost/migrations/` on boot, tracking what has run in a `_remaivo_migrations` table.
+The app is a Cloudflare Worker. In self-hosted mode it runs on [workerd](https://github.com/cloudflare/workerd), Cloudflare's open-source runtime, through Miniflare. The Worker's `DB` binding is a local SQLite file under `DATA_DIR`. The Worker applies the migrations in `cloudflare/migrations/` itself before its first request, exactly as it does on Cloudflare.

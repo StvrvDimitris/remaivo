@@ -1,0 +1,5 @@
+# The password for your Remaivo server, at least 8 characters.
+# Deploy to Cloudflare asks for it; for local development copy this file to .dev.vars.
+REMAIVO_PASSWORD=
+# Optional: your name in the app.
+REMAIVO_NAME=

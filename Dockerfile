@@ -21,7 +21,6 @@ RUN MINIFLARE=$(node -p "require('./package.json').devDependencies.miniflare") \
  && npm install --omit=dev --no-audit --no-fund "miniflare@$MINIFLARE" \
  && npm cache clean --force
 COPY --from=build /app/dist ./dist
-COPY cloudflare/migrations ./cloudflare/migrations
 COPY selfhost ./selfhost
 VOLUME /data
 EXPOSE 5007

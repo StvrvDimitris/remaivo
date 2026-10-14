@@ -1,30 +1,26 @@
-// Counters are provided by Cloudflare; no database writes or isolate-local maps.
-type Limiters = Pick<Env, "LOGIN_RATE_LIMIT" | "CALLBACK_RATE_LIMIT" | "FINANCE_RATE_LIMIT" | "PAGE_RATE_LIMIT">;
+// Counters are provided by the runtime; no database writes or isolate-local maps.
+type Limiters = Pick<Env, "LOGIN_RATE_LIMIT" | "FINANCE_RATE_LIMIT" | "PAGE_RATE_LIMIT" | "REMAIVO_PLATFORM">;
 export function rateLimitGroup(pathname: string) {
-  if (pathname === "/auth/callback") return "callback";
   if (pathname.startsWith("/auth/") && pathname !== "/auth/signout") return "login";
   if (pathname === "/api/finance" || pathname.startsWith("/api/finance/")) return "finance";
   if (pathname === "/") return "page";
   return null;
 }
-export async function enforceRateLimit(request: Request, env: Limiters, options: { sharedLogin?: boolean } = {}): Promise<Response | null> {
+export async function enforceRateLimit(request: Request, env: Limiters): Promise<Response | null> {
   const group = rateLimitGroup(new URL(request.url).pathname);
   if (!group) return null;
-  // Cloudflare overwrites this header at the public edge. Never use caller-
-  // supplied Forwarded, X-Forwarded-For, cookies, query strings, or user IDs.
-  const ip = request.headers.get("cf-connecting-ip");
+  // On Cloudflare this header is set at the public edge and can be trusted.
+  // Never use caller-supplied Forwarded, X-Forwarded-For, cookies or user IDs.
+  // A self-hosted server has no edge, so all its visitors share one counter.
+  const ip = request.headers.get("cf-connecting-ip") ?? (env.REMAIVO_PLATFORM === "selfhost" ? "server" : null);
   const headers = { "Cache-Control": "no-store", "Retry-After": "60", "Referrer-Policy": "no-referrer" };
   if (!ip) return Response.json({ error: "Request verification is temporarily unavailable. Please try again shortly." }, { status: 503, headers });
-  const limiter = {
-    login: env.LOGIN_RATE_LIMIT,
-    callback: env.CALLBACK_RATE_LIMIT,
-    finance: env.FINANCE_RATE_LIMIT,
-    page: env.PAGE_RATE_LIMIT,
-  }[group];
+  const limiter = { login: env.LOGIN_RATE_LIMIT, finance: env.FINANCE_RATE_LIMIT, page: env.PAGE_RATE_LIMIT }[group];
+  // A self-hosted server usually sits behind a proxy, so the address it sees is
+  // not the visitor's; password attempts there share one server-wide counter.
+  const key = group === "login" && env.REMAIVO_PLATFORM !== "cloudflare" ? "login:server" : `${group}:${ip}`;
   try {
-    // A self-hosted server is not behind Cloudflare's edge, so the client IP
-    // cannot be trusted; password attempts then share one server-wide counter.
-    const { success } = await limiter.limit({ key: options.sharedLogin && group === "login" ? "login:server" : `${group}:${ip}` });
+    const { success } = await limiter.limit({ key });
     if (success) return null;
     if (group === "finance") return Response.json({ error: "Too many requests. Please wait a minute and try again." }, { status: 429, headers });
     return new Response("Too many requests. Please wait a minute, then return to Remaivo and try again.", {
