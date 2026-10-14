@@ -1,0 +1,24 @@
+{
+  // Self-hosted build: `REMAIVO_HOST=selfhost pnpm build`, then `node selfhost/server.mjs`.
+  // The database lives in a local SQLite file; nothing here is a Cloudflare account resource.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "remaivo",
+  "main": "./worker/index.ts",
+  // Must not be newer than the workerd bundled with the pinned miniflare.
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "ratelimits": [
+    { "name": "LOGIN_RATE_LIMIT", "namespace_id": "1", "simple": { "limit": 10, "period": 60 } },
+    { "name": "FINANCE_RATE_LIMIT", "namespace_id": "3", "simple": { "limit": 300, "period": 60 } },
+    { "name": "PAGE_RATE_LIMIT", "namespace_id": "4", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "assets": { "binding": "ASSETS", "not_found_handling": "none" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "remaivo",
+    "database_id": "00000000-0000-4000-8000-000000000001"
+  }],
+  "vars": {
+    "REMAIVO_PLATFORM": "selfhost"
+  }
+}

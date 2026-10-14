@@ -42,7 +42,6 @@ const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8').replace(
 const source = `
 const env = globalThis.__goalsTestEnv;
 const getUser = async () => ({ userId: globalThis.__goalsTestUser, displayName: 'Test', email: 'test@example.invalid' });
-const usesGoogleAuth = () => false;
 const ensureFinanceSchema = async () => {};
 const financialToday = () => globalThis.__goalsTestToday ?? '2027-02-01';
 const reconcileV3 = async () => {};

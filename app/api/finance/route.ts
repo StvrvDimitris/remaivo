@@ -3,7 +3,7 @@ import { exportBackup } from "../../../db/backup";
 import { ArchiveError, listArchive, restoreArchive } from "../../../db/archive";
 import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
-import { getUser, usesGoogleAuth } from "../../auth";
+import { getUser } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
 import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow } from "../../statistics";
@@ -21,12 +21,7 @@ type FinanceUser = { userId: string; displayName: string; email: string };
 type JsonObject = Record<string, unknown>;
 
 async function currentUser(): Promise<FinanceUser | null> {
-  const user = await getUser();
-  if (user) return user;
-  if (!usesGoogleAuth() && process.env.NODE_ENV !== "production") {
-    return { userId: "local-demo-user", displayName: "Alex Morgan", email: "alex@example.com" };
-  }
-  return null;
+  return getUser();
 }
 
 // Account balances may be negative (an overdraft, or a credit card in your favour).
@@ -455,7 +450,7 @@ function monthToDate(today: string) {
 
 export async function GET(request: Request) {
   const user = await currentUser();
-  if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
+  if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401 });
   try {
     const view = new URL(request.url).searchParams.get("view");
     if (view === "export") {
@@ -483,7 +478,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await currentUser();
-  if (!user) return Response.json({ error: "Sign in with ChatGPT to continue." }, { status: 401 });
+  if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401 });
 
   try {
     await ensureFinanceSchema();

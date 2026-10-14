@@ -97,7 +97,6 @@ fs.mkdirSync(routeScratch, { recursive: true });
 fs.writeFileSync(path.join(routeScratch, 'route.mjs'), ts.transpileModule(`
 const env = globalThis.__ledgerTestEnv;
 const getUser = async () => ({ userId: 'owner', displayName: 'Test', email: 'test@example.invalid' });
-const usesGoogleAuth = () => false;
 const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-10-08';
 const reconcileV3 = async () => {};

@@ -6,22 +6,21 @@ const config=JSON.parse(fs.readFileSync('wrangler.cloudflare.jsonc','utf8'));
 const bindings=Object.fromEntries(config.ratelimits.map(binding=>[binding.name,binding]));
 function environment() {
   const counters = new Map();
-  return Object.fromEntries(Object.values(bindings).map(binding=>[binding.name,{limit:async({key})=>{
+  return {REMAIVO_PLATFORM:'cloudflare',...Object.fromEntries(Object.values(bindings).map(binding=>[binding.name,{limit:async({key})=>{
     const id=binding.namespace_id+':'+key;
     const count=(counters.get(id)??0)+1;
     counters.set(id,count);
     return {success:count<=binding.simple.limit};
-  }}]));
+  }}]))};
 }
 const request=(path,ip='192.0.2.1',extra={})=>new Request('https://remaivo.example'+path,{headers:{...(ip?{'cf-connecting-ip':ip}:{}),...extra}});
-test('Repeated login attempts are rejected without consuming callback or normal-use counters',async()=>{
+test('Repeated login attempts are rejected per visitor without consuming normal-use counters',async()=>{
   const env=environment();
-  for(let i=0;i<10;i++) assert.equal(await enforceRateLimit(request('/auth/google?return_to=/'+i),env),null);
-  const denied=await enforceRateLimit(request('/auth/google?return_to=/different'),env);
+  for(let i=0;i<10;i++) assert.equal(await enforceRateLimit(request('/auth/login?return_to=/'+i),env),null);
+  const denied=await enforceRateLimit(request('/auth/login?return_to=/different'),env);
   assert.equal(denied.status,429);assert.equal(denied.headers.get('retry-after'),'60');assert.equal(denied.headers.get('cache-control'),'no-store');
-  assert.equal(await enforceRateLimit(request('/auth/callback?code=anything'),env),null);
   assert.equal(await enforceRateLimit(request('/api/finance'),env),null);
-  assert.equal(await enforceRateLimit(request('/auth/google','192.0.2.2'),env),null);
+  assert.equal(await enforceRateLimit(request('/auth/login','192.0.2.2'),env),null);
 });
 test('API reads and writes share a counter; query parameters and spoofed forwarded IPs cannot bypass it',async()=>{
   const env=environment();
@@ -39,9 +38,9 @@ test('Page reloads are capped while static assets and sign-out remain available'
   }
 });
 test('Missing edge identity or unavailable limiters fail closed',async()=>{
-  assert.equal((await enforceRateLimit(request('/auth/google',null),environment())).status,503);
+  assert.equal((await enforceRateLimit(request('/auth/login',null),environment())).status,503);
   const env=environment();env.LOGIN_RATE_LIMIT.limit=async()=>{throw new Error('unavailable');};
-  assert.equal((await enforceRateLimit(request('/auth/google'),env)).status,503);
+  assert.equal((await enforceRateLimit(request('/auth/login'),env)).status,503);
   const namespaces=config.ratelimits.map(b=>b.namespace_id);
   assert.equal(new Set(namespaces).size,namespaces.length);
 });

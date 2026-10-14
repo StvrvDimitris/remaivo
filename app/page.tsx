@@ -1,13 +1,12 @@
-import { signInPath, signOutPath, getUser, usesGoogleAuth } from "./auth";
+import { signInPath, signOutPath, getUser } from "./auth";
 import { RemaivoV3 as FinanceClient } from "./v3-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const authenticatedUser = await getUser();
-  const isLocalPreview = !usesGoogleAuth() && process.env.NODE_ENV !== "production";
 
-  if (!authenticatedUser && !isLocalPreview) {
+  if (!authenticatedUser) {
     return (
       <main className="signin-screen">
         <section className="signin-card">
@@ -15,8 +14,8 @@ export default async function Home() {
           <p className="eyebrow">REMAIVO PERSONAL FINANCE</p>
           <h1>Know what’s left.</h1>
           <p>Sign in securely to see your private accounts, budgets, plans, and progress on every device.</p>
-          <a className="primary-button signin-button" href={signInPath("/")}>{usesGoogleAuth() ? "Continue with Google" : "Sign in with ChatGPT"} <span>→</span></a>
-          <small>Your financial data is private to your signed-in account.</small>
+          <a className="primary-button signin-button" href={signInPath("/")}>Sign in <span>→</span></a>
+          <small>Your financial data stays on your own Remaivo server.</small>
         </section>
       </main>
     );
@@ -24,9 +23,10 @@ export default async function Home() {
 
   return (
     <FinanceClient
-      displayName={authenticatedUser?.displayName ?? "Alex Morgan"}
-      email={authenticatedUser?.email ?? "alex@example.com"}
-      signOutHref={authenticatedUser ? signOutPath("/") : "#"}
+      displayName={authenticatedUser.displayName}
+      // A password-only owner has no real address to show.
+      email={authenticatedUser.email.endsWith("@remaivo.local") ? "" : authenticatedUser.email}
+      signOutHref={signOutPath()}
     />
   );
 }

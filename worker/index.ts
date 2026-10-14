@@ -1,14 +1,11 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { authenticateRequest, handleGoogleAuth } from "./google-auth";
+import { authenticate, handleAuth, sameOrigin } from "./auth";
+import { ensureMigrated } from "./migrate";
 import { enforceRateLimit } from "./rate-limit";
 
 interface WorkerEnv extends Env {
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  LEGACY_OWNER_EMAIL?: string;
-  LEGACY_OWNER_ID?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -33,16 +30,21 @@ const worker = {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (env.AUTH_PROVIDER === "google") {
-      const limited = await enforceRateLimit(request, env);
-      if (limited) return limited;
-      const authResponse = await handleGoogleAuth(request, env);
-      if (authResponse) return authResponse;
-      if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.headers.get("origin") !== env.APP_ORIGIN) {
-        return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
-      }
-      request = await authenticateRequest(request, env);
+    // Every request is rate limited and authenticated before the app sees it.
+    const limited = await enforceRateLimit(request, env);
+    if (limited) return limited;
+    try {
+      await ensureMigrated(env.DB);
+    } catch {
+      console.error(JSON.stringify({ event: "migration_failed" }));
+      return new Response("Remaivo is updating its database. Please try again in a moment.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "10" } });
     }
+    const authResponse = await handleAuth(request, env);
+    if (authResponse) return authResponse;
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !sameOrigin(request, env)) {
+      return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
+    }
+    request = await authenticate(request, env);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -82,7 +84,7 @@ const worker = {
         },
       });
     }
-    if (env.AUTH_PROVIDER === "google" && !url.pathname.startsWith("/_next/") && !url.pathname.startsWith("/assets/")) {
+    if (!url.pathname.startsWith("/_next/") && !url.pathname.startsWith("/assets/")) {
       const headers = new Headers(response.headers);
       headers.set("Cache-Control", "private, no-store");
       headers.set("Referrer-Policy", "no-referrer");

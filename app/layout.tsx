@@ -20,7 +20,6 @@ const title = "Remaivo — Know what's left";
 const description = "A clear, cross-device view of your money, budgets, commitments, savings, and raw investments.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://remaivo-personal-finance.stavrou.chatgpt.site"),
   applicationName: "Remaivo",
   title,
   description,

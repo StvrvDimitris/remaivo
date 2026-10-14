@@ -1,0 +1,6 @@
+# Optional. Leave empty to choose your password in the app on your first visit.
+# Setting it skips that setup; at least 8 characters.
+# For local development, copy this file to .dev.vars.
+REMAIVO_PASSWORD=
+# Optional: your name in the app.
+REMAIVO_NAME=
