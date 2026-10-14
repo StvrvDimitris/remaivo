@@ -54,7 +54,7 @@ export function BudgetPace({ plan, currency, onConfigure }: { plan: CurrentPlan;
   return <section className="stat-panel plan-pace-panel" aria-labelledby="plan-pace-heading">
     <div className="stat-panel-heading plan-pace-heading">
       <div><p>{tr("CURRENT PLAN")}</p><h2 id="plan-pace-heading">{tr("Budget pace")}</h2><small>{plan.name} · {tr(periodLabels[plan.period])} · {period}</small></div>
-      <div className="plan-pace-heading-actions">{pace && <span className={`plan-pace-status ${tr(position === "above" ? "Above" : "Below")}`}>{position === "on" ? tr("On even pace") : tr(position === "above" ? "Above even pace" : "Below even pace")}</span>}<button type="button" className="plan-pace-edit" onClick={onConfigure}>{tr("Edit target")}</button></div>
+      <div className="plan-pace-heading-actions">{pace && <span className={`plan-pace-status ${position}`}>{position === "on" ? tr("On even pace") : tr(position === "above" ? "Above even pace" : "Below even pace")}</span>}<button type="button" className="plan-pace-edit" onClick={onConfigure}>{tr("Edit target")}</button></div>
     </div>
     {pace ? <>
       <div className="plan-pace-total"><strong>{money(plan.spent, currency, locale)}</strong><span>{tr("used of")} {money(plan.target, currency, locale)}  {tr("spending target")}</span></div>
