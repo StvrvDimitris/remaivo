@@ -21,12 +21,12 @@ Prefer free and always on, without Docker? Use [Cloudflare](setup-cloudflare.md)
 3. It asks for two values:
    - **REMAIVO_PASSWORD**: the password you'll sign in with (at least 8 characters).
    - **REMAIVO_NAME**: your name (optional).
-4. Press **Apply** / **Deploy Blueprint** and wait a few minutes.
+4. Press **Apply** / **Deploy Blueprint** and wait. Render builds Remaivo from this repository, which takes about 5 to 10 minutes the first time.
 5. Open the address Render shows (it ends in `.onrender.com`), sign in with your password, and follow the short setup ([see step 4 below](#4-tell-remaivo-where-your-money-is-today)).
 
 **Change your password later:** in Render open the **remaivo** service → **Environment** → change `REMAIVO_PASSWORD` → **Save**. Render restarts Remaivo with the new password.
 
-**Get updates:** in Render open the service → **Manual Deploy** → **Deploy latest reference**.
+**Get updates:** in Render open the service → **Manual Deploy** → **Deploy latest commit**.
 
 ---
 
@@ -39,13 +39,14 @@ Prefer free and always on, without Docker? Use [Cloudflare](setup-cloudflare.md)
 
 ### 2. Start Remaivo
 
-Open a terminal: on Windows press Start and type **PowerShell**; on Mac open **Terminal**. Paste this line and press Enter:
+Open a terminal: on Windows press Start and type **PowerShell**; on Mac open **Terminal**. Paste these two lines and press Enter:
 
 ```sh
-docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped ghcr.io/stvrvdimitris/remaivo:latest
+docker build -t remaivo https://github.com/StvrvDimitris/remaivo.git#main
+docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped remaivo
 ```
 
-Docker downloads Remaivo and starts it. Your data is kept in a storage area called `remaivo-data`, so it survives restarts and updates.
+The first line downloads Remaivo from GitHub and builds it on your computer. That takes a few minutes (longer on a Raspberry Pi), and only happens when you install or update. The second line starts it. Your data is kept in a storage area called `remaivo-data`, so it survives restarts and updates.
 
 ### 3. Open Remaivo and choose your password
 
@@ -89,9 +90,9 @@ docker exec remaivo node selfhost/server.mjs reset-password
 **How do I get updates?** Run these three lines. Your data stays, and Remaivo updates its database by itself.
 
 ```sh
-docker pull ghcr.io/stvrvdimitris/remaivo:latest
+docker build -t remaivo https://github.com/StvrvDimitris/remaivo.git#main
 docker rm -f remaivo
-docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped ghcr.io/stvrvdimitris/remaivo:latest
+docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped remaivo
 ```
 
 **Can someone else use my Remaivo?** Yes. Share your Remaivo's address and password with up to four people you trust. After signing in, each person taps **Add a profile** on the *Who's using Remaivo?* page, picks a name, colour and icon, and sets up their own accounts and plan. Profiles keep everyone's money separate, but anyone with the password can open any profile, so share it only with people you trust. Switch profiles from **Settings → Switch or add a profile**.

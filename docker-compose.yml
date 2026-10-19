@@ -1,7 +1,8 @@
 services:
   remaivo:
-    image: ghcr.io/stvrvdimitris/remaivo:latest
+    image: remaivo
     build: .
+    pull_policy: build
     container_name: remaivo
     restart: unless-stopped
     ports:

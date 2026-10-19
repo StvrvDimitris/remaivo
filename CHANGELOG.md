@@ -9,6 +9,9 @@
 - Switch profile from the sidebar or from Settings, on any device. Switching on one device doesn't affect another.
 - Existing sign-ins stay signed in as the owner; the database updates itself.
 
+**Installing**
+- Docker and Render installs now build Remaivo from this repository instead of downloading a published image, so they no longer depend on GitHub Actions. Home installs use `docker build` straight from GitHub; see the [Docker guide](docs/setup-docker.md).
+
 ## 1.0.0 (2026-10-14)
 
 The first public release. Remaivo is a single-owner personal finance app you run yourself, on Cloudflare (free) or with Docker.

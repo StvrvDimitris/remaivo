@@ -1,12 +1,11 @@
 name: Docker image
 
-# Publishes the self-hosted image to ghcr.io/stvrvdimitris/remaivo.
-# main -> :latest, tag v1.2.3 -> :1.2.3 and :1.2. Pull requests only build.
+# Optionally publishes the self-hosted image to ghcr.io/stvrvdimitris/remaivo.
+# Installs build from the Dockerfile, so this runs only by hand or for a tag:
+# tag v1.2.3 -> :1.2.3 and :1.2, a manual run on main -> :latest.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 permissions:

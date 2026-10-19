@@ -1,13 +1,14 @@
 # "Deploy to Render" blueprint for a self-hosted Remaivo.
-# Render asks for REMAIVO_PASSWORD while deploying, so the public URL is
+# Render builds the image itself from this repo's Dockerfile, so no published
+# image is needed. Render asks for REMAIVO_PASSWORD while deploying, so the public URL is
 # protected from the first second. The disk keeps the database across deploys
 # (Render disks need a paid instance; Starter is the smallest).
 services:
   - type: web
     name: remaivo
-    runtime: image
-    image:
-      url: ghcr.io/stvrvdimitris/remaivo:latest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: starter
     healthCheckPath: /manifest.webmanifest
     disk:

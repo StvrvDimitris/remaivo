@@ -12,15 +12,16 @@ Render asks for a **password** (`REMAIVO_PASSWORD`) and, optionally, your name w
 
 To change the password later, edit `REMAIVO_PASSWORD` under the service's **Environment** tab. Render restarts the app, the new password takes effect, and everyone is signed out.
 
-Any host that runs a Docker image with a persistent volume works the same way. Use image `ghcr.io/stvrvdimitris/remaivo:latest`, mount a volume at `/data`, and set `REMAIVO_PASSWORD`. Railway, Fly.io, Koyeb, Coolify, CasaOS and Unraid all fit.
+Render builds the image from this repo's Dockerfile; no published image is needed. Any host that builds from a Dockerfile (or runs an image you built) with a persistent volume works the same way: mount a volume at `/data` and set `REMAIVO_PASSWORD`. Railway, Fly.io, Koyeb, Coolify, CasaOS and Unraid all fit.
 
 ## Quick start (Docker)
 
 ```sh
-docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped ghcr.io/stvrvdimitris/remaivo:latest
+docker build -t remaivo https://github.com/StvrvDimitris/remaivo.git#main
+docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped remaivo
 ```
 
-Or with Compose, from a clone of this repo:
+Or with Compose, from a clone of this repo (it builds the image the same way):
 
 ```sh
 docker compose up -d
@@ -30,7 +31,7 @@ Open <http://localhost:5007>. On the first visit Remaivo asks you to **choose a 
 
 Your data is in the `remaivo-data` volume (with Compose, the `./remaivo-data` folder). Back it up, or use the JSON export inside the app.
 
-To build the image yourself instead of pulling it: `docker build -t remaivo .`
+To build from a local clone instead: `docker build -t remaivo .`
 
 ## Without Docker
 
@@ -83,16 +84,16 @@ docker compose exec remaivo node selfhost/server.mjs reset-password
 ## Updating
 
 ```sh
-docker compose pull && docker compose up -d
+git pull && docker compose up -d --build
 ```
 
-On Render, use **Manual Deploy → Deploy latest reference** to pull the newest image. If you built the image yourself, `git pull && docker compose up -d --build`.
+Without Compose, run the `docker build` line from the quick start again, then `docker rm -f remaivo` and the `docker run` line. On Render, use **Manual Deploy → Deploy latest commit**.
 
 Database migrations run automatically after each update.
 
 ## Publishing the image (maintainers)
 
-`.github/workflows/docker-image.yml` builds `linux/amd64` and `linux/arm64` images. Pushes to `main` publish `ghcr.io/stvrvdimitris/remaivo:latest`, and tags like `v1.2.0` publish `:1.2.0` and `:1.2`. Pull requests only build.
+Nothing above depends on a published image: every install builds from the Dockerfile. `.github/workflows/docker-image.yml` can still publish `linux/amd64` and `linux/arm64` images to `ghcr.io/stvrvdimitris/remaivo` when run by hand (Actions → Docker image → Run workflow) or for a `v*` tag, if GitHub Actions is available on the account.
 
 ## How it works
 
