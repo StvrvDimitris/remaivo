@@ -50,16 +50,16 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
   const labelLeft = todayX > W - 150;
   const status = pace ? pace.paceDifference > 0 ? "above" : pace.paceDifference < 0 ? "below" : "on" : null;
   const summary = pace
-    ? `Cumulative spending reached ${money(spent, currency, locale)} by ${shortDate(today, locale)}, against an even pace of ${money(pace.expectedSpent, currency, locale)} and a ${money(target, currency, locale)} target.`
-    : `Cumulative spending reached ${money(spent, currency, locale)} by ${shortDate(today, locale)}. No spending target is set.`;
+    ? `${tr("Cumulative spending reached")} ${money(spent, currency, locale)} ${tr("by")} ${shortDate(today, locale)}, ${tr("against an even pace of")} ${money(pace.expectedSpent, currency, locale)} ${tr("and a target of")} ${money(target, currency, locale)}.`
+    : `${tr("Cumulative spending reached")} ${money(spent, currency, locale)} ${tr("by")} ${shortDate(today, locale)}. ${tr("No spending target is set.")}`;
 
   return <div className="v3-spend-chart">
     <div className="v3-spend-chart-head">
       <div>
         <h2>{tr("Spending against your target")}</h2>
-        <p>{pace ? `${money(spent, currency, locale)} used of ${money(target, currency, locale)} · ${pace.elapsedRatio.toFixed(0)}% of the period elapsed` : `${money(spent, currency, locale)} spent so far. Set a spending target in Plan to compare pace.`}</p>
+        <p>{pace ? `${money(spent, currency, locale)} ${tr("used of")} ${money(target, currency, locale)} · ${pace.elapsedRatio.toFixed(0)}% ${tr("of the period elapsed")}` : `${money(spent, currency, locale)} ${tr("spent so far. Set a spending target in Plan to compare pace.")}`}</p>
       </div>
-      {pace && status && <span className={`v3-pace-pill ${status}`}><i />{status === "on" ? tr("On even pace") : `${money(Math.abs(pace.paceDifference), currency, locale)} ${status} even pace`}</span>}
+      {pace && status && <span className={`v3-pace-pill ${status}`}><i />{status === "on" ? tr("On even pace") : `${money(Math.abs(pace.paceDifference), currency, locale)} ${tr(status === "above" ? "above even pace" : "below even pace")}`}</span>}
     </div>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary}>
       {[0, 0.5, 1].map((share) => <g key={share}>

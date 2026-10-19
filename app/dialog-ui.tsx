@@ -74,7 +74,7 @@ export function ColorPicker({ name = "color", defaultValue }: { name?: string; d
 
   const [value, setValue] = useState(defaultValue);
   const palette = ["#12a16b", "#365bd6", "#228e9d", "#8563c7", "#d68b64", "#df5e6a", "#1f5b4e", "#cfe9d7"];
-  return <span className="color-picker"><input name={name} type="hidden" value={value}/>{palette.map(color => <button type="button" key={color} style={{ background: color }} aria-label={`Use colour ${color}`} aria-pressed={value === color} onClick={() => setValue(color)}>{value === color ? "✓" : ""}</button>)}<input type="color" value={value} aria-label={tr("Custom colour")} onChange={event => setValue(event.target.value)}/></span>;
+  return <span className="color-picker"><input name={name} type="hidden" value={value}/>{palette.map(color => <button type="button" key={color} style={{ background: color }} aria-label={`${tr("Use colour")} ${color}`} aria-pressed={value === color} onClick={() => setValue(color)}>{value === color ? "✓" : ""}</button>)}<input type="color" value={value} aria-label={tr("Custom colour")} onChange={event => setValue(event.target.value)}/></span>;
 }
 
 export function ChoiceField({ label, name, defaultValue, options }: { label: string; name: string; defaultValue: string | number; options: { value: string | number; label: string }[] }) {

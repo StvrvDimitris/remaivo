@@ -35,7 +35,7 @@ export function PeriodTrendChart({ days, cumulative, compare, currency }: { days
   const labelCount = Math.min(days.length, width < 500 ? 3 : 4);
   const labels = new Set(Array.from({ length: labelCount }, (_, index) => labelCount === 1 ? 0 : Math.round(index * (days.length - 1) / (labelCount - 1))));
   return <div ref={host} className="period-trend-plot">
-    {days.length ? <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${cumulative ? tr("Cumulative") : tr("Daily")} movement from ${date(days[0].date)} to ${date(days[days.length - 1].date)}${compare ? ", with comparison on the same scale" : ""}`}>
+    {days.length ? <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${cumulative ? tr("Cumulative") : tr("Daily")} ${tr("movement from")} ${date(days[0].date)} ${tr("to")} ${date(days[days.length - 1].date)}${compare ? `, ${tr("with comparison on the same scale")}` : ""}`}>
       {ticks.map((value, index) => <g key={index}><line x1={left} x2={right} y1={y(value)} y2={y(value)} className="period-trend-grid" /><text x={left - 8} y={y(value) + 4} textAnchor="end" className="period-trend-label">{format(value)}</text></g>)}
       <line x1={left} x2={right} y1={zero} y2={zero} className="period-trend-baseline" />
       {series.map((day, index) => {

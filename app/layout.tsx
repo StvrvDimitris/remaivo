@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { savedTheme } from "./auth";
+import { savedLanguage, savedTheme } from "./auth";
 import { themeCanvas } from "./ui-themes";
 
 const geistSans = Geist({
@@ -48,8 +48,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const [language, theme] = await Promise.all([savedLanguage(), savedTheme()]);
   return (
-    <html lang="en" data-theme={await savedTheme()}>
+    <html lang={language} data-theme={theme}>
       {/* Sent with cookies, so an installed app opens on this browser's theme colour. */}
       <head><link rel="manifest" href="/app.webmanifest" crossOrigin="use-credentials" /></head>
       <body

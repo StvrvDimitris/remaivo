@@ -9,7 +9,7 @@ export type { UILanguage } from "./ui-language";
 const LanguageContext = createContext<{ language: UILanguage; setLanguage: (language: UILanguage) => void }>({ language: "en", setLanguage: () => {} });
 export function LanguageProvider({ children, initialLanguage = "en" }: { children: ReactNode; initialLanguage?: UILanguage }) {
   const [language, setLanguage] = useState<UILanguage>(initialLanguage);
-  useEffect(() => { document.documentElement.lang = language; }, [language]);
+  useEffect(() => { document.documentElement.lang = language; document.cookie = `rmv-lang=${language}; Path=/; Max-Age=31536000; SameSite=Lax`; }, [language]);
   return <LanguageContext.Provider value={{language, setLanguage}}>{children}</LanguageContext.Provider>;
 }
 export function useTranslation() {

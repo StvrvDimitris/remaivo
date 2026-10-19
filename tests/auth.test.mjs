@@ -216,6 +216,26 @@ test('People sharing the password each get their own profile, with a customisabl
   assert.equal(await whoami(env, mine), alex.user_id);
 });
 
+test('Sign-in and profile pages follow the saved or browser language', async () => {
+  const { DB } = database();
+  const env = { DB, REMAIVO_PLATFORM: 'cloudflare', REMAIVO_PASSWORD: 'long enough' };
+  const greekLogin = await (await handleAuth(new Request(origin + '/auth/login', { headers: { 'accept-language': 'el-GR,el;q=0.9' } }), env)).text();
+  assert.match(greekLogin, /<html lang="el"/);
+  assert.match(greekLogin, /<h1>Σύνδεση<\/h1>/);
+  const wrong = await post(env, { password: 'not it' }, { cookie: 'rmv-lang=el' });
+  assert.match(await wrong.text(), /Ο κωδικός δεν είναι σωστός\./);
+  const cookie = sessionCookie(await post(env, { password: 'long enough' }));
+  for (const path of ['/auth/profiles', '/auth/profiles?add=1', '/auth/signout']) {
+    const html = await (await handleAuth(new Request(origin + path, { headers: { cookie: cookie + '; rmv-lang=el' } }), env)).text();
+    // Only names, codes and the brand may stay in Latin script.
+    const text = html.replace(/<style>[\s\S]*?<\/style>|<[^>]+>/g, ' ').replace(/\b(Remaivo|Owner|Aa)\b/g, '');
+    assert.doesNotMatch(text, /[A-Za-z]{3,}/, path);
+    for (const [, value] of html.matchAll(/ (?:aria-label|title|placeholder)="([^"]*)"/g)) assert.doesNotMatch(value.replace(/Remaivo|Owner/g, ''), /[A-Za-z]{3,}/, path + ' ' + value);
+  }
+  // English stays English.
+  assert.match(await (await handleAuth(new Request(origin + '/auth/login'), env)).text(), /<h1>Sign in<\/h1>/);
+});
+
 test('Sessions from before profiles keep the owner signed in', async () => {
   const { sqlite, DB } = database();
   const env = { DB, REMAIVO_PLATFORM: 'cloudflare', REMAIVO_PASSWORD: 'long enough' };

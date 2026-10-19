@@ -149,11 +149,18 @@ const pageHeaders = {
 };
 const escape = (value: string) => value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 import { themeCanvas } from "../app/ui-themes.ts";
+import { localize } from "./auth-text.ts";
 
 // Auth pages follow the theme the app last used in this browser (the
 // rmv-theme cookie), or the system's light or dark mode before there is one.
 const THEMES = ["indigo", "ocean", "midnight"];
 const DARK = "--bg:#101621;--card:#1a2332;--text:#eef2fa;--muted:#a1aec2;--border:#354258;--soft:#232f42;--accent:#a4b7ff;--on:#142047;--err:#ffaaa8;color-scheme:dark";
+// The interface language: the one the app last used here, else the browser's.
+export function languageFrom(request: Request) {
+  const saved = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)rmv-lang=([a-z]+)/)?.[1];
+  if (saved === "el" || saved === "en") return saved;
+  return /^el\b/i.test(request.headers.get("accept-language") ?? "") ? "el" : "en";
+}
 export function themeFrom(request: Request) {
   const value = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)rmv-theme=([a-z]+)/)?.[1];
   return value && THEMES.includes(value) ? value : null;
@@ -331,10 +338,11 @@ async function handleProfiles(request: Request, env: AuthEnv, url: URL): Promise
     return redirect(profilesPath(returnTo));
   }
   await env.DB.prepare("UPDATE auth_sessions SET user_id = ?, profile_chosen = 1 WHERE token_hash = ?").bind(userId, session.tokenHash).run();
-  // Open the app in the chosen profile's theme straight away, even on a new device.
-  const saved = await env.DB.prepare("SELECT ui_theme FROM profiles WHERE user_id = ?").bind(userId).first<{ ui_theme: string }>();
+  // Open the app in the chosen profile's theme and language straight away, even on a new device.
+  const saved = await env.DB.prepare("SELECT ui_theme, ui_language FROM profiles WHERE user_id = ?").bind(userId).first<{ ui_theme: string; ui_language: string }>();
   const theme = THEMES.includes(saved?.ui_theme ?? "") ? saved!.ui_theme : "indigo";
-  return redirect(returnTo, [`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`]);
+  const language = saved?.ui_language === "el" ? "el" : saved ? "en" : languageFrom(request);
+  return redirect(returnTo, [`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`, `rmv-lang=${language}; Path=/; Max-Age=31536000; SameSite=Lax`]);
 }
 
 export async function handleAuth(request: Request, env: AuthEnv): Promise<Response | null> {
@@ -342,13 +350,14 @@ export async function handleAuth(request: Request, env: AuthEnv): Promise<Respon
   return response && themed(request, response);
 }
 
-// Applies the browser's saved theme to a page built by page().
+// Applies the browser's saved theme and language to a page built by page().
 async function themed(request: Request, response: Response) {
-  const theme = themeFrom(request);
-  if (!theme || !response.headers.get("content-type")?.startsWith("text/html")) return response;
-  const html = (await response.text()).replace('<html lang="en">', `<html lang="en" data-theme="${theme}">`)
+  const theme = themeFrom(request), language = languageFrom(request);
+  if ((!theme && language === "en") || !response.headers.get("content-type")?.startsWith("text/html")) return response;
+  let html = await response.text();
+  if (theme) html = html.replace('<html lang="en">', `<html lang="en" data-theme="${theme}">`)
     .replace(BAR_COLORS, `<meta name="theme-color" content="${themeCanvas(theme)}">`);
-  return new Response(html, { status: response.status, headers: response.headers });
+  return new Response(localize(html, language), { status: response.status, headers: response.headers });
 }
 
 // A short themed page for the Worker's own messages (updating, too many requests).

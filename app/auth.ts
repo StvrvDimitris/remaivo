@@ -19,6 +19,13 @@ export async function savedTheme() {
   const cookie = (await headers()).get("cookie") ?? "";
   return normalizeUITheme(cookie.match(/(?:^|;\s*)rmv-theme=([a-z]+)/)?.[1]);
 }
+// The language this browser last used, else the browser's own preference.
+export async function savedLanguage() {
+  const requestHeaders = await headers();
+  const saved = (requestHeaders.get("cookie") ?? "").match(/(?:^|;\s*)rmv-lang=([a-z]+)/)?.[1];
+  if (saved === "el" || saved === "en") return saved;
+  return /^el\b/i.test(requestHeaders.get("accept-language") ?? "") ? "el" : "en";
+}
 export const signInPath = (returnTo: string) => `/auth/login?return_to=${encodeURIComponent(returnTo)}`;
 export const signOutPath = () => "/auth/signout";
 export const profilesPath = () => "/auth/profiles";
