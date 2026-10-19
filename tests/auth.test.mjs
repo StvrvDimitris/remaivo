@@ -185,10 +185,10 @@ test('People sharing the password each get their own profile, with a customisabl
   await send(theirs, { profile: alex.user_id });
 
   // Editing a card changes its look, not who is signed in.
-  const edited = await send(mine, { action: 'edit', profile: alex.user_id, name: 'Alexandra', color: '#4d7c0f', icon: '' });
+  const edited = await send(mine, { action: 'edit', profile: alex.user_id, name: 'Alexandra', color: '#0b7bc1', icon: '' });
   assert.equal(edited.headers.get('location'), '/auth/profiles');
   assert.equal(await whoami(env, mine), 'owner');
-  assert.deepEqual(await avatarOf(theirs), { color: '#4d7c0f', icon: 'A' });
+  assert.deepEqual(await avatarOf(theirs), { color: '#0b7bc1', icon: 'A' });
   assert.equal((await send(mine, { action: 'edit', profile: alex.user_id, name: 'Kim' })).status, 400);
   assert.match(await (await handleAuth(new Request(origin + '/auth/profiles?edit=' + alex.user_id, { headers: { cookie: mine } }), env)).text(), /value="Alexandra"/);
 
@@ -199,6 +199,11 @@ test('People sharing the password each get their own profile, with a customisabl
   await send(mine, { action: 'add', name: 'Five' });
   assert.equal((await send(mine, { action: 'add', name: 'Six' })).status, 400);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM auth_identities").get().n, 5);
+
+  // Picking a card opens the app in that profile's theme, even on a new device.
+  sqlite.exec(`INSERT INTO profiles (user_id, ui_theme) VALUES ('${alex.user_id}', 'midnight')`);
+  assert.match((await send(mine, { profile: alex.user_id })).headers.get('set-cookie'), /^rmv-theme=midnight;/);
+  assert.match(await (await profiles(mine + '; rmv-theme=midnight')).text(), /<html lang="en" data-theme="midnight">/);
 
   // Switching back is just picking another card.
   await send(mine, { profile: alex.user_id });

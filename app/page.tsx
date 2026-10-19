@@ -1,4 +1,4 @@
-import { signInPath, signOutPath, profilesPath, getUser } from "./auth";
+import { signInPath, signOutPath, profilesPath, getUser, savedTheme } from "./auth";
 import { RemaivoV3 as FinanceClient } from "./v3-client";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +29,7 @@ export default async function Home() {
       signOutHref={signOutPath()}
       profilesHref={profilesPath()}
       avatar={authenticatedUser.avatar}
+      initialTheme={await savedTheme()}
     />
   );
 }

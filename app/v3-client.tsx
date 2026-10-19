@@ -53,7 +53,7 @@ function DataExportCard(){
  </section>;
 }
 type ProfileAvatar={color?:string;icon?:string};
-function RemaivoWorkspace(props:{displayName:string;email:string;signOutHref:string;profilesHref:string;avatar?:ProfileAvatar}){
+function RemaivoWorkspace(props:{displayName:string;email:string;signOutHref:string;profilesHref:string;avatar?:ProfileAvatar;initialTheme?:UITheme}){
  const { t: tr, locale, language } = useTranslation();
 
  const [data,setData]=useState<Snapshot|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);const [accountsView,setAccountsView]=useState<'balances'|'report'>('balances');const [page,setPage]=useState<Page>(initialPage);const [panel,setPanel]=useState<Panel|null>(null);const [modal,setModal]=useState<ModalName>(null);const [edit,setEdit]=useState<EditTarget|null>(null);const [goalEntry,setGoalEntry]=useState<Goal|null>(null);const [valuation,setValuation]=useState<Account|null>(null);const [notice,setNotice]=useState('');
@@ -61,8 +61,9 @@ function RemaivoWorkspace(props:{displayName:string;email:string;signOutHref:str
  const [planPromptHidden,setPlanPromptHidden]=useState(()=>{try{return localStorage.getItem('remaivo:plan-prompt')==='hidden';}catch{return false;}});
  const { setLanguage } = useTranslation();
  useEffect(()=>{if(data?.profile) setLanguage(normalizeLanguage(data.profile.ui_language));},[data?.profile?.ui_language, data?.profile, setLanguage]);
- const theme=normalizeUITheme(data?.profile?.ui_theme);
- useEffect(()=>{document.documentElement.dataset.theme=theme;return()=>{delete document.documentElement.dataset.theme;};},[theme]);
+ // Until the profile loads, keep the theme this browser last showed (rmv-theme cookie).
+ const theme=data?.profile?normalizeUITheme(data.profile.ui_theme):props.initialTheme??'indigo';
+ useEffect(()=>{document.documentElement.dataset.theme=theme;document.cookie=`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`;},[theme]);
  const loadingRef=useRef(false);
  const busyRef=useRef(false);
  const mutationRef=useRef(0);
@@ -282,4 +283,4 @@ function Equation({label,amount,currency,total=false}:{label:string;amount:numbe
  const { t: tr, locale } = useTranslation();
 return <div className={total?'total':''}><span>{tr(label)}</span><strong>{money(amount,currency, locale)}</strong></div>;}
 
-export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string;profilesHref:string;avatar?:ProfileAvatar}) { return <LanguageProvider><RemaivoWorkspace {...props}/></LanguageProvider>; }
+export function RemaivoV3(props:{displayName:string;email:string;signOutHref:string;profilesHref:string;avatar?:ProfileAvatar;initialTheme?:UITheme}) { return <LanguageProvider><RemaivoWorkspace {...props}/></LanguageProvider>; }

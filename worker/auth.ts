@@ -148,19 +148,42 @@ const pageHeaders = {
   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
 };
 const escape = (value: string) => value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+// Auth pages follow the theme the app last used in this browser (the
+// rmv-theme cookie), or the system's light or dark mode before there is one.
+const THEMES = ["indigo", "ocean", "midnight"];
+const DARK = "--bg:#101621;--card:#1a2332;--text:#eef2fa;--muted:#a1aec2;--border:#354258;--soft:#232f42;--accent:#a4b7ff;--on:#142047;--err:#ffaaa8;color-scheme:dark";
+export function themeFrom(request: Request) {
+  const value = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)rmv-theme=([a-z]+)/)?.[1];
+  return value && THEMES.includes(value) ? value : null;
+}
+const icons: Record<string, string> = {
+  edit: "M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4",
+  plus: "M12 5v14M5 12h14",
+  back: "M19 12H5m6-6-6 6 6 6",
+  signout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
+};
+const icon = (name: string) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[name]}"/></svg>`;
 function page(title: string, body: string, status = 200) {
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Remaivo</title>
-<style>body{font:16px system-ui,sans-serif;background:#f6f7f9;color:#14171f;margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:#fff;border-radius:16px;box-shadow:0 1px 3px #0001}
-h1{font-size:22px;margin:0 0 8px}p{color:#555;margin:0 0 18px}label{display:block;font-size:14px;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px 12px;font:inherit;border:1px solid #ccd;border-radius:8px}
-button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:#fff;background:#14171f;border:0;border-radius:8px;cursor:pointer}.error{color:#b42318}.hint{font-size:13px;margin:6px 0 0}a{color:inherit}code{font-size:13px}
-.profiles{list-style:none;padding:0;margin:0 0 8px;display:grid;gap:8px}.profiles li{display:flex;align-items:center;gap:8px}.profiles form{margin:0;flex:1;min-width:0}.profiles button{margin:0;display:flex;align-items:center;gap:12px;text-align:left;color:inherit;background:#f6f7f9;font-weight:500}
-.profiles button:hover,.profiles button[aria-current]{outline:2px solid #14171f}.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.edit{font-size:13px;padding:8px 4px}.avatar{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}.current{margin-left:auto;font-size:13px;color:#555}
-details{margin-top:18px}summary{cursor:pointer;font-weight:600}.links{margin:18px 0 0;font-size:14px;display:flex;justify-content:space-between}
-fieldset{border:0;padding:0;margin:14px 0 0}legend{font-size:14px;padding:0;margin-bottom:6px}.choices{display:flex;flex-wrap:wrap;gap:6px}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-.choices label{margin:0;position:relative;cursor:pointer}.choices input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.swatch{width:32px;height:32px;border-radius:50%}.swatch:has(:checked){box-shadow:0 0 0 2px #fff,0 0 0 4px #14171f}
-.icon>span:first-of-type{display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid #ccd;font-size:18px}.icon:has(:checked)>span:first-of-type{border:2px solid #14171f}.choices :focus-visible+span,.swatch:has(:focus-visible){outline:2px solid #1570ef;outline-offset:2px}
-@media (prefers-color-scheme:dark){body{background:#0f1115;color:#eef}main{background:#181b22;box-shadow:none}p{color:#aab}input{background:#0f1115;color:#eef;border-color:#334}button{background:#eef;color:#14171f}.error{color:#f97066}.profiles button{background:#0f1115;color:#eef}.profiles button:hover,.profiles button[aria-current]{outline-color:#eef}.current{color:#aab}.swatch:has(:checked){box-shadow:0 0 0 2px #181b22,0 0 0 4px #eef}.icon>span:first-of-type{border-color:#334}.icon:has(:checked)>span:first-of-type{border-color:#eef}}</style>
-<main>${body}</main></html>`;
+<style>:root{--bg:#f6f7f9;--card:#fff;--text:#20242e;--muted:#697180;--border:#e5e7ec;--soft:#f5f6f8;--accent:#365bd6;--on:#fff;--err:#b42318;color-scheme:light}
+html[data-theme=ocean]{--bg:#f2f7f7;--text:#17323b;--muted:#607d85;--border:#dce8e9;--soft:#edf5f5;--accent:#087c82}html[data-theme=midnight]{${DARK}}@media (prefers-color-scheme:dark){html:not([data-theme]){${DARK}}}
+body{font:16px system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:var(--card);border-radius:16px;box-shadow:0 1px 3px #0002}
+h1{font-size:22px;margin:0 0 8px}p{color:var(--muted);margin:0 0 18px}label{display:block;font-size:14px;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px 12px;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px}
+button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:var(--on);background:var(--accent);border:0;border-radius:8px;cursor:pointer}.error{color:var(--err)}.hint{font-size:13px;margin:6px 0 0}a{color:inherit}code{font-size:13px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+main.wide{max-width:560px;background:none;box-shadow:none;text-align:center}.wide h1{font-size:26px;margin-bottom:28px}
+.tiles{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;justify-content:center;gap:22px}.tile{position:relative;width:96px}.tile form{margin:0}
+.pick{margin:0;padding:0;width:96px;display:flex;flex-direction:column;align-items:center;gap:8px;background:none;color:var(--muted);font-weight:500;text-decoration:none;border-radius:16px}.pick:hover,.pick[aria-current]{color:var(--text)}
+.avatar{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}.avatar.large{width:96px;height:96px;border-radius:20px;font-size:44px;box-sizing:border-box;transition:transform .12s}
+.pick:hover .avatar.large{transform:scale(1.04)}.pick[aria-current] .avatar.large{box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--accent)}.avatar.add{background:var(--soft);color:var(--muted);border:2px dashed var(--border)}
+.name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.edit{position:absolute;top:-8px;right:-8px;width:32px;height:32px;display:grid;place-items:center;border-radius:50%;background:var(--card);color:var(--text);box-shadow:0 1px 4px #0003}.edit svg{width:16px;height:16px}
+.bar{display:flex;justify-content:center;gap:12px;margin-top:36px}.bar a{width:44px;height:44px;display:grid;place-items:center;border-radius:12px;background:var(--card);color:var(--text);box-shadow:0 1px 3px #0002}
+.links{margin:18px 0 0;font-size:14px;display:flex;justify-content:space-between}.preview{display:flex;justify-content:center;margin-bottom:8px}
+fieldset{border:0;padding:0;margin:14px 0 0}legend{font-size:14px;padding:0;margin-bottom:6px}.choices{display:flex;flex-wrap:wrap;gap:6px}
+.choices label{margin:0;position:relative;cursor:pointer}.choices input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.swatch{width:32px;height:32px;border-radius:50%}.swatch:has(:checked){box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--text)}
+.icon>span:first-of-type{display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--border);font-size:18px}.icon:has(:checked)>span:first-of-type{border:2px solid var(--accent);background:var(--soft)}.choices :focus-visible+span,.swatch:has(:focus-visible){outline:2px solid var(--accent);outline-offset:2px}</style>
+<main${body.startsWith("<!--wide-->") ? ' class="wide"' : ""}>${body}</main></html>`;
   return new Response(html, { status, headers: pageHeaders });
 }
 function form(returnTo: string, setup: boolean, message = "") {
@@ -205,7 +228,7 @@ const profileList = (env: AuthEnv) =>
 
 // A profile card shows a colour and an icon, chosen from these. An empty icon
 // shows the first letter of the name; an unset colour follows the card's place.
-export const AVATAR_COLORS = ["#176c68", "#1570ef", "#6941c6", "#c11574", "#d92d20", "#b54708", "#4d7c0f", "#344054"];
+export const AVATAR_COLORS = ["#365bd6", "#0b7bc1", "#6941c6", "#c11574", "#d92d20", "#c4320a", "#b54708", "#475467"];
 export const AVATAR_ICONS = ["", "🐱", "🐶", "🦊", "🐼", "🐸", "🦄", "🐙", "🌸", "🌙", "⭐", "🔥", "🍀", "🌊", "🎧", "🎮", "☕", "🍕", "⚽", "🚀"];
 export function avatar(profile: Pick<Profile, "display_name" | "avatar_color" | "avatar_icon">, index = 0) {
   const color = AVATAR_COLORS.includes(profile.avatar_color) ? profile.avatar_color : AVATAR_COLORS[index % AVATAR_COLORS.length];
@@ -240,21 +263,27 @@ function profilesPage(profiles: Profile[], current: string | null, returnTo: str
   const { message = "", status = 200 } = options;
   const error = message ? `<p class="error" role="alert">${escape(message)}</p>` : "";
   const hidden = `<input type="hidden" name="return_to" value="${escape(returnTo)}">`;
+  const list = escape(profilesPath(returnTo));
+  const withReturn = (query: string) => `/auth/profiles?${query}${returnTo === "/" ? "" : "&amp;return_to=" + encodeURIComponent(returnTo)}`;
   const editIndex = profiles.findIndex(p => p.user_id === options.editing);
   if (editIndex >= 0) {
     const p = profiles[editIndex];
-    return page("Edit profile", `<h1>Edit profile</h1><p>Change how ${escape(p.display_name)}'s card looks. Only the card changes; the profile's data stays as it is.</p>${error}
+    return page("Edit profile", `<div class="preview">${badge(p, editIndex, true)}</div><h1>Edit profile</h1>${error}
 <form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="action" value="edit"><input type="hidden" name="profile" value="${escape(p.user_id)}">${cardFields(p, editIndex)}<button>Save</button></form>
-<p class="links"><a href="${escape(profilesPath(returnTo))}">Cancel</a><span></span></p>`, status);
+<p class="links"><a href="${list}">Cancel</a><span></span></p>`, status);
   }
-  const items = profiles.map((p, i) => `<li><form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="profile" value="${escape(p.user_id)}">
-<button${p.user_id === current ? ' aria-current="true"' : ""}>${badge(p, i)}<span class="name">${escape(p.display_name)}</span>${p.user_id === current ? '<span class="current">Current</span>' : ""}</button></form>
-<a class="edit" href="/auth/profiles?edit=${encodeURIComponent(p.user_id)}${returnTo === "/" ? "" : "&amp;return_to=" + encodeURIComponent(returnTo)}" aria-label="Edit ${escape(p.display_name)}">Edit</a></li>`).join("");
-  const add = profiles.length >= MAX_PROFILES ? `<p class="hint">This Remaivo has the most profiles it allows (${MAX_PROFILES}).</p>`
-    : `<details${options.adding ? " open" : ""}><summary>Add a profile</summary><form method="post" action="/auth/profiles"><input type="hidden" name="return_to" value="/"><input type="hidden" name="action" value="add">
-${cardFields(null, profiles.length)}<p class="hint">The new profile starts empty and sets up its own accounts and plan.</p><button>Create profile</button></form></details>`;
-  const back = current ? `<a href="${escape(returnTo)}">Back to Remaivo</a>` : "<span></span>";
-  return page("Profiles", `<h1>Who's using Remaivo?</h1><p>Everyone sharing this password has their own profile. Accounts, plans and history stay separate.</p>${error}<ul class="profiles">${items}</ul>${add}<p class="links">${back}<a href="/auth/signout">Sign out</a></p>`, status);
+  if (options.adding && profiles.length < MAX_PROFILES) {
+    return page("Add profile", `<h1>Add profile</h1>${error}<form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="action" value="add">
+${cardFields(null, profiles.length)}<button>Create profile</button></form><p class="links"><a href="${list}">Cancel</a><span></span></p>`, status);
+  }
+  const tiles = profiles.map((p, i) => `<li class="tile"><form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="profile" value="${escape(p.user_id)}">
+<button class="pick"${p.user_id === current ? ' aria-current="true"' : ""}>${badge(p, i, true)}<span class="name">${escape(p.display_name)}</span></button></form>
+<a class="edit" href="${withReturn("edit=" + encodeURIComponent(p.user_id))}" aria-label="Edit ${escape(p.display_name)}" title="Edit">${icon("edit")}</a></li>`).join("");
+  const add = profiles.length >= MAX_PROFILES ? ""
+    : `<li class="tile"><a class="pick" href="${withReturn("add=1")}"><span class="avatar large add" aria-hidden="true">${icon("plus")}</span><span class="name">Add profile</span></a></li>`;
+  const back = current ? `<a href="${escape(returnTo)}" aria-label="Back to Remaivo" title="Back to Remaivo">${icon("back")}</a>` : "";
+  return page("Profiles", `<!--wide--><h1>Who's using Remaivo?</h1>${error}<ul class="tiles">${tiles}${add}</ul>
+<nav class="bar">${back}<a href="/auth/signout" aria-label="Sign out" title="Sign out">${icon("signout")}</a></nav>`, status);
 }
 
 // The name, colour and icon from a card form, or the reason they don't fit.
@@ -270,7 +299,7 @@ async function handleProfiles(request: Request, env: AuthEnv, url: URL): Promise
   const session = await currentSession(request, env);
   if (!session) return redirect(`/auth/login?return_to=${encodeURIComponent(safeReturnPath(url.searchParams.get("return_to")))}`);
   const current = session.chosen ? session.userId : null;
-  if (request.method === "GET") return profilesPage(await profileList(env), current, safeReturnPath(url.searchParams.get("return_to")), { editing: url.searchParams.get("edit") });
+  if (request.method === "GET") return profilesPage(await profileList(env), current, safeReturnPath(url.searchParams.get("return_to")), { editing: url.searchParams.get("edit"), adding: url.searchParams.has("add") });
   if (request.method !== "POST") return page("Error", "<h1>Method not allowed.</h1>", 405);
   if (!sameOrigin(request, env)) return page("Error", "<h1>Request origin is not allowed.</h1>", 403);
 
@@ -297,10 +326,21 @@ async function handleProfiles(request: Request, env: AuthEnv, url: URL): Promise
     return redirect(profilesPath(returnTo));
   }
   await env.DB.prepare("UPDATE auth_sessions SET user_id = ?, profile_chosen = 1 WHERE token_hash = ?").bind(userId, session.tokenHash).run();
-  return redirect(returnTo);
+  // Open the app in the chosen profile's theme straight away, even on a new device.
+  const saved = await env.DB.prepare("SELECT ui_theme FROM profiles WHERE user_id = ?").bind(userId).first<{ ui_theme: string }>();
+  const theme = THEMES.includes(saved?.ui_theme ?? "") ? saved!.ui_theme : "indigo";
+  return redirect(returnTo, [`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`]);
 }
 
 export async function handleAuth(request: Request, env: AuthEnv): Promise<Response | null> {
+  const response = await authPage(request, env);
+  const theme = themeFrom(request);
+  if (!response || !theme || !response.headers.get("content-type")?.startsWith("text/html")) return response;
+  const html = (await response.text()).replace('<html lang="en">', `<html lang="en" data-theme="${theme}">`);
+  return new Response(html, { status: response.status, headers: response.headers });
+}
+
+async function authPage(request: Request, env: AuthEnv): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/auth/")) return null;
 
