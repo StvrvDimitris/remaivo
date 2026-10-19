@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Profiles**
+- Share your Remaivo password with up to four other people. After signing in, everyone picks their profile ("Who's using Remaivo?"), and each profile has its own accounts, plans, history and settings.
+- A new profile starts with the full setup: opening balances, accounts and an optional plan.
+- Profile cards can be customised with a name, a colour and an icon, and edited at any time.
+- Switch profile from the sidebar or from Settings, on any device. Switching on one device doesn't affect another.
+- Existing sign-ins stay signed in as the owner; the database updates itself.
+
 ## 1.0.0 (2026-10-14)
 
 The first public release. Remaivo is a single-owner personal finance app you run yourself, on Cloudflare (free) or with Docker.

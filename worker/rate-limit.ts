@@ -1,9 +1,10 @@
 // Counters are provided by the runtime; no database writes or isolate-local maps.
 type Limiters = Pick<Env, "LOGIN_RATE_LIMIT" | "FINANCE_RATE_LIMIT" | "PAGE_RATE_LIMIT" | "REMAIVO_PLATFORM">;
 export function rateLimitGroup(pathname: string) {
+  // Choosing a profile needs a signed-in session, so it counts as a page view.
+  if (pathname === "/" || pathname === "/auth/profiles") return "page";
   if (pathname.startsWith("/auth/") && pathname !== "/auth/signout") return "login";
   if (pathname === "/api/finance" || pathname.startsWith("/api/finance/")) return "finance";
-  if (pathname === "/") return "page";
   return null;
 }
 export async function enforceRateLimit(request: Request, env: Limiters): Promise<Response | null> {

@@ -9,16 +9,26 @@
 // Sessions are random tokens stored only as SHA-256 hashes. Each hash also
 // covers a key derived from the current password, so changing the password
 // signs every session out without any extra bookkeeping.
+//
+// The people who share the password each get a profile, like a streaming
+// service: their own user ID, so accounts, plans and history never mix. A new
+// sign-in first asks who is using Remaivo; the session then carries that
+// profile until someone switches or signs out.
 
 type AuthEnv = Pick<Env, "DB" | "REMAIVO_PLATFORM" | "APP_ORIGIN" | "REMAIVO_PASSWORD" | "REMAIVO_NAME">;
 type Identity = { user_id: string; email: string; display_name: string };
 type StoredPassword = { hash: string; salt: string; iterations: number };
 
-// The owner's identity row. The column is named after the former Google login.
+// The owner's identity row. The column is named after the former Google login;
+// every profile's starts with "password:".
 const OWNER_SUB = "password:owner";
 const OWNER_EMAIL = "owner@remaivo.local";
+const PROFILE_SUB = "password:%";
+const MAX_PROFILES = 5;
 const SESSION = "rmv-session";
 const MIN_LENGTH = 8;
+// Set on a request whose session is valid but has no profile chosen yet.
+export const CHOOSE_PROFILE = "x-remaivo-user-choose-profile";
 // workerd rejects PBKDF2 above 100,000 iterations. Cloudflare's free plan allows
 // about 10 ms of CPU per request, so a Worker there uses fewer; the count is
 // stored with each hash.
@@ -143,7 +153,13 @@ function page(title: string, body: string, status = 200) {
 <style>body{font:16px system-ui,sans-serif;background:#f6f7f9;color:#14171f;margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:#fff;border-radius:16px;box-shadow:0 1px 3px #0001}
 h1{font-size:22px;margin:0 0 8px}p{color:#555;margin:0 0 18px}label{display:block;font-size:14px;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px 12px;font:inherit;border:1px solid #ccd;border-radius:8px}
 button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:#fff;background:#14171f;border:0;border-radius:8px;cursor:pointer}.error{color:#b42318}.hint{font-size:13px;margin:6px 0 0}a{color:inherit}code{font-size:13px}
-@media (prefers-color-scheme:dark){body{background:#0f1115;color:#eef}main{background:#181b22;box-shadow:none}p{color:#aab}input{background:#0f1115;color:#eef;border-color:#334}button{background:#eef;color:#14171f}.error{color:#f97066}}</style>
+.profiles{list-style:none;padding:0;margin:0 0 8px;display:grid;gap:8px}.profiles li{display:flex;align-items:center;gap:8px}.profiles form{margin:0;flex:1;min-width:0}.profiles button{margin:0;display:flex;align-items:center;gap:12px;text-align:left;color:inherit;background:#f6f7f9;font-weight:500}
+.profiles button:hover,.profiles button[aria-current]{outline:2px solid #14171f}.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.edit{font-size:13px;padding:8px 4px}.avatar{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}.current{margin-left:auto;font-size:13px;color:#555}
+details{margin-top:18px}summary{cursor:pointer;font-weight:600}.links{margin:18px 0 0;font-size:14px;display:flex;justify-content:space-between}
+fieldset{border:0;padding:0;margin:14px 0 0}legend{font-size:14px;padding:0;margin-bottom:6px}.choices{display:flex;flex-wrap:wrap;gap:6px}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.choices label{margin:0;position:relative;cursor:pointer}.choices input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.swatch{width:32px;height:32px;border-radius:50%}.swatch:has(:checked){box-shadow:0 0 0 2px #fff,0 0 0 4px #14171f}
+.icon>span:first-of-type{display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid #ccd;font-size:18px}.icon:has(:checked)>span:first-of-type{border:2px solid #14171f}.choices :focus-visible+span,.swatch:has(:focus-visible){outline:2px solid #1570ef;outline-offset:2px}
+@media (prefers-color-scheme:dark){body{background:#0f1115;color:#eef}main{background:#181b22;box-shadow:none}p{color:#aab}input{background:#0f1115;color:#eef;border-color:#334}button{background:#eef;color:#14171f}.error{color:#f97066}.profiles button{background:#0f1115;color:#eef}.profiles button:hover,.profiles button[aria-current]{outline-color:#eef}.current{color:#aab}.swatch:has(:checked){box-shadow:0 0 0 2px #181b22,0 0 0 4px #eef}.icon>span:first-of-type{border-color:#334}.icon:has(:checked)>span:first-of-type{border-color:#eef}}</style>
 <main>${body}</main></html>`;
   return new Response(html, { status, headers: pageHeaders });
 }
@@ -165,16 +181,123 @@ function redirect(target: string, cookies: string[] = []) {
   return new Response(null, { status: 303, headers });
 }
 
+// Whoever just chose the first password is the owner and goes straight in;
+// every later sign-in picks a profile first.
 async function startSession(request: Request, env: AuthEnv, key: string, returnTo: string, name?: string) {
   const owner = await ownerIdentity(env, name);
+  const chosen = name !== undefined;
   const token = randomToken();
   const previous = sessionToken(request);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").bind(now()),
     ...(previous ? [env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sessionHash(previous, key))] : []),
-    env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").bind(await sessionHash(token, key), owner.user_id, now() + lifetime),
+    env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at, profile_chosen) VALUES (?, ?, ?, ?)").bind(await sessionHash(token, key), owner.user_id, now() + lifetime, chosen ? 1 : 0),
   ]);
-  return redirect(safeReturnPath(returnTo), [cookie(request, token, lifetime)]);
+  const target = safeReturnPath(returnTo);
+  return redirect(chosen ? target : profilesPath(target), [cookie(request, token, lifetime)]);
+}
+
+export const profilesPath = (returnTo: string) => returnTo === "/" ? "/auth/profiles" : `/auth/profiles?return_to=${encodeURIComponent(returnTo)}`;
+
+type Profile = { user_id: string; display_name: string; avatar_color: string; avatar_icon: string };
+const profileList = (env: AuthEnv) =>
+  env.DB.prepare("SELECT user_id, display_name, avatar_color, avatar_icon FROM auth_identities WHERE google_sub LIKE ? ORDER BY google_sub <> ?, created_at, rowid").bind(PROFILE_SUB, OWNER_SUB).all<Profile>().then(r => r.results);
+
+// A profile card shows a colour and an icon, chosen from these. An empty icon
+// shows the first letter of the name; an unset colour follows the card's place.
+export const AVATAR_COLORS = ["#176c68", "#1570ef", "#6941c6", "#c11574", "#d92d20", "#b54708", "#4d7c0f", "#344054"];
+export const AVATAR_ICONS = ["", "🐱", "🐶", "🦊", "🐼", "🐸", "🦄", "🐙", "🌸", "🌙", "⭐", "🔥", "🍀", "🌊", "🎧", "🎮", "☕", "🍕", "⚽", "🚀"];
+export function avatar(profile: Pick<Profile, "display_name" | "avatar_color" | "avatar_icon">, index = 0) {
+  const color = AVATAR_COLORS.includes(profile.avatar_color) ? profile.avatar_color : AVATAR_COLORS[index % AVATAR_COLORS.length];
+  const icon = AVATAR_ICONS.includes(profile.avatar_icon) && profile.avatar_icon ? profile.avatar_icon : Array.from(profile.display_name.trim())[0]?.toUpperCase() || "?";
+  return { color, icon };
+}
+
+// The session behind a request, whether or not it has chosen a profile yet.
+async function currentSession(request: Request, env: AuthEnv) {
+  const token = sessionToken(request), key = token ? await credentialKey(env) : null;
+  if (!token || !key) return null;
+  const tokenHash = await sessionHash(token, key);
+  const row = await env.DB.prepare("SELECT user_id, profile_chosen FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").bind(tokenHash, now()).first<{ user_id: string; profile_chosen: number }>();
+  return row ? { tokenHash, userId: row.user_id, chosen: !!row.profile_chosen } : null;
+}
+
+const badge = (p: Profile, index: number, large = false) => {
+  const { color, icon } = avatar(p, index);
+  return `<span class="avatar${large ? " large" : ""}" style="background:${color}" aria-hidden="true">${escape(icon)}</span>`;
+};
+// The card editor: name, colour and icon, as plain radio buttons (no scripts).
+function cardFields(p: Profile | null, index: number) {
+  const current = p ? avatar(p, index) : { color: AVATAR_COLORS[index % AVATAR_COLORS.length], icon: "" };
+  const icon = p && AVATAR_ICONS.includes(p.avatar_icon) ? p.avatar_icon : "";
+  const colors = AVATAR_COLORS.map((c, i) => `<label class="swatch" style="background:${c}"><input type="radio" name="color" value="${c}"${c === current.color ? " checked" : ""}><span class="sr">Colour ${i + 1}</span></label>`).join("");
+  const icons = AVATAR_ICONS.map(i => `<label class="icon"><input type="radio" name="icon" value="${i}"${i === icon ? " checked" : ""}><span>${i || "Aa"}</span>${i ? "" : '<span class="sr">First letter</span>'}</label>`).join("");
+  return `<label for="name">Name</label><input id="name" name="name" maxlength="40" autocomplete="off" value="${escape(p?.display_name ?? "")}" required>
+<fieldset><legend>Colour</legend><div class="choices">${colors}</div></fieldset><fieldset><legend>Icon</legend><div class="choices">${icons}</div></fieldset>`;
+}
+
+function profilesPage(profiles: Profile[], current: string | null, returnTo: string, options: { message?: string; status?: number; editing?: string | null; adding?: boolean } = {}) {
+  const { message = "", status = 200 } = options;
+  const error = message ? `<p class="error" role="alert">${escape(message)}</p>` : "";
+  const hidden = `<input type="hidden" name="return_to" value="${escape(returnTo)}">`;
+  const editIndex = profiles.findIndex(p => p.user_id === options.editing);
+  if (editIndex >= 0) {
+    const p = profiles[editIndex];
+    return page("Edit profile", `<h1>Edit profile</h1><p>Change how ${escape(p.display_name)}'s card looks. Only the card changes; the profile's data stays as it is.</p>${error}
+<form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="action" value="edit"><input type="hidden" name="profile" value="${escape(p.user_id)}">${cardFields(p, editIndex)}<button>Save</button></form>
+<p class="links"><a href="${escape(profilesPath(returnTo))}">Cancel</a><span></span></p>`, status);
+  }
+  const items = profiles.map((p, i) => `<li><form method="post" action="/auth/profiles">${hidden}<input type="hidden" name="profile" value="${escape(p.user_id)}">
+<button${p.user_id === current ? ' aria-current="true"' : ""}>${badge(p, i)}<span class="name">${escape(p.display_name)}</span>${p.user_id === current ? '<span class="current">Current</span>' : ""}</button></form>
+<a class="edit" href="/auth/profiles?edit=${encodeURIComponent(p.user_id)}${returnTo === "/" ? "" : "&amp;return_to=" + encodeURIComponent(returnTo)}" aria-label="Edit ${escape(p.display_name)}">Edit</a></li>`).join("");
+  const add = profiles.length >= MAX_PROFILES ? `<p class="hint">This Remaivo has the most profiles it allows (${MAX_PROFILES}).</p>`
+    : `<details${options.adding ? " open" : ""}><summary>Add a profile</summary><form method="post" action="/auth/profiles"><input type="hidden" name="return_to" value="/"><input type="hidden" name="action" value="add">
+${cardFields(null, profiles.length)}<p class="hint">The new profile starts empty and sets up its own accounts and plan.</p><button>Create profile</button></form></details>`;
+  const back = current ? `<a href="${escape(returnTo)}">Back to Remaivo</a>` : "<span></span>";
+  return page("Profiles", `<h1>Who's using Remaivo?</h1><p>Everyone sharing this password has their own profile. Accounts, plans and history stay separate.</p>${error}<ul class="profiles">${items}</ul>${add}<p class="links">${back}<a href="/auth/signout">Sign out</a></p>`, status);
+}
+
+// The name, colour and icon from a card form, or the reason they don't fit.
+function cardInput(data: FormData, profiles: Profile[], self: string | null) {
+  const name = String(data.get("name") ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
+  const color = String(data.get("color") ?? ""), icon = String(data.get("icon") ?? "");
+  if (!name) return { error: "Give the profile a name." };
+  if (profiles.some(p => p.user_id !== self && p.display_name.toLowerCase() === name.toLowerCase())) return { error: "A profile with that name already exists." };
+  return { name, color: AVATAR_COLORS.includes(color) ? color : "", icon: AVATAR_ICONS.includes(icon) ? icon : "" };
+}
+
+async function handleProfiles(request: Request, env: AuthEnv, url: URL): Promise<Response> {
+  const session = await currentSession(request, env);
+  if (!session) return redirect(`/auth/login?return_to=${encodeURIComponent(safeReturnPath(url.searchParams.get("return_to")))}`);
+  const current = session.chosen ? session.userId : null;
+  if (request.method === "GET") return profilesPage(await profileList(env), current, safeReturnPath(url.searchParams.get("return_to")), { editing: url.searchParams.get("edit") });
+  if (request.method !== "POST") return page("Error", "<h1>Method not allowed.</h1>", 405);
+  if (!sameOrigin(request, env)) return page("Error", "<h1>Request origin is not allowed.</h1>", 403);
+
+  const data = await request.formData().catch(() => null);
+  const returnTo = safeReturnPath(String(data?.get("return_to") ?? "/"));
+  const profiles = await profileList(env);
+  const action = String(data?.get("action") ?? "");
+  let userId = String(data?.get("profile") ?? "");
+  if (action === "add") {
+    const card = cardInput(data!, profiles, null);
+    if (card.error) return profilesPage(profiles, current, returnTo, { message: card.error, status: 400, adding: true });
+    if (profiles.length >= MAX_PROFILES) return profilesPage(profiles, current, returnTo, { message: `This Remaivo already has ${MAX_PROFILES} profiles.`, status: 400 });
+    userId = crypto.randomUUID();
+    // The address column is required; profiles have none, so it stays local.
+    await env.DB.prepare("INSERT INTO auth_identities (google_sub, user_id, email, display_name, avatar_color, avatar_icon) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind("password:" + userId, userId, `${userId}@remaivo.local`, card.name, card.color || AVATAR_COLORS[profiles.length % AVATAR_COLORS.length], card.icon).run();
+  } else if (!profiles.some(p => p.user_id === userId)) {
+    return profilesPage(profiles, current, returnTo, { message: "That profile no longer exists.", status: 400 });
+  } else if (action === "edit") {
+    const card = cardInput(data!, profiles, userId), index = profiles.findIndex(p => p.user_id === userId);
+    if (card.error) return profilesPage(profiles, current, returnTo, { message: card.error, status: 400, editing: userId });
+    await env.DB.prepare("UPDATE auth_identities SET display_name = ?, avatar_color = ?, avatar_icon = ? WHERE user_id = ? AND google_sub LIKE ?").bind(card.name, card.color || avatar(profiles[index], index).color, card.icon, userId, PROFILE_SUB).run();
+    // Editing a card is not choosing it: go back to the list.
+    return redirect(profilesPath(returnTo));
+  }
+  await env.DB.prepare("UPDATE auth_sessions SET user_id = ?, profile_chosen = 1 WHERE token_hash = ?").bind(userId, session.tokenHash).run();
+  return redirect(returnTo);
 }
 
 export async function handleAuth(request: Request, env: AuthEnv): Promise<Response | null> {
@@ -190,6 +313,7 @@ export async function handleAuth(request: Request, env: AuthEnv): Promise<Respon
     return redirect("/", [cookie(request, "", 0)]);
   }
 
+  if (url.pathname === "/auth/profiles") return handleProfiles(request, env, url);
   if (url.pathname !== "/auth/login") return page("Not found", '<h1>Page not found.</h1><p><a href="/">Back to Remaivo</a></p>', 404);
   const envPassword = env.REMAIVO_PASSWORD;
   if (envPassword && envPassword.length < MIN_LENGTH) return page("Password too short", `<h1>Password too short</h1><p>The <code>REMAIVO_PASSWORD</code> setting must be at least ${MIN_LENGTH} characters.</p>`, 503);
@@ -240,12 +364,15 @@ export async function authenticate(request: Request, env: AuthEnv): Promise<Requ
   const token = sessionToken(request);
   const key = token ? await credentialKey(env) : null;
   if (token && key) {
-    const identity = await env.DB.prepare("SELECT i.user_id, i.email, i.display_name FROM auth_sessions s JOIN auth_identities i ON i.user_id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND i.google_sub = ?")
-      .bind(await sessionHash(token, key), now(), OWNER_SUB).first<Identity>();
-    if (identity) {
+    const identity = await env.DB.prepare("SELECT i.user_id, i.email, i.display_name, i.avatar_color, i.avatar_icon, s.profile_chosen FROM auth_sessions s JOIN auth_identities i ON i.user_id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND i.google_sub LIKE ?")
+      .bind(await sessionHash(token, key), now(), PROFILE_SUB).first<Identity & Pick<Profile, "avatar_color" | "avatar_icon"> & { profile_chosen: number }>();
+    if (identity && !identity.profile_chosen) headers.set(CHOOSE_PROFILE, "1");
+    else if (identity) {
       headers.set("x-remaivo-user-id", identity.user_id);
       headers.set("x-remaivo-user-email", identity.email);
       headers.set("x-remaivo-user-name", encodeURIComponent(identity.display_name));
+      const { color, icon } = avatar(identity);
+      headers.set("x-remaivo-user-avatar", encodeURIComponent(JSON.stringify({ color, icon })));
     }
   }
   return new Request(request, { headers });

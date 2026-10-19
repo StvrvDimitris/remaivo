@@ -1,4 +1,4 @@
-import { signInPath, signOutPath, getUser } from "./auth";
+import { signInPath, signOutPath, profilesPath, getUser } from "./auth";
 import { RemaivoV3 as FinanceClient } from "./v3-client";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +27,8 @@ export default async function Home() {
       // A password-only owner has no real address to show.
       email={authenticatedUser.email.endsWith("@remaivo.local") ? "" : authenticatedUser.email}
       signOutHref={signOutPath()}
+      profilesHref={profilesPath()}
+      avatar={authenticatedUser.avatar}
     />
   );
 }

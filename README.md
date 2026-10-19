@@ -14,6 +14,7 @@
 - **Accounts report:** how each account and your net worth changed over a month or year.
 - **Savings goals and investments,** including market-value snapshots.
 - **Track only mode** if you just want to record money in and out without a plan.
+- **Profiles:** up to five people can share one password, each with their own data and a customisable profile card.
 - English and Greek, light and dark themes, works on phones and can be installed to the home screen.
 
 | Plan | Insights |
@@ -26,7 +27,7 @@
 
 ## Get your own Remaivo
 
-Each Remaivo belongs to one person (or a household sharing finances) and is protected by one password. Your data stays in your own account; nobody else can see it.
+Each Remaivo is protected by one password. Share it with a few people you trust and each of you gets a **profile**, like on a streaming service: pick yours after signing in, and your accounts, plans and history stay separate from everyone else's. Each profile card has its own name, colour and icon. Your data stays in your own account; nobody outside can see it.
 
 | | **Cloudflare** | **Docker** |
 | --- | --- | --- |

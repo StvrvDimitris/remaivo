@@ -1,7 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { authenticate, handleAuth, sameOrigin } from "./auth";
+import { authenticate, CHOOSE_PROFILE, handleAuth, profilesPath, safeReturnPath, sameOrigin } from "./auth";
 import { ensureMigrated } from "./migrate";
 import { enforceRateLimit } from "./rate-limit";
 
@@ -45,6 +45,10 @@ const worker = {
       return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
     }
     request = await authenticate(request, env);
+    // Signed in, but nobody has said who is using Remaivo yet.
+    if (request.headers.has(CHOOSE_PROFILE) && request.method === "GET" && url.pathname === "/") {
+      return new Response(null, { status: 303, headers: { Location: profilesPath(safeReturnPath(url.pathname + url.search)), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

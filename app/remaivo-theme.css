@@ -233,6 +233,8 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-data-export > p { margin: -5px 0 22px; max-width: 60ch; color: var(--theme-muted); font-size: .875rem; line-height: 1.6; }
 .v3-data-export-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; }
 .v3-data-export-actions > span { color: var(--theme-muted); font-size: .8125rem; line-height: 1.5; }
+.v3-profile-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; margin-top: 12px; }
+.v3-profile-actions > a:not(.v3-primary) { color: var(--theme-text-soft); font-size: .875rem; }
 .v3-alert { font-size: .875rem; line-height: 1.5; border-radius: 8px; }
 .v3-toast { background: #252f47; font-size: .875rem; border: 1px solid #ffffff20; box-shadow: 0 8px 30px #20242e22; }
 .v3-dialog-backdrop, .v3-app .modal-backdrop { background: #171d355c; backdrop-filter: blur(5px); padding: 24px; }

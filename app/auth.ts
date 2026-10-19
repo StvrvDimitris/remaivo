@@ -8,7 +8,10 @@ export async function getUser() {
   const email = requestHeaders.get("x-remaivo-user-email");
   if (!userId || !email) return null;
   const displayName = decodeURIComponent(requestHeaders.get("x-remaivo-user-name") ?? "") || email;
-  return { userId, email, displayName, fullName: displayName };
+  let avatar: { color?: string; icon?: string } = {};
+  try { avatar = JSON.parse(decodeURIComponent(requestHeaders.get("x-remaivo-user-avatar") ?? "{}")); } catch { /* the initial on a neutral badge */ }
+  return { userId, email, displayName, fullName: displayName, avatar };
 }
 export const signInPath = (returnTo: string) => `/auth/login?return_to=${encodeURIComponent(returnTo)}`;
 export const signOutPath = () => "/auth/signout";
+export const profilesPath = () => "/auth/profiles";
