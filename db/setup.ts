@@ -89,7 +89,7 @@ export async function createCurrentPlan(userId: string, payload: SetupPayload) {
     // Credit cards are entered as the amount owed.
     const balance = signedMoneyCents(input.balance || 0) * (type === "credit" ? -1 : 1);
     const creditLimit = input.creditLimit ? moneyCents(input.creditLimit) : null;
-    const color = /^#[0-9a-fA-F]{6}$/.test(String(input.color)) ? String(input.color) : "#1f5b4e";
+    const color = /^#[0-9a-fA-F]{6}$/.test(String(input.color)) ? String(input.color) : "#365bd6";
     const spendable = typeof input.includeSpendable === "boolean" ? input.includeSpendable : !["savings", "investment", "credit"].includes(type);
     const accountId = `opening:${userId}:${index}`;
     statements.push(env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${open}`)

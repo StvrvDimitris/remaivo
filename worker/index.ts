@@ -1,7 +1,9 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { authenticate, CHOOSE_PROFILE, handleAuth, profilesPath, safeReturnPath, sameOrigin } from "./auth";
+import { authenticate, CHOOSE_PROFILE, handleAuth, profilesPath, safeReturnPath, sameOrigin, themeFrom } from "./auth";
+import manifest from "../public/manifest.webmanifest?raw";
+import { themeCanvas } from "../app/ui-themes";
 import { ensureMigrated } from "./migrate";
 import { enforceRateLimit } from "./rate-limit";
 
@@ -29,6 +31,15 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // The web app manifest, coloured for the theme this browser last used, so an
+    // installed Remaivo opens on that colour instead of a light splash.
+    if (url.pathname === "/app.webmanifest") {
+      const color = themeCanvas(themeFrom(request) ?? "indigo");
+      return new Response(JSON.stringify({ ...JSON.parse(manifest), background_color: color, theme_color: color }), {
+        headers: { "Content-Type": "application/manifest+json", "Cache-Control": "private, no-cache", "Vary": "Cookie" },
+      });
+    }
 
     // Every request is rate limited and authenticated before the app sees it.
     const limited = await enforceRateLimit(request, env);

@@ -4,6 +4,9 @@ export const uiThemes = [
   { id: 'ocean', name: 'Ocean', description: 'Calm teal tones', canvas: '#f2f7f7', surface: '#ffffff', accent: '#087c82' },
 ] as const;
 
+// The colour behind the app and in the phone's status and navigation bars.
+export const themeCanvas = (id: string) => (uiThemes.find(theme => theme.id === id) ?? uiThemes[0]).canvas;
+
 export type UITheme = typeof uiThemes[number]['id'];
 export function isUITheme(value: unknown): value is UITheme {
   return uiThemes.some(theme => theme.id === value);

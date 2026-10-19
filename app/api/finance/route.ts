@@ -510,7 +510,7 @@ export async function POST(request: Request) {
       // Credit cards are entered as the amount owed.
       const signedAmount = signedCents(payload.balance) * (type === "credit" ? -1 : 1);
       const accountId = crypto.randomUUID();
-      const statements = [env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(accountId, user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId)];
+      const statements = [env.DB.prepare("INSERT INTO accounts (id, user_id, name, type, currency, balance_cents, credit_limit_cents, color, include_spendable) SELECT ?, ?, ?, ?, currency, ?, ?, ?, ? FROM profiles WHERE user_id = ?").bind(accountId, user.userId, text(payload.name, "New account"), type, signedAmount, cents(payload.creditLimit) || null, text(payload.color, "#365bd6"), bool(payload.includeSpendable, !["savings", "investment", "credit"].includes(type)) ? 1 : 0, user.userId)];
       if (signedAmount) statements.push(ledgerEntry(user.userId, `opening:${accountId}`, "opening_balance", accountId, signedAmount, actionToday, "Opening balance"));
       await env.DB.batch(statements);
     } else if (action === "adjustBalance") {
@@ -537,7 +537,7 @@ export async function POST(request: Request) {
             (spare_source_id = ? AND ? IN ('investment', 'credit')) OR
             (spare_destination_id = ? AND ? NOT IN ('savings', 'investment'))
           )
-        )`).bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#1f5b4e"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId, user.userId, payload.accountId, type, payload.accountId, type).run();
+        )`).bind(text(payload.name, "Account"), type, cents(payload.creditLimit) || null, text(payload.color, "#365bd6"), bool(payload.includeSpendable) ? 1 : 0, payload.accountId, user.userId, user.userId, payload.accountId, type, payload.accountId, type).run();
       if (!Number(updated.meta.changes)) return Response.json({ error: "This account's type must support its spare-change role. Change the spare-change settings first." }, { status: 409 });
     } else if (action === "addInvestmentSnapshot" || action === "updateInvestmentSnapshot") {
       const accountId = text(payload.accountId);

@@ -6,9 +6,12 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f1e9",
-  "theme_color": "#15372f",
-  "categories": ["finance", "productivity"],
+  "background_color": "#f6f7f9",
+  "theme_color": "#f6f7f9",
+  "categories": [
+    "finance",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "/remaivo-v1-icon-192.png",

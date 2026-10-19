@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { savedTheme } from "./auth";
+import { themeCanvas } from "./ui-themes";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,9 +14,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const viewport: Viewport = {
-  themeColor: "#f6f7f9",
-};
+// The phone's status and navigation bars take the theme's background colour.
+export async function generateViewport(): Promise<Viewport> {
+  return { themeColor: themeCanvas(await savedTheme()) };
+}
 
 const title = "Remaivo — Know what's left";
 const description = "A clear, cross-device view of your money, budgets, commitments, savings, and raw investments.";
@@ -24,7 +26,6 @@ export const metadata: Metadata = {
   applicationName: "Remaivo",
   title,
   description,
-  manifest: "/manifest.webmanifest",
   icons: {
     icon: [
       { url: "/remaivo-v1-favicon-32.png", sizes: "32x32", type: "image/png" },
@@ -49,6 +50,8 @@ export default async function RootLayout({
 }>) {
   return (
     <html lang="en" data-theme={await savedTheme()}>
+      {/* Sent with cookies, so an installed app opens on this browser's theme colour. */}
+      <head><link rel="manifest" href="/app.webmanifest" crossOrigin="use-credentials" /></head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

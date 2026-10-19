@@ -14,7 +14,7 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; background: var(--theme-canvas, var(--cream)); }
 
 body {
   margin: 0;

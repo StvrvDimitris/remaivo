@@ -13,7 +13,7 @@ import { BudgetPace } from './budget-pace';
 import { SpendingChart } from './spending-chart';
 import { calculateInvestmentValue } from './investment-valuations';
 import { plusDays, type Bucket, type Occurrence } from './v3-engine';
-import { uiThemes, normalizeUITheme, type UITheme } from './ui-themes';
+import { uiThemes, normalizeUITheme, themeCanvas, type UITheme } from './ui-themes';
 import { invalidateFinancePageCache } from './finance-page-cache';
 import { FinanceRefreshPolicy, snapshotChanged } from './finance-refresh';
 import { financialToday } from './finance-dates';
@@ -63,7 +63,7 @@ function RemaivoWorkspace(props:{displayName:string;email:string;signOutHref:str
  useEffect(()=>{if(data?.profile) setLanguage(normalizeLanguage(data.profile.ui_language));},[data?.profile?.ui_language, data?.profile, setLanguage]);
  // Until the profile loads, keep the theme this browser last showed (rmv-theme cookie).
  const theme=data?.profile?normalizeUITheme(data.profile.ui_theme):props.initialTheme??'indigo';
- useEffect(()=>{document.documentElement.dataset.theme=theme;document.cookie=`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`;},[theme]);
+ useEffect(()=>{document.documentElement.dataset.theme=theme;document.cookie=`rmv-theme=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`;document.querySelectorAll('meta[name="theme-color"]').forEach(meta=>meta.setAttribute('content',themeCanvas(theme)));},[theme]);
  const loadingRef=useRef(false);
  const busyRef=useRef(false);
  const mutationRef=useRef(0);
