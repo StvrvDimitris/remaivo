@@ -69,7 +69,7 @@ It then opens like an app.
 
 **How do I get updates?** When a new version appears on the [releases page](https://github.com/StvrvDimitris/remaivo/releases), update your copy on GitHub: open it, and if GitHub offers **Sync fork**, press it. Cloudflare rebuilds and redeploys automatically after your copy changes, and Remaivo updates its database by itself.
 
-**Can someone else use my Remaivo?** Anyone with the password sees the same data, so share it only with someone you share finances with. For separate finances, each person sets up their own Remaivo.
+**Can someone else use my Remaivo?** Yes. Share your Remaivo's address and password with up to four people you trust. After signing in, each person taps **Add a profile** on the *Who's using Remaivo?* page, picks a name, colour and icon, and sets up their own accounts and plan. Profiles keep everyone's money separate, but anyone with the password can open any profile, so share it only with people you trust. Switch profiles from **Settings → Switch or add a profile**.
 
 **Does Cloudflare see my data?** Your data is stored in your own Cloudflare account's database. Nobody else, including the Remaivo developers, has access to it.
 

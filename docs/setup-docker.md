@@ -94,6 +94,8 @@ docker rm -f remaivo
 docker run -d --name remaivo -p 5007:5007 -v remaivo-data:/data --restart unless-stopped ghcr.io/stvrvdimitris/remaivo:latest
 ```
 
+**Can someone else use my Remaivo?** Yes. Share your Remaivo's address and password with up to four people you trust. After signing in, each person taps **Add a profile** on the *Who's using Remaivo?* page, picks a name, colour and icon, and sets up their own accounts and plan. Profiles keep everyone's money separate, but anyone with the password can open any profile, so share it only with people you trust. Switch profiles from **Settings → Switch or add a profile**.
+
 **Will it start again after I restart my computer?** Yes, as long as Docker starts too (Docker Desktop has a *Start when you sign in* setting).
 
 ### Something went wrong?

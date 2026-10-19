@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-10-19)
 
 **Profiles**
 - Share your Remaivo password with up to four other people. After signing in, everyone picks their profile ("Who's using Remaivo?"), and each profile has its own accounts, plans, history and settings.
