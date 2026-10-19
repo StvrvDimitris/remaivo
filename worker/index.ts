@@ -1,9 +1,9 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { authenticate, CHOOSE_PROFILE, handleAuth, profilesPath, safeReturnPath, sameOrigin, themeFrom } from "./auth";
+import { authenticate, CHOOSE_PROFILE, handleAuth, noticePage, profilesPath, safeReturnPath, sameOrigin, themeFrom } from "./auth";
 import manifest from "../public/manifest.webmanifest?raw";
-import { themeCanvas } from "../app/ui-themes";
+import { themeCanvas } from "../app/ui-themes.ts";
 import { ensureMigrated } from "./migrate";
 import { enforceRateLimit } from "./rate-limit";
 
@@ -48,7 +48,7 @@ const worker = {
       await ensureMigrated(env.DB);
     } catch {
       console.error(JSON.stringify({ event: "migration_failed" }));
-      return new Response("Remaivo is updating its database. Please try again in a moment.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "10" } });
+      return noticePage(request, "Remaivo is updating", "Its database is being brought up to date. Please try again in a moment.", 503, { "Retry-After": "10" });
     }
     const authResponse = await handleAuth(request, env);
     if (authResponse) return authResponse;

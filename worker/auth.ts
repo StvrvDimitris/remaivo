@@ -148,6 +148,8 @@ const pageHeaders = {
   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
 };
 const escape = (value: string) => value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+import { themeCanvas } from "../app/ui-themes.ts";
+
 // Auth pages follow the theme the app last used in this browser (the
 // rmv-theme cookie), or the system's light or dark mode before there is one.
 const THEMES = ["indigo", "ocean", "midnight"];
@@ -156,6 +158,9 @@ export function themeFrom(request: Request) {
   const value = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)rmv-theme=([a-z]+)/)?.[1];
   return value && THEMES.includes(value) ? value : null;
 }
+// The phone's status bar colour. Every page sets it, so an installed app never
+// falls back to the colour its manifest had when it was installed.
+const BAR_COLORS = `<meta name="theme-color" content="${themeCanvas("indigo")}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="${themeCanvas("midnight")}" media="(prefers-color-scheme: dark)">`;
 const icons: Record<string, string> = {
   edit: "M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4",
   plus: "M12 5v14M5 12h14",
@@ -164,7 +169,7 @@ const icons: Record<string, string> = {
 };
 const icon = (name: string) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[name]}"/></svg>`;
 function page(title: string, body: string, status = 200) {
-  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Remaivo</title>
+  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${BAR_COLORS}<title>${title} · Remaivo</title>
 <style>:root{--bg:#f6f7f9;--card:#fff;--text:#20242e;--muted:#697180;--border:#e5e7ec;--soft:#f5f6f8;--accent:#365bd6;--on:#fff;--err:#b42318;color-scheme:light}
 html[data-theme=ocean]{--bg:#f2f7f7;--text:#17323b;--muted:#607d85;--border:#dce8e9;--soft:#edf5f5;--accent:#087c82}html[data-theme=midnight]{${DARK}}@media (prefers-color-scheme:dark){html:not([data-theme]){${DARK}}}
 body{font:16px system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:var(--card);border-radius:16px;box-shadow:0 1px 3px #0002}
@@ -334,10 +339,23 @@ async function handleProfiles(request: Request, env: AuthEnv, url: URL): Promise
 
 export async function handleAuth(request: Request, env: AuthEnv): Promise<Response | null> {
   const response = await authPage(request, env);
+  return response && themed(request, response);
+}
+
+// Applies the browser's saved theme to a page built by page().
+async function themed(request: Request, response: Response) {
   const theme = themeFrom(request);
-  if (!response || !theme || !response.headers.get("content-type")?.startsWith("text/html")) return response;
-  const html = (await response.text()).replace('<html lang="en">', `<html lang="en" data-theme="${theme}">`);
+  if (!theme || !response.headers.get("content-type")?.startsWith("text/html")) return response;
+  const html = (await response.text()).replace('<html lang="en">', `<html lang="en" data-theme="${theme}">`)
+    .replace(BAR_COLORS, `<meta name="theme-color" content="${themeCanvas(theme)}">`);
   return new Response(html, { status: response.status, headers: response.headers });
+}
+
+// A short themed page for the Worker's own messages (updating, too many requests).
+export function noticePage(request: Request, title: string, message: string, status: number, headers: Record<string, string> = {}) {
+  const response = page(title, `<h1>${escape(title)}</h1><p>${escape(message)}</p><p><a href="/">Back to Remaivo</a></p>`, status);
+  for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+  return themed(request, response);
 }
 
 async function authPage(request: Request, env: AuthEnv): Promise<Response | null> {

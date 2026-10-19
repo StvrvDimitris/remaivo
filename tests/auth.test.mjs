@@ -204,6 +204,12 @@ test('People sharing the password each get their own profile, with a customisabl
   sqlite.exec(`INSERT INTO profiles (user_id, ui_theme) VALUES ('${alex.user_id}', 'midnight')`);
   assert.match((await send(mine, { profile: alex.user_id })).headers.get('set-cookie'), /^rmv-theme=midnight;/);
   assert.match(await (await profiles(mine + '; rmv-theme=midnight')).text(), /<html lang="en" data-theme="midnight">/);
+  assert.match(await (await profiles(mine + '; rmv-theme=midnight')).text(), /<meta name="theme-color" content="#101621">/);
+  // Without a saved theme, every auth page still sets the bar colour for light and dark.
+  for (const path of ['/auth/login', '/auth/profiles', '/auth/profiles?add=1', '/auth/signout']) {
+    const html = await (await handleAuth(new Request(origin + path, { headers: { cookie: mine } }), env)).text();
+    assert.match(html, /<meta name="theme-color" content="#f6f7f9" media="\(prefers-color-scheme: light\)">/, path);
+  }
 
   // Switching back is just picking another card.
   await send(mine, { profile: alex.user_id });

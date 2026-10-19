@@ -1,4 +1,5 @@
 // Counters are provided by the runtime; no database writes or isolate-local maps.
+import { noticePage } from "./auth.ts";
 type Limiters = Pick<Env, "LOGIN_RATE_LIMIT" | "FINANCE_RATE_LIMIT" | "PAGE_RATE_LIMIT" | "REMAIVO_PLATFORM">;
 export function rateLimitGroup(pathname: string) {
   // Choosing a profile needs a signed-in session, so it counts as a page view.
@@ -24,9 +25,7 @@ export async function enforceRateLimit(request: Request, env: Limiters): Promise
     const { success } = await limiter.limit({ key });
     if (success) return null;
     if (group === "finance") return Response.json({ error: "Too many requests. Please wait a minute and try again." }, { status: 429, headers });
-    return new Response("Too many requests. Please wait a minute, then return to Remaivo and try again.", {
-      status: 429, headers: { ...headers, "Content-Type": "text/plain; charset=utf-8" },
-    });
+    return noticePage(request, "Too many requests", "Please wait a minute, then try again.", 429, headers);
   } catch {
     // Fail closed before touching D1 if a binding is missing or unavailable.
     console.error(JSON.stringify({ event: "rate_limiter_unavailable", group }));
