@@ -635,6 +635,11 @@ html[data-theme="midnight"] {
 .v3-app .dialog-frame .form-field > span:first-child { font-size:.875rem; font-weight:500; }
 .v3-app .dialog-frame :is(.form-grid,.v3-form-grid) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .v3-app .dialog-frame :is(input,select) { min-width:0; max-width:100%; box-sizing:border-box; }
+/* Side-by-side fields keep their boxes level when one label wraps (long Greek labels). */
+.v3-app .dialog-frame :is(.form-grid,.v3-form-grid) > .form-field { display:flex; flex-direction:column; }
+.v3-app .dialog-frame :is(.form-grid,.v3-form-grid) > .form-field > span:first-child { flex:1; }
+/* On phones a dropdown needs the full width to show its choice. */
+@media (max-width:480px) { .v3-app .dialog-frame :is(.form-grid,.v3-form-grid):has(> .form-field select) { grid-template-columns:1fr; } }
 .v3-app .dialog-footer { flex-shrink:0; display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 24px; border-top:1px solid var(--theme-line); background:var(--theme-soft); }
 .v3-app .dialog-footer :is(.primary-button,.ghost-button) { min-height:40px; padding:0 16px; font-size:.875rem; }
 .v3-app .dialog-key-hint { margin-right:auto; color:var(--theme-muted); font-size:.75rem; white-space:nowrap; }
@@ -755,11 +760,12 @@ html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-mu
 }
 @media (max-width:760px) {
  .v3-app :is(.modal-card,.v3-dialog).dialog-frame { width:100%; max-width:none; max-height:calc(100dvh - 24px); border-radius:18px 18px 0 0; }
- .v3-app .dialog-frame::before { display:block; width:36px; height:5px; min-height:5px; margin:10px auto 0; }
- .v3-app .dialog-scroll { padding:18px; scrollbar-gutter:auto; }
+ /* The handle and close button get their own strip so scrolled fields never pass under the ×. */
+ .v3-app .dialog-frame::before { display:block; width:36px; height:5px; min-height:5px; margin:10px auto 33px; }
+ .v3-app .dialog-scroll { padding:4px 18px 18px; scrollbar-gutter:auto; }
  .v3-app .dialog-heading { gap:10px; padding-right:30px; margin-bottom:18px; }
  .v3-app .dialog-heading-icon { width:36px; height:36px; }
- .v3-app .dialog-frame .modal-close { top:12px; right:8px; width:44px; height:44px; }
+ .v3-app .dialog-frame .modal-close { top:4px; right:8px; width:44px; height:44px; }
  .v3-app .dialog-frame form { gap:14px; }
  .v3-app .dialog-footer { padding:12px 18px max(12px,env(safe-area-inset-bottom)); gap:10px; }
  .v3-app .dialog-key-hint { display:none; }
@@ -768,7 +774,10 @@ html[data-theme="midnight"] .v3-app .category-cloud small { color:var(--theme-mu
  .v3-app .money-input { height:46px; }
  .v3-app .transaction-amount .money-input { height:56px; }
  .v3-app .money-input input { min-height:0; height:100%; }
- .v3-app .dialog-frame .transaction-types button { font-size:.75rem; padding:0 4px; }
+ /* Long labels (Greek) size to their text and the row scrolls sideways instead of overlapping. */
+ .v3-app .dialog-frame .transaction-types { overflow-x:auto; scrollbar-width:none; }
+ .v3-app .dialog-frame .transaction-types::-webkit-scrollbar { display:none; }
+ .v3-app .dialog-frame .transaction-types button { flex:1 0 auto; font-size:.75rem; padding:0 8px; }
  .v3-app .transaction-page .analytics-filter-shell { padding:16px 16px 10px; }
  .v3-app .analytics-filter-shell .page-toolbar { flex-wrap:wrap; gap:8px; }
  .v3-app .analytics-filter-shell .search-box { flex:1 0 100%; box-sizing:border-box; }
