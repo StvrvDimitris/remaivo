@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.1 (2026-10-20)
+
+**Looks the same everywhere**
+- The profile picker, sign-in pages and the installed app now follow your theme (Indigo, Ocean or Midnight), including the phone's status bar and the splash screen. No more green bars, white edges or a white flash when opening the app in dark mode.
+- The profile picker uses icon buttons instead of text, and the top-left of the app shows your profile card; tap it to switch profile.
+- Leftover greens from the old design are gone.
+
+**Greek**
+- The whole interface is now in Greek when Greek is chosen, including sign-in, profiles, statuses, charts, scheduled payments and error messages.
+
+**Phones**
+- Side-by-side fields in forms stay aligned when a label wraps, dropdowns get the full width so their choice isn't cut off, and the close button no longer covers fields while you scroll.
+- The transaction type tabs no longer overlap in Greek.
+
+**Accounts**
+- Bank, wallet and custom accounts call their limit an *overdraft limit*; credit cards keep *credit limit*. Savings, cash and investment accounts no longer show a limit.
+
+**Updating**
+- Cloudflare: open your copy on GitHub and press **Sync fork**; Cloudflare redeploys by itself. Render: **Manual Deploy → Deploy latest commit**. At home: run the three update lines from the [Docker guide](docs/setup-docker.md). Your data stays and the database updates itself.
+
 ## 1.1.0 (2026-10-19)
 
 **Profiles**

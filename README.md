@@ -25,6 +25,10 @@
 | --- | --- |
 | ![Accounts](docs/screenshots/accounts.png) | <img src="docs/screenshots/phone-overview.png" alt="Remaivo on a phone" width="300"> |
 
+| Profiles | Profiles on a phone (Midnight theme) |
+| --- | --- |
+| ![Who's using Remaivo?](docs/screenshots/profiles.png) | <img src="docs/screenshots/phone-profiles.png" alt="Profile picker on a phone" width="300"> |
+
 ## Get your own Remaivo
 
 Each Remaivo is protected by one password. Share it with a few people you trust and each of you gets a **profile**, like on a streaming service: pick yours after signing in, and your accounts, plans and history stay separate from everyone else's. Each profile card has its own name, colour and icon. Your data stays in your own account; nobody outside can see it.
