@@ -253,6 +253,7 @@ export const greek: Record<string,string> = {
   "Account type": "Τύπος λογαριασμού",
   "Account color": "Χρώμα λογαριασμού",
   "Credit limit (optional)": "Πιστωτικό όριο (προαιρετικό)",
+  "Overdraft limit (optional)": "Όριο υπερανάληψης (προαιρετικό)",
   "Include this balance in available-to-spend money": "Συμπερίληψη αυτού του υπολοίπου στα διαθέσιμα χρήματα",
   "Save account details": "Αποθήκευση λογαριασμού",
   "Add account": "Προσθήκη λογαριασμού",
