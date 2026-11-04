@@ -36,12 +36,12 @@ html[data-theme="sand"] {
 html[data-theme="obsidian"] {
   --pro-chrome: #000000;
   --pro-chrome-hover: #16181d;
-  --pro-cta: #b9a2ff;
-  --pro-cta-hover: #cdbcff;
-  --pro-cta-text: #1c1238;
+  --pro-cta: #f2b54a;
+  --pro-cta-hover: #f7c870;
+  --pro-cta-text: #2a1a00;
   --pro-chart-strong: #e2e2e8;
   --pro-chart-positive: #7fd6ad;
-  --pro-ring: rgba(185, 162, 255, .3);
+  --pro-ring: rgba(242, 181, 74, .3);
   --pro-warn-bg: #2a2214;
   --pro-warn-border: #5e4a23;
   --pro-warn-text: #f8d9a0;
@@ -51,12 +51,12 @@ html[data-theme="obsidian"] {
 html[data-theme="midnight"] {
   --pro-chrome: #0b111b;
   --pro-chrome-hover: #172131;
-  --pro-cta: #a4b7ff;
-  --pro-cta-hover: #bdcaff;
-  --pro-cta-text: #142047;
+  --pro-cta: #5cb8ff;
+  --pro-cta-hover: #85caff;
+  --pro-cta-text: #06213a;
   --pro-chart-strong: #d0d9e8;
   --pro-chart-positive: #83d5b7;
-  --pro-ring: rgba(164, 183, 255, .28);
+  --pro-ring: rgba(92, 184, 255, .28);
   --pro-warn-bg: #2f2716;
   --pro-warn-border: #6b5428;
   --pro-warn-text: #f8d9a0;

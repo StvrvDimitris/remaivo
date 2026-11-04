@@ -154,7 +154,7 @@ import { localize } from "./auth-text.ts";
 // Auth pages follow the theme the app last used in this browser (the
 // rmv-theme cookie), or the system's light or dark mode before there is one.
 const THEMES = ["indigo", "ocean", "sand", "midnight", "obsidian"];
-const DARK = "--bg:#101621;--card:#1a2332;--text:#eef2fa;--muted:#a1aec2;--border:#354258;--soft:#232f42;--accent:#a4b7ff;--on:#142047;--err:#ffaaa8;color-scheme:dark";
+const DARK = "--bg:#101621;--card:#1a2332;--text:#eef2fa;--muted:#a1aec2;--border:#354258;--soft:#232f42;--accent:#5cb8ff;--on:#06213a;--err:#ffaaa8;color-scheme:dark";
 // The interface language: the one the app last used here, else the browser's.
 export function languageFrom(request: Request) {
   const saved = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)rmv-lang=([a-z]+)/)?.[1];
@@ -178,7 +178,7 @@ const icon = (name: string) => `<svg viewBox="0 0 24 24" width="20" height="20" 
 function page(title: string, body: string, status = 200) {
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${BAR_COLORS}<title>${title} · Remaivo</title>
 <style>:root{--bg:#f6f7f9;--card:#fff;--text:#20242e;--muted:#697180;--border:#e5e7ec;--soft:#f5f6f8;--accent:#365bd6;--on:#fff;--err:#b42318;color-scheme:light}
-html[data-theme=ocean]{--bg:#f2f7f7;--text:#17323b;--muted:#607d85;--border:#dce8e9;--soft:#edf5f5;--accent:#087c82}html[data-theme=sand]{--bg:#f4efe6;--card:#fffcf7;--text:#2f241c;--muted:#7d6c5e;--border:#e6dccd;--soft:#f7f1e8;--accent:#b4492a}html[data-theme=midnight]{${DARK}}html[data-theme=obsidian]{${DARK};--bg:#050608;--card:#111317;--text:#f1f1f4;--muted:#9a9ca6;--border:#2a2c33;--soft:#1a1c21;--accent:#b9a2ff;--on:#1c1238}@media (prefers-color-scheme:dark){html:not([data-theme]){${DARK}}}
+html[data-theme=ocean]{--bg:#f2f7f7;--text:#17323b;--muted:#607d85;--border:#dce8e9;--soft:#edf5f5;--accent:#087c82}html[data-theme=sand]{--bg:#f4efe6;--card:#fffcf7;--text:#2f241c;--muted:#7d6c5e;--border:#e6dccd;--soft:#f7f1e8;--accent:#b4492a}html[data-theme=midnight]{${DARK}}html[data-theme=obsidian]{${DARK};--bg:#050608;--card:#111317;--text:#f1f1f4;--muted:#9a9ca6;--border:#2a2c33;--soft:#1a1c21;--accent:#f2b54a;--on:#2a1a00}@media (prefers-color-scheme:dark){html:not([data-theme]){${DARK}}}
 body{font:16px system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0}main{max-width:360px;margin:12vh auto;padding:28px;background:var(--card);border-radius:16px;box-shadow:0 1px 3px #0002}
 h1{font-size:22px;margin:0 0 8px}p{color:var(--muted);margin:0 0 18px}label{display:block;font-size:14px;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px 12px;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px}
 button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:var(--on);background:var(--accent);border:0;border-radius:8px;cursor:pointer}.error{color:var(--err)}.hint{font-size:13px;margin:6px 0 0}a{color:inherit}code{font-size:13px}

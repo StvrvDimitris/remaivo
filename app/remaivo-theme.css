@@ -33,12 +33,12 @@ html[data-theme="ocean"] {
 }
 html[data-theme="midnight"] {
  color-scheme:dark;
- --theme-on-accent:#142047;
+ --theme-on-accent:#06213a;
  --theme-canvas:#101621; --theme-surface:#1a2332; --theme-text:#eef2fa; --theme-text-soft:#d0d9e8; --theme-muted:#a1aec2;
  --theme-border:#354258; --theme-line:#2b374a; --theme-soft:#232f42; --theme-hover:#253248;
- --theme-accent:#a4b7ff; --theme-accent-hover:#bdcaff; --theme-focus:#a4b7ff; --theme-accent-soft:#2b3958;
- --theme-hero:#263758; --theme-hero-muted:#c4d0ea; --theme-positive:#83d5b7; --theme-negative:#ffaaa8; --theme-negative-soft:#432b35;
- --theme-chart-secondary:#6d85bf; --theme-chart-muted:#415472;
+ --theme-accent:#5cb8ff; --theme-accent-hover:#85caff; --theme-focus:#5cb8ff; --theme-accent-soft:#16344f;
+ --theme-hero:#18324d; --theme-hero-muted:#bcd6ee; --theme-positive:#83d5b7; --theme-negative:#ffaaa8; --theme-negative-soft:#432b35;
+ --theme-chart-secondary:#3f7fb5; --theme-chart-muted:#2a4560;
  --theme-raised:#202b3e; --theme-raised-shadow:0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .3);
 }
 html[data-theme="sand"] {
@@ -50,12 +50,12 @@ html[data-theme="sand"] {
 }
 html[data-theme="obsidian"] {
  color-scheme:dark;
- --theme-on-accent:#1c1238;
+ --theme-on-accent:#2a1a00;
  --theme-canvas:#050608; --theme-surface:#111317; --theme-text:#f1f1f4; --theme-text-soft:#cfd0d6; --theme-muted:#9a9ca6;
  --theme-border:#2a2c33; --theme-line:#1f2127; --theme-soft:#1a1c21; --theme-hover:#1c1e24;
- --theme-accent:#b9a2ff; --theme-accent-hover:#cdbcff; --theme-focus:#b9a2ff; --theme-accent-soft:#2a2342;
- --theme-hero:#1d1a2b; --theme-hero-muted:#c9c2e4; --theme-positive:#7fd6ad; --theme-negative:#ff9f9c; --theme-negative-soft:#3a1f22;
- --theme-chart-secondary:#7e6cc0; --theme-chart-muted:#34304a;
+ --theme-accent:#f2b54a; --theme-accent-hover:#f7c870; --theme-focus:#f2b54a; --theme-accent-soft:#2e2412;
+ --theme-hero:#1f1a10; --theme-hero-muted:#e3d3b0; --theme-positive:#7fd6ad; --theme-negative:#ff9f9c; --theme-negative-soft:#3a1f22;
+ --theme-chart-secondary:#a77b2c; --theme-chart-muted:#3a3020;
  --theme-raised:#16181d; --theme-raised-shadow:0 1px 2px rgba(0, 0, 0, .6), 0 6px 18px rgba(0, 0, 0, .5);
 }
 /* Remaivo: one visual system across the planning workspace and legacy forms. */
