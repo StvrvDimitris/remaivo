@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0 (2026-11-04)
+
+**Backups you can restore**
+- **Download backup** in Settings now saves every profile in one file, with each profile's name, colour and icon. Your password isn't included.
+- **Restore from a backup** shows the backup's date and what would change for each profile, then asks you to confirm. Your current data downloads first, in case you chose the wrong file.
+- A restore replaces only the profiles in the file. If anything goes wrong, nothing changes.
+- Earlier exports can still be restored, one profile at a time, and a backup also restores onto a new install.
+
+**Payment calendar**
+- **Plan → Upcoming** has a new Calendar view of the current plan period. Each day shows its payments and what your plan expects to have left afterwards, using the same estimate as Budget pace.
+- Days turn amber when the plan is running low and red when they go over it. Open a payment to record, reschedule or skip it.
+
+**Phones**
+- The Plan tabs are now Allocations, Upcoming and Schedules, so all three fit without scrolling.
+
+**Updating**
+- Cloudflare: open your copy on GitHub and press **Sync fork**; Cloudflare redeploys by itself. Render: **Manual Deploy → Deploy latest commit**. At home: run the three update lines from the [Docker guide](docs/setup-docker.md). Your data stays, and nothing needs changing in the database.
+
 ## 1.2.0 (2026-11-04)
 
 **Themes**
