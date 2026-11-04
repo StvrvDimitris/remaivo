@@ -65,7 +65,7 @@ It then opens like an app.
 
 **I forgot my password.** In the Cloudflare dashboard open **Storage & Databases → D1 → remaivo → Console**, run `DELETE FROM auth_password;` and press Execute. Your finance data is untouched. Open Remaivo again and choose a new password with a fresh setup code (step 3).
 
-**How do I back up my data?** In Remaivo open **Settings** and use **Export**. You get a file with all your records. Cloudflare also keeps its own backups of the database (D1 Time Travel).
+**How do I back up my data?** In Remaivo open **Settings** and press **Download backup**. You get one file with every profile, which **Restore from a backup** can load again. Cloudflare also keeps its own backups of the database (D1 Time Travel).
 
 **How do I get updates?** When a new version appears on the [releases page](https://github.com/StvrvDimitris/remaivo/releases), update your copy on GitHub: open it, and if GitHub offers **Sync fork**, press it. Cloudflare rebuilds and redeploys automatically after your copy changes, and Remaivo updates its database by itself.
 

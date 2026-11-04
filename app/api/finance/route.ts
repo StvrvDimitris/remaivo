@@ -1,5 +1,5 @@
 import { reconcileV3, v3Snapshot, v3Action } from "../../../db/v3";
-import { exportBackup } from "../../../db/backup";
+import { BackupError, exportBackup, previewRestore, restoreBackup } from "../../../db/backup";
 import { ArchiveError, listArchive, restoreArchive } from "../../../db/archive";
 import { createCurrentPlan } from "../../../db/setup";
 import { env } from "cloudflare:workers";
@@ -454,11 +454,11 @@ export async function GET(request: Request) {
   try {
     const view = new URL(request.url).searchParams.get("view");
     if (view === "export") {
-      const backup = await exportBackup(user.userId);
+      const backup = await exportBackup();
       const date = backup.exportedAt.slice(0, 10);
       return new Response(JSON.stringify(backup, null, 2), { headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="remaivo-data-export-${date}.json"`,
+        "Content-Disposition": `attachment; filename="remaivo-backup-${date}.json"`,
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
       } });
@@ -485,6 +485,8 @@ export async function POST(request: Request) {
     const body = await request.json() as JsonObject;
     const action = text(body.action);
     const payload = (body.payload ?? {}) as JsonObject;
+    if (action === "previewRestore") return Response.json(await previewRestore(user.userId, payload.backup));
+    if (action === "restoreBackup") return Response.json(await restoreBackup(user.userId, payload.backup));
     const storedClock = action === "setup" ? null : await env.DB.prepare("SELECT timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<{timezone:string}>();
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
@@ -866,6 +868,6 @@ export async function POST(request: Request) {
     return Response.json(await snapshot(user));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save your changes.";
-    return Response.json({ error: message.includes("UNIQUE") ? "That item already exists." : message }, { status: error instanceof ArchiveError ? error.status : 500 });
+    return Response.json({ error: message.includes("UNIQUE") ? "That item already exists." : message }, { status: error instanceof ArchiveError || error instanceof BackupError ? error.status : 500 });
   }
 }

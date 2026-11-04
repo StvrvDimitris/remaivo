@@ -766,6 +766,11 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
 .v3-app .v3-data-export-actions { margin:12px 0 0; }
 .v3-app .v3-data-export-actions > a { position:absolute; right:24px; top:50%; transform:translateY(-50%); }
 .v3-app .v3-data-export-actions > span { font-size:.75rem; }
+.v3-app .v3-data-restore { margin-top:12px; }
+.v3-app .v3-restore-table { margin:12px 0; font-size:.875rem; }
+.v3-app .v3-restore-table > div { display:grid; grid-template-columns:minmax(0,1.6fr) 1fr 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--theme-border); }
+.v3-app .v3-restore-table small { font-weight:400; }
+.v3-app .v3-restore-confirm { display:flex; align-items:flex-start; gap:8px; margin:12px 0; font-size:.875rem; }
 .v3-app .v3-appearance { padding:20px; }
 .v3-app .v3-theme-preview { height:90px; }
 

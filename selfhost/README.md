@@ -29,7 +29,7 @@ docker compose up -d
 
 Open <http://localhost:5007>. On the first visit Remaivo asks you to **choose a password**, together with a one-time **setup code** that only the server's log shows (`docker logs remaivo`, or the terminal you started it from). That password protects the server from then on.
 
-Your data is in the `remaivo-data` volume (with Compose, the `./remaivo-data` folder). Back it up, or use the JSON export inside the app.
+Your data is in the `remaivo-data` volume (with Compose, the `./remaivo-data` folder). Back it up, or use **Download backup** in Settings, which **Restore from a backup** can load again.
 
 To build from a local clone instead: `docker build -t remaivo .`
 

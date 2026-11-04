@@ -85,7 +85,7 @@ To reach it from anywhere, the easiest safe way is [Tailscale](https://tailscale
 docker exec remaivo node selfhost/server.mjs reset-password
 ```
 
-**How do I back up my data?** In Remaivo open **Settings → Export** for a file with all your records. Your full database lives in the `remaivo-data` Docker volume.
+**How do I back up my data?** In Remaivo open **Settings** and press **Download backup** for one file with every profile, which **Restore from a backup** can load again. Your full database lives in the `remaivo-data` Docker volume.
 
 **How do I get updates?** Run these three lines. Your data stays, and Remaivo updates its database by itself.
 

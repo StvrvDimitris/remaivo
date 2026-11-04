@@ -72,7 +72,7 @@ pnpm lint
 pnpm build
 ```
 
-The UI lives in `app/`; `app/api/finance/route.ts` handles authenticated finance requests. `worker/auth.ts` is the password sign-in and `worker/migrate.ts` brings the database up to date on startup. `db/setup.ts` creates the current Plan for new owners, `db/v3.ts` reconciles the Plan, buckets and scheduled payments, and `db/backup.ts` produces the JSON export.
+The UI lives in `app/`; `app/api/finance/route.ts` handles authenticated finance requests. `worker/auth.ts` is the password sign-in and `worker/migrate.ts` brings the database up to date on startup. `db/setup.ts` creates the current Plan for new owners, `db/v3.ts` reconciles the Plan, buckets and scheduled payments, and `db/backup.ts` produces and restores the JSON backup.
 
 `REMAIVO_HOST` picks the Worker config at build time: unset uses `wrangler.jsonc` (the Cloudflare template), `cloudflare` uses `wrangler.cloudflare.jsonc` (your own filled-in copy, which git ignores), and `selfhost` uses `wrangler.selfhost.jsonc` (the Docker image).
 
