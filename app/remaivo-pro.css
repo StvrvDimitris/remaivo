@@ -261,6 +261,29 @@ html[data-theme="midnight"] {
 .v3-app .v3-tabs { gap: 4px; border-color: var(--theme-border); }
 .v3-app .v3-tabs button { min-height: 40px; padding: 0 12px; font-weight: 500; color: var(--theme-muted); }
 .v3-app .v3-tabs button.active { color: var(--theme-text); border-bottom-color: var(--theme-text); font-weight: 600; }
+.v3-app .v3-view-switch { display:inline-flex; gap:2px; padding:3px; margin:0 0 16px; border-radius:9px; background:var(--theme-soft); }
+.v3-app .v3-view-switch button { min-height:32px; padding:0 14px; border:0; border-radius:7px; background:transparent; color:var(--theme-muted); font-size:.8125rem; font-weight:500; }
+.v3-app .v3-view-switch button.active { background:var(--paper); color:var(--theme-text); box-shadow:0 1px 2px rgba(16,24,40,.1); }
+.v3-app .v3-calendar-summary { display:flex; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.v3-app .v3-calendar-summary small { display:block; font-size:.75rem; color:var(--theme-muted); }
+.v3-app .v3-calendar-summary strong { font-size:1rem; font-weight:600; color:var(--theme-text); }
+.v3-app .v3-calendar-summary > div:last-child { text-align:right; }
+.v3-app .v3-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; }
+.v3-app .v3-calendar-weekday { padding:2px 0 4px; text-align:center; font-size:.75rem; color:var(--theme-muted); }
+.v3-app .v3-calendar-day { position:relative; display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0; min-height:64px; padding:6px; overflow:hidden; border:1px solid var(--theme-line); border-radius:8px; background:transparent; color:var(--theme-text); text-align:left; cursor:pointer; }
+.v3-app .v3-calendar-day:hover { background:var(--theme-hover); }
+.v3-app .v3-calendar-day b { font-size:.75rem; font-weight:500; }
+.v3-app .v3-calendar-day small { max-width:100%; overflow:hidden; font-size:.6875rem; text-overflow:ellipsis; white-space:nowrap; }
+.v3-app .v3-calendar-day i { display:none; }
+.v3-app .v3-calendar-day.is-past { background:var(--theme-soft); color:var(--theme-muted); }
+.v3-app .v3-calendar-day.is-tight, .v3-app .v3-calendar-left.is-tight { background:var(--amber-soft,#fdf3dc); color:#8a5a00; }
+.v3-app .v3-calendar-day.is-over, .v3-app .v3-calendar-left.is-over { background:var(--red-soft,#fdecec); color:#b42318; }
+.v3-app .v3-calendar-day.is-today b { color:var(--theme-accent); font-weight:700; }
+.v3-app .v3-calendar-day.is-selected { border-color:var(--theme-accent); box-shadow:inset 0 0 0 1px var(--theme-accent); }
+.v3-app .v3-calendar-detail { margin-top:14px; padding-top:12px; border-top:1px solid var(--theme-line); }
+.v3-app .v3-calendar-left { display:flex; justify-content:space-between; gap:12px; margin-top:8px; padding:8px 10px; border-radius:8px; background:var(--theme-soft); font-size:.875rem; }
+html[data-theme=midnight] .v3-app .v3-calendar-day.is-tight, html[data-theme=midnight] .v3-app .v3-calendar-left.is-tight, html[data-theme=obsidian] .v3-app .v3-calendar-day.is-tight, html[data-theme=obsidian] .v3-app .v3-calendar-left.is-tight { background:#3d2f10; color:#f5cf85; }
+html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midnight] .v3-app .v3-calendar-left.is-over, html[data-theme=obsidian] .v3-app .v3-calendar-day.is-over, html[data-theme=obsidian] .v3-app .v3-calendar-left.is-over { background:#431c1c; color:#ffaaa8; }
 .v3-app .v3-dialog .v3-tabs, .v3-app .modal-card .v3-tabs { gap: 2px; padding: 3px; margin: 0 0 16px; border: 0; border-radius: 9px; background: var(--theme-soft); }
 .v3-app .v3-dialog .v3-tabs button { flex: 1; min-height: 32px; padding: 0 10px; border: 0; border-radius: 7px; font-size: .8125rem; }
 .v3-app .v3-dialog .v3-tabs button.active { background: var(--paper); color: var(--theme-text); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
@@ -822,6 +845,12 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
  .v3-app .goal-heading { flex-wrap:wrap; gap:12px; }
  .v3-app .goal-heading > button { margin:0; }
  .v3-app .accounts-grid .add-card { min-height:140px; }
+ .v3-app .v3-tabs { justify-content:space-between; gap:8px; }
+ .v3-app .v3-tabs button { padding:0 4px; white-space:nowrap; }
+ .v3-app .v3-calendar { gap:2px; }
+ .v3-app .v3-calendar-day { align-items:center; min-height:44px; padding:5px 2px 10px; }
+ .v3-app .v3-calendar-day small { display:none; }
+ .v3-app .v3-calendar-day i { position:absolute; bottom:6px; left:50%; display:block; width:5px; height:5px; margin-left:-2.5px; border-radius:50%; background:currentColor; }
  .v3-app .v3-data-export { padding:16px; }
  .v3-app .v3-data-export-actions { align-items:flex-start; }
  .v3-app .v3-data-export-actions > a { position:static; transform:none; }
