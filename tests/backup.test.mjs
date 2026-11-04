@@ -59,7 +59,7 @@ const source = fs.readFileSync('db/backup.ts', 'utf8')
 fs.writeFileSync(path.join(scratch, 'backup.mjs'), ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText);
-const { exportBackup } = await import(pathToFileURL(path.join(scratch, 'backup.mjs')));
+const { BackupError, exportBackup, previewRestore, restoreBackup } = await import(pathToFileURL(path.join(scratch, 'backup.mjs')));
 
 function freshDatabase() {
   sqlite?.close();
@@ -67,9 +67,28 @@ function freshDatabase() {
   for (const name of fs.readdirSync('drizzle').filter(name => name.endsWith('.sql')).sort()) {
     sqlite.exec(fs.readFileSync(path.join('drizzle', name), 'utf8'));
   }
+  sqlite.exec(`CREATE TABLE auth_identities (google_sub TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL, display_name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, avatar_color TEXT NOT NULL DEFAULT '', avatar_icon TEXT NOT NULL DEFAULT '');
+    CREATE TABLE auth_password (id INTEGER PRIMARY KEY, hash TEXT NOT NULL);
+    INSERT INTO auth_password(id,hash) VALUES(1,'SECRET_PASSWORD_HASH');`);
   failAfterWrite = null;
   writeCount = 0;
 }
+
+function identity(user, name, owner = false) {
+  sqlite.prepare('INSERT INTO auth_identities(google_sub,user_id,email,display_name,avatar_color,avatar_icon) VALUES(?,?,?,?,?,?)')
+    .run(owner ? 'password:owner' : `password:${user}`, user, `${user}@remaivo.local`, name, '#123456', 'A');
+}
+
+function household() {
+  freshDatabase();
+  identity('alice', 'Alice', true);
+  identity('bob', 'Bob');
+  seed('alice', 'ALICE');
+  seed('bob', 'BOB');
+}
+
+const copy = value => JSON.parse(JSON.stringify(value));
+const count = (table, user) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id=?`).get(user).n;
 
 function seed(user, prefix) {
   const account = `${prefix}-account`;
@@ -111,29 +130,170 @@ function rowsFor(user) {
   ]));
 }
 
-test('JSON export includes current records without old schema or another owner', async () => {
-  freshDatabase();
-  seed('alice', 'ALICE');
-  seed('bob', 'BOB');
-  sqlite.prepare('INSERT INTO transactions(id,user_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?)')
-    .run('alice-new', 'alice', 'expense', 'AFTER_MIGRATION_PRIVATE_PURCHASE', 999, '2026-09-21');
+test('A backup holds every profile and every table of user data, but no sign-in secrets', async () => {
+  household();
   sqlite.prepare('UPDATE categories SET archived=1 WHERE user_id=?').run('alice');
-  const before = JSON.parse(JSON.stringify(rowsFor('alice')));
-  const bobBefore = JSON.parse(JSON.stringify(rowsFor('bob')));
-  const backup = JSON.parse(JSON.stringify(await exportBackup('alice')));
+  const before = copy(rowsFor('alice'));
+  const backup = copy(await exportBackup());
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 3);
-  assert.equal(backup.ownerId, 'alice');
+  assert.equal(backup.version, 4);
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
+  assert.deepEqual(backup.profiles, [
+    { userId: 'alice', name: 'Alice', color: '#123456', icon: 'A', owner: true },
+    { userId: 'bob', name: 'Bob', color: '#123456', icon: 'A', owner: false },
+  ]);
   assert.deepEqual(Object.keys(backup.tables).sort(), [...tables].sort());
-  assert.equal(Object.hasOwn(backup.tables, 'v3_migrations'), false);
-  for (const table of tables) {
-    assert.ok(backup.tables[table]?.length, `${table} must be included`);
-    assert.deepEqual(backup.tables[table].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), before[table]);
-  }
+  const sorted = rows => [...rows].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  for (const table of tables) assert.deepEqual(sorted(backup.tables[table].filter(row => row.user_id === 'alice')), before[table]);
   const serialized = JSON.stringify(backup);
-  assert.match(serialized, /AFTER_MIGRATION_PRIVATE_PURCHASE/);
-  assert.doesNotMatch(serialized, /BOB_PRIVATE_PURCHASE/);
-  assert.deepEqual(JSON.parse(JSON.stringify(rowsFor('alice'))), before);
-  assert.deepEqual(JSON.parse(JSON.stringify(rowsFor('bob'))), bobBefore);
+  assert.match(serialized, /ALICE_PRIVATE_PURCHASE/);
+  assert.match(serialized, /BOB_PRIVATE_PURCHASE/);
+  assert.doesNotMatch(serialized, /SECRET_PASSWORD_HASH|password:/);
+});
+
+test('Every table holding user data is in the backup', async () => {
+  household();
+  const holding = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'auth_%'").all()
+    .map(({ name }) => name)
+    .filter(name => sqlite.prepare(`SELECT name FROM pragma_table_info('${name}')`).all().some(column => column.name === 'user_id'));
+  assert.deepEqual(Object.keys((await exportBackup()).tables).sort(), holding.sort());
+});
+
+test('Restoring brings back every record exactly, after loss and edits', async () => {
+  household();
+  const before = { alice: copy(rowsFor('alice')), bob: copy(rowsFor('bob')) };
+  const backup = copy(await exportBackup());
+  sqlite.exec("DELETE FROM v3_payment_links; DELETE FROM spare_events; DELETE FROM v3_assignments; DELETE FROM v3_occurrences; DELETE FROM transactions WHERE user_id='alice'");
+  sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run('added-later', 'bob', 'added later', 'checking', 1);
+  sqlite.prepare("UPDATE auth_identities SET display_name='Renamed' WHERE user_id='bob'").run();
+  assert.deepEqual(await restoreBackup('bob', backup), { profiles: 2 });
+  assert.deepEqual(copy(rowsFor('alice')), before.alice);
+  assert.deepEqual(copy(rowsFor('bob')), before.bob);
+  assert.equal(sqlite.prepare("SELECT display_name FROM auth_identities WHERE user_id='bob'").get().display_name, 'Bob');
+  assert.equal(sqlite.prepare('SELECT hash FROM auth_password').get().hash, 'SECRET_PASSWORD_HASH');
+  assert.equal(sqlite.prepare('PRAGMA foreign_key_check').all().length, 0);
+});
+
+test('The preview shows what would change and writes nothing', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  identity('carol', 'Carol');
+  sqlite.prepare("UPDATE accounts SET name='edited' WHERE user_id='alice'").run();
+  sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run('added-later', 'alice', 'added later', 'checking', 1);
+  const before = copy(rowsFor('alice'));
+  const preview = await previewRestore('alice', backup);
+  assert.deepEqual(preview.profiles[0], { name: 'Alice', isNew: false, transactions: { now: 1, backup: 1 }, accounts: { now: 2, backup: 1 } });
+  assert.deepEqual(preview.kept, ['Carol']);
+  assert.deepEqual(copy(rowsFor('alice')), before);
+});
+
+test('Profiles that are not in the backup are left alone', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  identity('carol', 'Carol');
+  seed('carol', 'CAROL');
+  const carol = copy(rowsFor('carol'));
+  await restoreBackup('alice', backup);
+  assert.deepEqual(copy(rowsFor('carol')), carol);
+});
+
+test('A deleted profile comes back with its card', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  const bob = copy(rowsFor('bob'));
+  sqlite.exec('BEGIN');
+  sqlite.exec('PRAGMA defer_foreign_keys=on');
+  for (const table of tables) sqlite.prepare(`DELETE FROM ${table} WHERE user_id='bob'`).run();
+  sqlite.exec('COMMIT');
+  sqlite.prepare("DELETE FROM auth_identities WHERE user_id='bob'").run();
+  assert.equal((await previewRestore('alice', backup)).profiles[1].isNew, true);
+  await restoreBackup('alice', backup);
+  assert.deepEqual(copy(rowsFor('bob')), bob);
+  const card = sqlite.prepare("SELECT google_sub, display_name FROM auth_identities WHERE user_id='bob'").get();
+  assert.deepEqual({ ...card }, { google_sub: 'password:bob', display_name: 'Bob' });
+});
+
+test('A backup restores onto a new install under its owner', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  const alice = copy(rowsFor('alice'));
+  freshDatabase();
+  identity('new-owner', 'Someone', true);
+  await restoreBackup('new-owner', backup);
+  const moved = rowsFor('new-owner');
+  for (const table of tables) assert.equal(moved[table].length, alice[table].length, table);
+  assert.equal(sqlite.prepare("SELECT display_name FROM auth_identities WHERE user_id='new-owner'").get().display_name, 'Alice');
+  assert.equal(count('transactions', 'bob'), 1);
+});
+
+test('An older single-profile export restores only that profile', async () => {
+  household();
+  const full = copy(await exportBackup());
+  const only = rows => rows.filter(row => row.user_id === 'alice');
+  const older = { format: 'remaivo-backup', version: 3, exportedAt: full.exportedAt, ownerId: 'alice', tables: Object.fromEntries(Object.entries(full.tables).map(([table, rows]) => [table, only(rows)])) };
+  const bob = copy(rowsFor('bob'));
+  const alice = copy(rowsFor('alice'));
+  sqlite.prepare("UPDATE accounts SET name='changed' WHERE user_id='alice'").run();
+  const preview = await previewRestore('bob', older);
+  assert.deepEqual(preview.profiles.map(profile => profile.name), ['Alice']);
+  await restoreBackup('bob', older);
+  assert.deepEqual(copy(rowsFor('alice')), alice);
+  assert.deepEqual(copy(rowsFor('bob')), bob);
+});
+
+test('A bad file is refused before anything changes', async () => {
+  household();
+  const good = copy(await exportBackup());
+  const before = copy(rowsFor('alice'));
+  const edited = change => { const file = copy(good); change(file); return file; };
+  const refused = [
+    null, [], 'text', {}, { format: 'other', version: 4 },
+    edited(file => { delete file.tables.accounts; }),
+    edited(file => { file.tables.other = []; }),
+    edited(file => { file.tables.accounts = 'nope'; }),
+    edited(file => { file.tables.accounts[0].user_id = 'stranger'; }),
+    edited(file => { file.tables.accounts[0].name = { nested: true }; }),
+    edited(file => { file.profiles = []; }),
+    edited(file => { file.profiles[0].owner = false; }),
+    edited(file => { file.profiles[1].userId = file.profiles[0].userId; }),
+  ];
+  for (const file of refused) {
+    await assert.rejects(previewRestore('alice', file), BackupError);
+    await assert.rejects(restoreBackup('alice', file), BackupError);
+  }
+  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 5; })), /newer version/);
+  await assert.rejects(restoreBackup('alice', edited(file => { file.tables.accounts[0]['name" = 1; DROP TABLE accounts; --'] = 'x'; })), /no longer uses/);
+  assert.deepEqual(copy(rowsFor('alice')), before);
+});
+
+test('A failed restore changes nothing', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  const before = { alice: copy(rowsFor('alice')), bob: copy(rowsFor('bob')) };
+  backup.tables.transactions.push({ ...backup.tables.transactions[0] });
+  failAfterWrite = 30;
+  await assert.rejects(restoreBackup('alice', copy(backup)), /Nothing was changed/);
+  failAfterWrite = null;
+  await assert.rejects(restoreBackup('alice', backup), /Nothing was changed/);
+  assert.deepEqual(copy(rowsFor('alice')), before.alice);
+  assert.deepEqual(copy(rowsFor('bob')), before.bob);
+});
+
+test('A restore over the profile limit is refused', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  freshDatabase();
+  identity('owner', 'Owner', true);
+  for (const user of ['p1', 'p2', 'p3', 'p4']) identity(user, user);
+  await assert.rejects(restoreBackup('owner', backup), /limit of five profiles/);
+});
+
+test('A large backup restores across several statements', async () => {
+  household();
+  const insert = sqlite.prepare('INSERT INTO transactions(id,user_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?)');
+  for (let index = 0; index < 1203; index += 1) insert.run(`bulk-${index}`, 'alice', 'expense', `Purchase "${index}" \\ 'quoted' ευρώ`, index + 1, '2026-09-21');
+  const backup = copy(await exportBackup());
+  const before = copy(rowsFor('alice'));
+  await restoreBackup('alice', backup);
+  assert.deepEqual(copy(rowsFor('alice')), before);
 });

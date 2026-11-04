@@ -44,12 +44,63 @@ function ProfileCard({displayName,profilesHref,signOutHref}:{displayName:string;
  </section>;
 }
 
-function DataExportCard(){
- const { t: tr } = useTranslation();
+type RestoreCount={now:number;backup:number};
+type RestorePreview={exportedAt:string;profiles:{name:string;isNew:boolean;transactions:RestoreCount;accounts:RestoreCount}[];kept:string[]};
 
- return <section className="v3-card v3-data-export"><div className="v3-section-head"><div><span className="v3-eyebrow">{tr("YOUR DATA")}</span><h2>{tr("Export your data")}</h2></div></div>
-  <p>{tr("Download your current Remaivo data in one JSON file. It includes accounts, activity, plans, goals, settings and history.")}</p>
-  <div className="v3-data-export-actions"><a className="v3-primary" href="/api/finance?view=export">{tr("Download JSON export")}</a><span>{tr("This file contains private financial information. Store it somewhere safe.")}</span></div>
+function BackupCard({currency}:{currency:string}){
+ const { t: tr, locale } = useTranslation();
+ const input=useRef<HTMLInputElement>(null);
+ const [file,setFile]=useState<unknown>(null);
+ const [preview,setPreview]=useState<RestorePreview|null>(null);
+ const [confirmed,setConfirmed]=useState(false);
+ const [busy,setBusy]=useState(false);
+ const [error,setError]=useState('');
+ const post=async<T,>(action:string,backup:unknown)=>{const r=await fetch('/api/finance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,payload:{backup}})});const body=await r.json() as T&{error?:string};if(!r.ok)throw new Error(body.error||"This backup couldn't be restored. Nothing was changed.");return body;};
+ const close=()=>{if(busy)return;setPreview(null);setFile(null);setConfirmed(false);setError('');};
+ async function choose(chosen:File|undefined){
+  if(input.current)input.current.value='';
+  if(!chosen)return;
+  setBusy(true);setError('');
+  try{let parsed:unknown;try{parsed=JSON.parse(await chosen.text());}catch{throw new Error("This file isn't a Remaivo backup.");}setPreview(await post<RestorePreview>('previewRestore',parsed));setFile(parsed);}
+  catch(e){setError(e instanceof Error?e.message:"This file isn't a Remaivo backup.");}
+  finally{setBusy(false);}
+ }
+ async function restore(event:FormEvent){
+  event.preventDefault();
+  if(!confirmed||busy)return;
+  setBusy(true);setError('');
+  try{
+   // The current data is saved first, so a wrong file can be undone.
+   const current=await fetch('/api/finance?view=export');
+   if(!current.ok)throw new Error("Your current data couldn't be saved first, so nothing was changed.");
+   const link=document.createElement('a');
+   link.href=URL.createObjectURL(await current.blob());
+   link.download=`remaivo-backup-before-restore-${new Date().toISOString().slice(0,10)}.json`;
+   link.click();
+   // Give the browser time to start that download before anything else happens.
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   URL.revokeObjectURL(link.href);
+   await post('restoreBackup',file);
+   invalidateFinancePageCache();
+   window.location.reload();
+  }catch(e){setError(e instanceof Error?e.message:"This backup couldn't be restored. Nothing was changed.");setBusy(false);}
+ }
+ return <section className="v3-card v3-data-export"><div className="v3-section-head"><div><span className="v3-eyebrow">{tr("YOUR DATA")}</span><h2>{tr("Back up your data")}</h2></div></div>
+  <p>{tr("One JSON file with every profile: accounts, activity, plans, goals, settings and history. Your password isn't included.")}</p>
+  <div className="v3-data-export-actions"><a className="v3-primary" href="/api/finance?view=export">{tr("Download backup")}</a><span>{tr("This file contains private financial information. Store it somewhere safe.")}</span></div>
+  <div className="v3-data-restore"><input ref={input} type="file" accept=".json,application/json" hidden onChange={event=>void choose(event.target.files?.[0])}/><button className="v3-secondary" type="button" disabled={busy} onClick={()=>input.current?.click()}>{tr("Restore from a backup")}</button></div>
+  {error&&!preview&&<div className="v3-alert" role="alert"><span>{tr(error)}</span></div>}
+  {preview&&<Dialog currency={currency} title={tr("Restore this backup?")} subtitle={tr("Check what this backup will replace.")} close={close}><form onSubmit={event=>void restore(event)}>
+   <p>{tr("Backup from")} <strong>{new Date(preview.exportedAt).toLocaleString(locale)}</strong></p>
+   <div className="v3-restore-table" role="table"><div role="row"><span role="columnheader">{tr("Profile")}</span><span role="columnheader">{tr("Transactions")}</span><span role="columnheader">{tr("Accounts")}</span></div>
+    {preview.profiles.map(profile=><div role="row" key={profile.name}><strong role="cell">{profile.name}{profile.isNew&&<small> · {tr("New profile")}</small>}</strong><span role="cell">{profile.transactions.now} → {profile.transactions.backup}</span><span role="cell">{profile.accounts.now} → {profile.accounts.backup}</span></div>)}
+   </div>
+   <p>{tr("Everything in these profiles is replaced by the backup, and anything added since then is removed. Your current data is downloaded first.")}</p>
+   {preview.kept.length>0&&<p>{tr("Not in this backup, so left as they are:")} {preview.kept.join(', ')}</p>}
+   <label className="v3-restore-confirm"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/> <span>{tr("I understand this replaces the data above")}</span></label>
+   {error&&<div className="v3-alert" role="alert"><span>{tr(error)}</span></div>}
+   <button className="v3-primary" type="submit" disabled={!confirmed||busy}>{busy?tr("Restoring…"):tr("Restore backup")}</button>
+  </form></Dialog>}
  </section>;
 }
 type ProfileAvatar={color?:string;icon?:string};
@@ -195,7 +246,7 @@ function RemaivoWorkspace(props:{displayName:string;email:string;signOutHref:str
  {page==='accounts'&&accountsView==='report'&&<AccountsReportPage currency={context.currency} revision={revision}/>}
  {page==='accounts'&&accountsView==='balances'&&<AccountsPage context={context} busy={busy} onDefaultExpense={account=>void save("updateDefaultExpenseAccount",{accountId:account.id})} onAdd={()=>setModal('account')} onEdit={record=>setEdit({kind:'account',record})} onSnapshot={setValuation}/>}
  {page==='statistics'&&<><div className="v3-page-actions"><p>{tr("Explore historical activity and spending trends.")}</p></div><StatisticsPage context={context} revision={revision}/></>}
- {page==='settings'&&<><PlanningSettings planning={planning} busy={busy} onEnable={()=>void enablePlanning()} onDisable={()=>void save('updatePlanning',{enabled:false})}/><section className="v3-card"><h2>{tr("Language")}</h2><p>{tr("Choose the language used throughout Remaivo. Your preference follows you across devices.")}</p><LanguageSelect busy={busy} onChange={language=>void save('updateLanguage',{language})}/></section><AppearanceSettings theme={theme} busy={busy} onChange={next=>void save('updateTheme',{theme:next})}/><ProfileCard displayName={props.displayName} profilesHref={props.profilesHref} signOutHref={props.signOutHref}/><DataExportCard/><SettingsPage context={context} onCategory={()=>setModal('category')} onGoals={()=>navigate('goals')} onWeek={()=>setModal('week')} onTimezone={()=>setModal('timezone')} onArchive={()=>{setError('');setArchiveOpen(true);}} onEditCategory={record=>setEdit({kind:'category',record})}/></>}
+ {page==='settings'&&<><PlanningSettings planning={planning} busy={busy} onEnable={()=>void enablePlanning()} onDisable={()=>void save('updatePlanning',{enabled:false})}/><section className="v3-card"><h2>{tr("Language")}</h2><p>{tr("Choose the language used throughout Remaivo. Your preference follows you across devices.")}</p><LanguageSelect busy={busy} onChange={language=>void save('updateLanguage',{language})}/></section><AppearanceSettings theme={theme} busy={busy} onChange={next=>void save('updateTheme',{theme:next})}/><ProfileCard displayName={props.displayName} profilesHref={props.profilesHref} signOutHref={props.signOutHref}/><BackupCard currency={context.currency}/><SettingsPage context={context} onCategory={()=>setModal('category')} onGoals={()=>navigate('goals')} onWeek={()=>setModal('week')} onTimezone={()=>setModal('timezone')} onArchive={()=>{setError('');setArchiveOpen(true);}} onEditCategory={record=>setEdit({kind:'category',record})}/></>}
  {page==='goals'&&<><div className="v3-page-actions"><p>{tr("Create a goal bucket in Plan to protect money. These accounts and milestones track your progress.")}</p><button className="v3-secondary" onClick={()=>setPanel({kind:'bucket'})}>{tr("New goal allocation")}</button></div><GoalsPage context={context} onGoal={()=>setModal('goal')} onSpare={()=>setModal('spare')} onSweep={()=>void save('sweepSpare',{})} onEdit={record=>setEdit({kind:'goal',record})} onRecord={setGoalEntry}/></>}
  <footer className="v3-footer"><span>{tr("Remaivo")}</span><span>{data.profile.timezone.replaceAll('_',' ')}  {tr("· Updated through")} {dateLabel(data.today, locale)}</span></footer></div></div>
  {modal&&<FinanceModal name={modal} context={context} busy={busy} error={error} close={()=>{setModal(null);setError('');}} save={saveModal}/>}{edit&&<EditModal target={edit} context={context} busy={busy} error={error} close={()=>{setEdit(null);setError('');}} save={saveModal}/>}{goalEntry&&<GoalEntryModal goal={goalEntry} context={context} busy={busy} error={error} close={()=>{setGoalEntry(null);setError('');}} save={save}/>}{valuation&&<ValuationModal account={valuation} snapshots={data.investmentSnapshots||[]} currency={currency} today={data.today} busy={busy} close={()=>setValuation(null)} save={save}/>}
