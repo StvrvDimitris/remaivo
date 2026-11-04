@@ -15,7 +15,7 @@
 - **Savings goals and investments,** including market-value snapshots.
 - **Track only mode** if you just want to record money in and out without a plan.
 - **Profiles:** up to five people can share one password, each with their own data and a customisable profile card.
-- English and Greek, light and dark themes, works on phones and can be installed to the home screen.
+- English and Greek, five themes (three light, two dark), works on phones and can be installed to the home screen.
 
 | Plan | Insights |
 | --- | --- |
@@ -25,9 +25,20 @@
 | --- | --- |
 | ![Accounts](docs/screenshots/accounts.png) | <img src="docs/screenshots/phone-overview.png" alt="Remaivo on a phone" width="300"> |
 
-| Profiles | Profiles on a phone (Midnight theme) |
+| Profiles | Profiles on a phone (Obsidian theme) |
 | --- | --- |
 | ![Who's using Remaivo?](docs/screenshots/profiles.png) | <img src="docs/screenshots/phone-profiles.png" alt="Profile picker on a phone" width="300"> |
+
+### Themes
+
+Pick a look in **Settings → Appearance**: Indigo, Ocean and Sand are light; Midnight and Obsidian are dark.
+
+![The five Remaivo themes side by side](docs/screenshots/themes.png)
+
+| Sand | Obsidian |
+| --- | --- |
+| ![Sand theme](docs/screenshots/theme-sand.png) | ![Obsidian theme](docs/screenshots/theme-obsidian.png) |
+| <img src="docs/screenshots/phone-sand.png" alt="Sand theme on a phone" width="300"> | <img src="docs/screenshots/phone-obsidian.png" alt="Obsidian theme on a phone" width="300"> |
 
 ## Get your own Remaivo
 
