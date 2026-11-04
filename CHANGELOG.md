@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 (2026-11-04)
+
+**Themes**
+- Two new themes: **Sand**, warm paper tones with a terracotta accent, and **Obsidian**, a true-black theme for night. Pick them in Settings → Appearance. They also apply to the sign-in and profile pages and the phone's status bar.
+- The dark themes no longer use purple. Midnight's links, buttons, icons and chart lines are now sky blue, and Obsidian's are amber.
+
+**Updating**
+- Cloudflare: open your copy on GitHub and press **Sync fork**; Cloudflare redeploys by itself. Render: **Manual Deploy → Deploy latest commit**. At home: run the three update lines from the [Docker guide](docs/setup-docker.md). Your data stays, and your chosen theme is kept.
+
 ## 1.1.1 (2026-10-20)
 
 **Looks the same everywhere**
