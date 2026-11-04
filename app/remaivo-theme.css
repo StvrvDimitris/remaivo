@@ -41,6 +41,23 @@ html[data-theme="midnight"] {
  --theme-chart-secondary:#6d85bf; --theme-chart-muted:#415472;
  --theme-raised:#202b3e; --theme-raised-shadow:0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .3);
 }
+html[data-theme="sand"] {
+ --theme-canvas:#f4efe6; --theme-surface:#fffcf7; --theme-text:#2f241c; --theme-text-soft:#57483c; --theme-muted:#7d6c5e;
+ --theme-border:#e6dccd; --theme-line:#efe7db; --theme-soft:#f7f1e8; --theme-hover:#fbf7f0;
+ --theme-accent:#b4492a; --theme-accent-hover:#963a20; --theme-focus:#e08a68; --theme-accent-soft:#f8e6dc;
+ --theme-hero:#4a2c1f; --theme-hero-muted:#e6cdbd; --theme-positive:#3f7a3a; --theme-negative:#a3214a; --theme-negative-soft:#fae6ec;
+ --theme-chart-secondary:#d89a7c; --theme-chart-muted:#efd9c9;
+}
+html[data-theme="obsidian"] {
+ color-scheme:dark;
+ --theme-on-accent:#1c1238;
+ --theme-canvas:#050608; --theme-surface:#111317; --theme-text:#f1f1f4; --theme-text-soft:#cfd0d6; --theme-muted:#9a9ca6;
+ --theme-border:#2a2c33; --theme-line:#1f2127; --theme-soft:#1a1c21; --theme-hover:#1c1e24;
+ --theme-accent:#b9a2ff; --theme-accent-hover:#cdbcff; --theme-focus:#b9a2ff; --theme-accent-soft:#2a2342;
+ --theme-hero:#1d1a2b; --theme-hero-muted:#c9c2e4; --theme-positive:#7fd6ad; --theme-negative:#ff9f9c; --theme-negative-soft:#3a1f22;
+ --theme-chart-secondary:#7e6cc0; --theme-chart-muted:#34304a;
+ --theme-raised:#16181d; --theme-raised-shadow:0 1px 2px rgba(0, 0, 0, .6), 0 6px 18px rgba(0, 0, 0, .5);
+}
 /* Remaivo: one visual system across the planning workspace and legacy forms. */
 :root {
   --ink: var(--theme-text);
@@ -625,13 +642,13 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-alert.warning { background: var(--theme-soft); border-color: var(--line); color: var(--ink); }
 .plan-pace-forecast-result small { color: var(--green); }
 .plan-pace-forecast-result span, .plan-pace-forecast-explain p { color: var(--muted); }
-html[data-theme="midnight"] .v3-app :is(.activity-icon, .transaction-name > i, .category-cloud > span) { color: #263345; }
+html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app :is(.activity-icon, .transaction-name > i, .category-cloud > span) { color: #263345; }
 /* Without a category colour the icon sits on the theme surface, so it needs light text. */
-html[data-theme="midnight"] .v3-app .activity-icon:not([style*="background"]) { color: var(--theme-text); }
-html[data-theme="midnight"] .v3-app .category-cloud small { color: #42536a; }
+html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .activity-icon:not([style*="background"]) { color: var(--theme-text); }
+html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud small { color: #42536a; }
 
 .v3-appearance > p { margin: -5px 0 22px; color: var(--muted); font-size: .875rem; line-height: 1.6; }
-.v3-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.v3-theme-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
 .v3-app .v3-theme-option { min-width: 0; padding: 10px; text-align: left; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); }
 .v3-app .v3-theme-option:hover { border-color: var(--green); }
 .v3-app .v3-theme-option[aria-pressed="true"] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
