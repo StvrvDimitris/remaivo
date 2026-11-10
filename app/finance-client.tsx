@@ -166,11 +166,11 @@ export function TagFields({ context, current }: { context: Pick<Context, "tags">
   return <details className="tag-picker"><summary><span>{tr("Tags")}</span><small>{names.length ? names.join(" · ") : tr("None chosen")}</small></summary><div className="tag-picker-group"><div>{shown.map(tag => { const on = picked.includes(tag.id); return <button type="button" key={tag.id} aria-pressed={on} className={on ? "active" : ""} style={{ "--tag-color": tag.color } as CSSProperties} onClick={() => setPicked(value => on ? value.filter(id => id !== tag.id) : [...value, tag.id])}>{tag.archived ? `${tr("Archived")} · ` : ""}{tag.name}</button>; })}</div>{picked.map(id => <input key={id} type="hidden" name={`tag_${id}`} value={id}/>)}</div></details>;
 }
 
-// Category choice as pills, like tags. Main categories come first; picking one
-// that has subcategories opens a row of them. One category in total: tap the
-// chosen subcategory again to go back to its main category, or the chosen main
-// category to clear it when no category is allowed. A visually hidden input
-// carries the value so a required choice still blocks the form.
+// Category choice as pills, like tags. Picking a main category hides the other
+// main categories and shows its subcategories; tap the chosen main category
+// again to clear it and see them all, or the chosen subcategory to go back to
+// its main category. A visually hidden input carries the value so a required
+// choice still blocks the form.
 export function CategoryPills({ label, categories, defaultValue = "", required = false }: { label: string; categories: Category[]; defaultValue?: string | null; required?: boolean }) {
   const { t: tr } = useTranslation();
   const ids = new Set(categories.map(category => category.id));
@@ -179,9 +179,9 @@ export function CategoryPills({ label, categories, defaultValue = "", required =
   const current = categories.find(category => category.id === value);
   const openMain = current ? (current.parent_id && ids.has(current.parent_id) ? current.parent_id : current.id) : "";
   const children = categories.filter(category => category.parent_id === openMain);
-  const pill = (category: Category) => { const on = value === category.id; return <button type="button" key={category.id} aria-pressed={on} className={on ? "active" : ""} style={{ "--tag-color": category.color } as CSSProperties} onClick={() => setValue(on ? (category.parent_id && ids.has(category.parent_id) ? category.parent_id : required ? category.id : "") : category.id)}>{category.archived ? `${tr("Archived")} · ` : ""}{category.name}</button>; };
+  const pill = (category: Category) => { const on = value === category.id; return <button type="button" key={category.id} aria-pressed={on} className={on ? "active" : ""} style={{ "--tag-color": category.color } as CSSProperties} title={on ? tr(category.parent_id && ids.has(category.parent_id) ? "Tap again to choose only the main category" : "Tap again to choose another category") : undefined} onClick={() => setValue(on ? (category.parent_id && ids.has(category.parent_id) ? category.parent_id : "") : category.id)}>{category.archived ? `${tr("Archived")} · ` : ""}{category.name}</button>; };
   const chosen = current ? categoryLabel(current, Object.fromEntries(categories.map(category => [category.id, category]))) : tr(required ? "Choose a category" : "Uncategorised");
-  return <div className="form-field category-pills"><span>{tr(label)}<small>{chosen}</small></span><div className="pill-row" role="group" aria-label={tr(label)}>{mains.map(pill)}</div>{children.length > 0 && <div className="pill-row pill-subrow" role="group" aria-label={current ? categoryLabel(current, Object.fromEntries(categories.map(category => [category.id, category]))) : tr(label)}>{children.map(pill)}</div>}{mains.length === 0 && <small className="pill-empty">{tr("No categories of this type yet. Add one in Settings.")}</small>}<input className="pill-value" name="categoryId" value={value} required={required} onChange={() => undefined} tabIndex={-1} aria-hidden="true"/></div>;
+  return <div className="form-field category-pills"><span>{tr(label)}<small>{chosen}</small></span><div className="pill-row" role="group" aria-label={tr(label)}>{(openMain ? mains.filter(category => category.id === openMain) : mains).map(pill)}</div>{children.length > 0 && <div className="pill-row pill-subrow" role="group" aria-label={current ? categoryLabel(current, Object.fromEntries(categories.map(category => [category.id, category]))) : tr(label)}>{children.map(pill)}</div>}{mains.length === 0 && <small className="pill-empty">{tr("No categories of this type yet. Add one in Settings.")}</small>}<input className="pill-value" name="categoryId" value={value} required={required} onChange={() => undefined} tabIndex={-1} aria-hidden="true"/></div>;
 }
 
 export function TransactionRow({ transaction, accountById, categoryById, tagById, currency, onEdit }: { transaction: Transaction; accountById: Record<string, Account>; categoryById: Record<string, Category>; tagById?: Record<string, Tag>; currency: string; onEdit: () => void }) {
