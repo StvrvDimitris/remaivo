@@ -9,7 +9,7 @@ import ts from 'typescript';
 const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
   'transactions', 'recurring_plans', 'installment_plans', 'installment_payments',
-  'goals', 'goal_entries', 'spare_events',
+  'goals', 'goal_entries', 'spare_events', 'tag_groups', 'tags',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
   'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_payment_links',
 ];
@@ -105,7 +105,9 @@ function seed(user, prefix) {
   insert('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)', account, user, `${prefix} cash`, 'checking', 98250);
   insert('INSERT INTO investment_valuation_snapshots(id,user_id,account_id,snapshot_date,value_cents) VALUES(?,?,?,?,?)', `${prefix}-valuation`, user, account, '2026-09-20', 45000);
   insert('INSERT INTO categories(id,user_id,name,kind) VALUES(?,?,?,?)', category, user, `${prefix} food`, 'expense');
-  insert('INSERT INTO transactions(id,user_id,account_id,category_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?,?)', transaction, user, account, category, 'expense', `${prefix}_PRIVATE_PURCHASE`, 1750, '2026-09-20');
+  insert('INSERT INTO tag_groups(id,user_id,name) VALUES(?,?,?)', `${prefix}-need`, user, `${prefix} need`);
+  insert('INSERT INTO tags(id,user_id,group_id,name) VALUES(?,?,?,?)', `${prefix}-daily`, user, `${prefix}-need`, `${prefix} daily`);
+  insert('INSERT INTO transactions(id,user_id,account_id,category_id,tag_ids,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?,?,?)', transaction, user, account, category, JSON.stringify([`${prefix}-daily`]), 'expense', `${prefix}_PRIVATE_PURCHASE`, 1750, '2026-09-20');
   insert('INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date) VALUES(?,?,?,?,?,?,?,?)', recurring, user, `${prefix} groceries`, 'expense', 1750, account, 'monthly', '2026-10-20');
   insert('INSERT INTO installment_plans(id,user_id,title,total_cents,installment_count,first_due_date,payment_account_id) VALUES(?,?,?,?,?,?,?)', installment, user, `${prefix} laptop`, 120000, 12, '2026-09-10', account);
   insert('INSERT INTO installment_payments(id,user_id,plan_id,sequence,due_date,amount_cents) VALUES(?,?,?,?,?,?)', `${prefix}-installment-payment`, user, installment, 1, '2026-09-10', 10000);
@@ -136,7 +138,7 @@ test('A backup holds every profile and every table of user data, but no sign-in 
   const before = copy(rowsFor('alice'));
   const backup = copy(await exportBackup());
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 4);
+  assert.equal(backup.version, 5);
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(backup.profiles, [
     { userId: 'alice', name: 'Alice', color: '#123456', icon: 'A', owner: true },
@@ -241,6 +243,23 @@ test('An older single-profile export restores only that profile', async () => {
   assert.deepEqual(copy(rowsFor('bob')), bob);
 });
 
+test('A backup from before tags restores and leaves that profile without tags', async () => {
+  household();
+  const full = copy(await exportBackup());
+  const older = copy(full);
+  older.version = 4;
+  delete older.tables.tag_groups;
+  delete older.tables.tags;
+  for (const row of older.tables.transactions) delete row.tag_ids;
+  await restoreBackup('alice', older);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM tags WHERE user_id IN ('alice','bob')").get().n, 0);
+  assert.deepEqual(sqlite.prepare("SELECT DISTINCT tag_ids FROM transactions WHERE user_id='alice'").all().map(row => row.tag_ids), ['[]']);
+  // A current backup must hold its tag tables.
+  const current = copy(full);
+  delete current.tables.tags;
+  await assert.rejects(restoreBackup('alice', current), BackupError);
+});
+
 test('A bad file is refused before anything changes', async () => {
   household();
   const good = copy(await exportBackup());
@@ -261,7 +280,7 @@ test('A bad file is refused before anything changes', async () => {
     await assert.rejects(previewRestore('alice', file), BackupError);
     await assert.rejects(restoreBackup('alice', file), BackupError);
   }
-  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 5; })), /newer version/);
+  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 6; })), /newer version/);
   await assert.rejects(restoreBackup('alice', edited(file => { file.tables.accounts[0]['name" = 1; DROP TABLE accounts; --'] = 'x'; })), /no longer uses/);
   assert.deepEqual(copy(rowsFor('alice')), before);
 });

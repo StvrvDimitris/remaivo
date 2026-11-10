@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { getUser } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
-import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow } from "../../statistics";
+import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow, type StatisticsTag, type StatisticsTagGroup } from "../../statistics";
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
@@ -139,6 +139,41 @@ async function categoryIdFor(userId: string, value: unknown, kind: "expense" | "
   return category?.id ?? null;
 }
 
+// Tags arrive as an array of tag IDs. A record keeps at most one tag from each
+// group; archived tags are accepted only when the record already carries them.
+// These helpers stay in this file because the route tests load it on its own.
+type TagCheck = { json: string } | { error: string };
+function tagList(value: unknown): string[] {
+  if (Array.isArray(value)) return [...new Set(value.filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (typeof value !== "string" || !value) return [];
+  try { return tagList(JSON.parse(value)); } catch { return []; }
+}
+async function tagIdsFor(userId: string, value: unknown, keep: unknown = "[]"): Promise<TagCheck> {
+  const ids = tagList(value).sort();
+  if (!ids.length) return { json: "[]" };
+  if (ids.length > 20) return { error: "Choose up to 20 tags." };
+  const kept = tagList(keep);
+  const found = await env.DB.prepare("SELECT t.id, t.group_id, t.archived, g.archived AS group_archived FROM tags t JOIN tag_groups g ON g.id = t.group_id AND g.user_id = t.user_id WHERE t.user_id = ? AND t.id IN (SELECT value FROM json_each(?))")
+    .bind(userId, JSON.stringify(ids)).all<{ id: string; group_id: string; archived: number; group_archived: number }>();
+  if (found.results.length !== ids.length || found.results.some(tag => (tag.archived || tag.group_archived) && !kept.includes(tag.id))) return { error: "Choose active tags." };
+  if (new Set(found.results.map(tag => tag.group_id)).size !== ids.length) return { error: "Choose one tag from each tag group." };
+  return { json: JSON.stringify(ids) };
+}
+// `tagId` filters to one tag; `none:<groupId>` to activity without a tag from that group.
+function tagFilter(tagId: string, where: string[], bindings: unknown[]) {
+  if (!tagId) return;
+  if (tagId.startsWith("none:")) {
+    where.push("NOT EXISTS (SELECT 1 FROM json_each(t.tag_ids) j JOIN tags tg ON tg.id = j.value AND tg.user_id = t.user_id WHERE tg.group_id = ?)");
+    bindings.push(tagId.slice(5));
+  } else {
+    where.push("EXISTS (SELECT 1 FROM json_each(t.tag_ids) WHERE value = ?)");
+    bindings.push(tagId);
+  }
+}
+function tagName(value: unknown) {
+  return text(value).replace(/\s+/g, " ").slice(0, 60);
+}
+
 const transactionSortColumns: Record<string, string> = {
   description: "t.description COLLATE NOCASE",
   date: "t.date",
@@ -161,6 +196,7 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
   const from = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedFrom : monthStart;
   const to = requestedFrom && requestedTo && requestedFrom <= requestedTo ? requestedTo : today;
   const categoryId = text(params.get("categoryId"));
+  const tagId = text(params.get("tagId"));
   const accountId = text(params.get("accountId"));
   const transactionType = text(params.get("transactionType"));
   const origin = text(params.get("origin"));
@@ -176,6 +212,7 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
     where.push("t.category_id = ?");
     bindings.push(categoryId);
   }
+  tagFilter(tagId, where, bindings);
   if (accountId) {
     where.push("(t.account_id = ? OR t.destination_account_id = ?)");
     bindings.push(accountId, accountId);
@@ -260,6 +297,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     mode,
     accountId: text(params.get("accountId")),
     categoryId: text(params.get("categoryId")),
+    tagId: text(params.get("tagId")),
     transactionType: text(params.get("transactionType")),
     origin: text(params.get("origin")),
     description: text(params.get("description")).slice(0, 120),
@@ -276,6 +314,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
       where.push("t.category_id = ?");
       bindings.push(filters.categoryId);
     }
+    tagFilter(filters.tagId ?? "", where, bindings);
     if (filters.transactionType) {
       where.push("t.type = ?");
       bindings.push(filters.transactionType);
@@ -289,10 +328,12 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
   };
 
-  const [currentRows, comparisonRows, firstRows] = await env.DB.batch([
+  const [currentRows, comparisonRows, firstRows, tagGroupRows, tagRows] = await env.DB.batch([
     prepareRows(from, to),
     comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color FROM transactions t WHERE 0"),
     env.DB.prepare("SELECT MIN(date) AS date FROM transactions WHERE user_id = ? AND status = 'posted'").bind(user.userId),
+    env.DB.prepare("SELECT id, name, archived FROM tag_groups WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
+    env.DB.prepare("SELECT id, group_id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
   ]);
   // A comparison period before tracking began has no records, so its changes would be meaningless.
   const trackingStart = (firstRows.results[0] as { date: string | null } | undefined)?.date ?? null;
@@ -302,6 +343,8 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     comparisonRows: comparisonRows.results as StatisticsRow[],
     filters,
     currency: String(profile.currency || "EUR"),
+    tagGroups: tagGroupRows.results as StatisticsTagGroup[],
+    tags: tagRows.results as StatisticsTag[],
   }) };
 }
 
@@ -349,6 +392,8 @@ async function snapshot(user: FinanceUser) {
   const [mainRows, v3] = await Promise.all([env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
+    env.DB.prepare("SELECT id, name, archived FROM tag_groups WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
+    env.DB.prepare("SELECT id, group_id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
     env.DB.prepare(`WITH recent AS (
       SELECT id FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC LIMIT 4
     ), latest_snapshots AS (
@@ -416,7 +461,7 @@ async function snapshot(user: FinanceUser) {
       FROM transactions WHERE user_id = ? AND status = 'posted' AND date >= ? AND date <= ? AND (date >= ? OR date <= ?)`)
       .bind(month.start, month.start, month.previousThrough, month.previousThrough, user.userId, month.previousStart, today, month.start, month.previousThrough),
   ]), v3Snapshot(user.userId, today)]);
-  const [accounts, categories, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
+  const [accounts, categories, tagGroups, tags, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
   const totals = (monthTotals.results[0] ?? {}) as Record<string, number>;
 
   return {
@@ -425,6 +470,8 @@ async function snapshot(user: FinanceUser) {
     profile,
     accounts: accounts.results,
     categories: categories.results,
+    tagGroups: tagGroups.results,
+    tags: tags.results,
     transactions: transactions.results,
     recurring: recurring.results,
     installmentPlans: installmentPlans.results,
@@ -570,6 +617,36 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), text(payload.kind, "expense") === "income" ? "income" : "expense", text(payload.color, "#cfe9d7"), payload.categoryId, user.userId).run();
     } else if (action === "archiveCategory") {
       await env.DB.prepare("UPDATE categories SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.categoryId, user.userId).run();
+    } else if (action === "addTagGroup") {
+      const name = tagName(payload.name);
+      if (!name) return Response.json({ error: "Give the tag group a name." }, { status: 400 });
+      const groups = await env.DB.prepare("SELECT COUNT(*) AS total FROM tag_groups WHERE user_id = ? AND archived = 0").bind(user.userId).first<{ total: number }>();
+      if (Number(groups?.total || 0) >= 10) return Response.json({ error: "You can have up to 10 active tag groups." }, { status: 400 });
+      await env.DB.prepare("INSERT INTO tag_groups (id, user_id, name) VALUES (?, ?, ?)").bind(crypto.randomUUID(), user.userId, name).run();
+    } else if (action === "updateTagGroup") {
+      const name = tagName(payload.name);
+      if (!name) return Response.json({ error: "Give the tag group a name." }, { status: 400 });
+      const updated = await env.DB.prepare("UPDATE tag_groups SET name = ? WHERE id = ? AND user_id = ?").bind(name, text(payload.groupId), user.userId).run();
+      if (!Number(updated.meta.changes)) return Response.json({ error: "That tag group is no longer available." }, { status: 404 });
+    } else if (action === "archiveTagGroup") {
+      // Its tags stay on past activity; the group and its tags leave pickers and filters for new entries.
+      await env.DB.prepare("UPDATE tag_groups SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.groupId), user.userId).run();
+    } else if (action === "addTag") {
+      const name = tagName(payload.name);
+      if (!name) return Response.json({ error: "Give the tag a name." }, { status: 400 });
+      const group = await env.DB.prepare("SELECT id FROM tag_groups WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.groupId), user.userId).first<{ id: string }>();
+      if (!group) return Response.json({ error: "Choose an active tag group." }, { status: 400 });
+      const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM tags WHERE user_id = ? AND group_id = ? AND archived = 0").bind(user.userId, group.id).first<{ total: number }>();
+      if (Number(count?.total || 0) >= 20) return Response.json({ error: "A tag group can have up to 20 active tags." }, { status: 400 });
+      await env.DB.prepare("INSERT INTO tags (id, user_id, group_id, name, color) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, group.id, name, text(payload.color, "#cfe9d7")).run();
+    } else if (action === "updateTag") {
+      // A tag keeps its group: moving it could give past activity two tags from one group.
+      const name = tagName(payload.name);
+      if (!name) return Response.json({ error: "Give the tag a name." }, { status: 400 });
+      const updated = await env.DB.prepare("UPDATE tags SET name = ?, color = ? WHERE id = ? AND user_id = ?").bind(name, text(payload.color, "#cfe9d7"), text(payload.tagId), user.userId).run();
+      if (!Number(updated.meta.changes)) return Response.json({ error: "That tag is no longer available." }, { status: 404 });
+    } else if (action === "archiveTag") {
+      await env.DB.prepare("UPDATE tags SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.tagId), user.userId).run();
     } else if (action === "addTransaction") {
       const id = crypto.randomUUID();
       const amount = cents(payload.amount);
@@ -581,9 +658,11 @@ export async function POST(request: Request) {
       if(isMovement && (!payload.destinationAccountId || payload.destinationAccountId === payload.accountId || !await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0").bind(payload.destinationAccountId,user.userId).first())) return Response.json({error:"Choose a different active destination account."},{status:400});
       const countsBudget = ["expense", "installment_payment", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget);
       const spareExcluded = type === "expense" && bool(payload.excludeFromSpare);
+      const tagIds = await tagIdsFor(user.userId, payload.tagIds);
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
       const spare = type === "expense" ? spareRoundUpCents(amount, text(payload.accountId), spareExcluded, profile) : 0;
-      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_monthly, spare_change_cents, spare_excluded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, spare, spareExcluded ? 1 : 0)];
+      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly, spare_change_cents, spare_excluded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, tagIds.json, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, spare, spareExcluded ? 1 : 0)];
       if (type === "income") statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
       else if (isMovement) {
         statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
@@ -594,7 +673,10 @@ export async function POST(request: Request) {
       }
       await env.DB.batch(statements);
     } else if (action === "updateTransaction") {
-      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN NULL ELSE ? END WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, actionToday), payload.categoryId || null, payload.transactionId, user.userId).run();
+      const current = await env.DB.prepare("SELECT tag_ids FROM transactions WHERE id = ? AND user_id = ? AND status = 'posted'").bind(payload.transactionId, user.userId).first<{ tag_ids: string }>();
+      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, current?.tag_ids) : { json: current?.tag_ids ?? "[]" };
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
+      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN NULL ELSE ? END, tag_ids = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN '[]' ELSE ? END WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, actionToday), payload.categoryId || null, tagIds.json, payload.transactionId, user.userId).run();
     } else if (action === "correctTransaction") {
       const original = await env.DB.prepare(
         `WITH RECURSIVE correction_chain AS (
@@ -623,6 +705,9 @@ export async function POST(request: Request) {
       }
       const categoryKind = type === "income" ? "income" : type === "expense" ? "expense" : null;
       const categoryId = categoryKind ? (!typeChanged && payload.categoryId === original.category_id ? original.category_id : await categoryIdFor(user.userId, payload.categoryId, categoryKind)) : null;
+      // Without a tag choice the replacement keeps the original's tags.
+      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, original.tag_ids) : { json: String(original.tag_ids ?? "[]") };
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const amount = cents(payload.amount);
       const accountId = text(payload.accountId);
       const destinationAccountId = text(payload.destinationAccountId);
@@ -653,7 +738,7 @@ export async function POST(request: Request) {
       const statements = [
         env.DB.prepare("UPDATE transactions SET status = ? WHERE id = ? AND user_id = ? AND status = 'posted' AND NOT EXISTS (SELECT 1 FROM spare_events WHERE transaction_id = ? AND user_id = ? AND status = 'swept')").bind(correctionMarker, original.id, user.userId, original.id, user.userId),
         ...balanceStatements(user.userId, original, -1, { id: String(original.id), status: correctionMarker }),
-        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, type, description, amount_cents, date, committed, counts_monthly, recurring_plan_id, spare_change_cents, spare_excluded, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, categoryId, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, spareExcluded ? 1 : 0, original.id, original.id, user.userId, correctionMarker),
+        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly, recurring_plan_id, spare_change_cents, spare_excluded, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, categoryId, tagIds.json, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, spareExcluded ? 1 : 0, original.id, original.id, user.userId, correctionMarker),
         ...balanceStatements(user.userId, replacement, 1, { id: replacementId, status: "posted" }),
       ];
       if (oldSpare?.status === "pending") statements.push(env.DB.prepare("UPDATE spare_events SET status = 'cancelled' WHERE transaction_id = ? AND user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(original.id, user.userId, original.id, user.userId, correctionMarker));
@@ -671,20 +756,24 @@ export async function POST(request: Request) {
       const categoryKind = planType === "income" ? "income" : planType === "expense" ? "expense" : null;
       const categoryId = categoryKind ? await categoryIdFor(user.userId, payload.categoryId, categoryKind) : null;
       if (categoryKind && !categoryId) return Response.json({ error: `Choose an active ${categoryKind} category.` }, { status: 400 });
-      await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, frequency, interval_count, next_date, anchor_day, end_date, auto_post, committed, counts_monthly) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), planType, cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, categoryId, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, nextDate, Number(nextDate.slice(8, 10)) || 1, payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0, bool(payload.excludeFromBudget) ? 0 : 1).run();
+      const tagIds = await tagIdsFor(user.userId, payload.tagIds);
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
+      await env.DB.prepare("INSERT INTO recurring_plans (id, user_id, title, type, amount_cents, account_id, destination_account_id, category_id, tag_ids, frequency, interval_count, next_date, anchor_day, end_date, auto_post, committed, counts_monthly) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.title), planType, cents(payload.amount), payload.accountId || null, payload.destinationAccountId || null, categoryId, tagIds.json, text(payload.frequency, "monthly"), Number(payload.intervalCount) || 1, nextDate, Number(nextDate.slice(8, 10)) || 1, payload.endDate || null, bool(payload.autoPost) ? 1 : 0, bool(payload.committed, true) ? 1 : 0, bool(payload.excludeFromBudget) ? 0 : 1).run();
     } else if (action === "updateRecurring") {
       const amount = cents(payload.amount);
       if (!amount) return Response.json({ error: "Amount is required." }, { status: 400 });
-      const plan = await env.DB.prepare("SELECT type, counts_monthly, next_date, end_date FROM recurring_plans WHERE id = ? AND user_id = ? AND active = 1").bind(payload.planId, user.userId).first<{ type: string; counts_monthly?: number; next_date: string; end_date: string | null }>();
+      const plan = await env.DB.prepare("SELECT type, counts_monthly, next_date, end_date, tag_ids FROM recurring_plans WHERE id = ? AND user_id = ? AND active = 1").bind(payload.planId, user.userId).first<{ type: string; counts_monthly?: number; next_date: string; end_date: string | null; tag_ids: string }>();
       if (!plan) return Response.json({ error: "That recurring plan is no longer active." }, { status: 404 });
       const categoryKind = plan.type === "income" ? "income" : plan.type === "expense" ? "expense" : null;
       const categoryId = categoryKind ? await categoryIdFor(user.userId, payload.categoryId, categoryKind) : null;
       if (categoryKind && !categoryId) return Response.json({ error: `Choose an active ${categoryKind} category.` }, { status: 400 });
+      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, plan.tag_ids) : { json: plan.tag_ids };
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const nextDate = text(payload.nextDate);
       const anchorDay = Math.max(1, Math.min(31, Math.round(Number(payload.anchorDay) || Number(nextDate.slice(8, 10)) || 1)));
       // A one-off plan ends on its due date; switching it back to a repeating frequency removes that end.
       const endDate = payload.endDate ? text(payload.endDate) : plan.end_date && plan.end_date === plan.next_date ? null : plan.end_date;
-      await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, amount_cents = ?, account_id = ?, destination_account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, end_date = ?, auto_post = ?, committed = ?, counts_monthly = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, amount, payload.accountId || null, payload.destinationAccountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, endDate, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, bool(payload.excludeFromBudget, plan.counts_monthly === 0) ? 0 : 1, payload.planId, user.userId).run();
+      await env.DB.prepare("UPDATE recurring_plans SET title = ?, category_id = ?, tag_ids = ?, amount_cents = ?, account_id = ?, destination_account_id = ?, frequency = ?, interval_count = ?, next_date = ?, anchor_day = ?, end_date = ?, auto_post = ?, committed = ?, counts_monthly = ? WHERE id = ? AND user_id = ? AND active = 1").bind(text(payload.title, "Recurring plan"), categoryId, tagIds.json, amount, payload.accountId || null, payload.destinationAccountId || null, text(payload.frequency, "monthly"), Math.max(1, Number(payload.intervalCount) || 1), nextDate, anchorDay, endDate, bool(payload.autoPost) ? 1 : 0, bool(payload.committed) ? 1 : 0, bool(payload.excludeFromBudget, plan.counts_monthly === 0) ? 0 : 1, payload.planId, user.userId).run();
       await env.DB.prepare("DELETE FROM v3_occurrences WHERE user_id=? AND source_kind='recurring' AND source_id=? AND status='upcoming' AND paid_cents=0").bind(user.userId,payload.planId).run();
     } else if (action === "archiveRecurring") {
       await env.DB.prepare("UPDATE recurring_plans SET active = 0, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.planId, user.userId).run();
@@ -696,11 +785,13 @@ export async function POST(request: Request) {
       if (!total || !firstDue || !payload.paymentAccountId) return Response.json({ error: "Amount, installment count, first date, and payment account are required." }, { status: 400 });
       const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
       if (!categoryId) return Response.json({ error: "Choose an active expense category." }, { status: 400 });
+      const tagIds = await tagIdsFor(user.userId, payload.tagIds);
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const base = Math.floor(total / count);
       const custom = Array.isArray(payload.customAmounts) ? payload.customAmounts.map(cents) : [];
       const statements = [
-        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, auto_post) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, categoryId, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0),
-        env.DB.prepare("INSERT INTO transactions (id, user_id, category_id, type, description, amount_cents, date, committed, counts_monthly, installment_plan_id) VALUES (?, ?, ?, 'installment_purchase', ?, ?, ?, 1, 0, ?)").bind(crypto.randomUUID(), user.userId, categoryId, text(payload.title), total, text(payload.purchaseDate, actionToday), planId),
+        env.DB.prepare("INSERT INTO installment_plans (id, user_id, title, provider, category_id, tag_ids, total_cents, paid_cents, installment_count, first_due_date, frequency, payment_account_id, linked_credit_account_id, auto_post) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)").bind(planId, user.userId, text(payload.title), text(payload.provider) || null, categoryId, tagIds.json, total, count, firstDue, text(payload.frequency, "monthly"), payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0),
+        env.DB.prepare("INSERT INTO transactions (id, user_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly, installment_plan_id) VALUES (?, ?, ?, ?, 'installment_purchase', ?, ?, ?, 1, 0, ?)").bind(crypto.randomUUID(), user.userId, categoryId, tagIds.json, text(payload.title), total, text(payload.purchaseDate, actionToday), planId),
       ];
       for (let index = 0; index < count; index += 1) {
         const amount = custom.length === count ? custom[index] : index === count - 1 ? total - base * (count - 1) : base;
@@ -716,6 +807,8 @@ export async function POST(request: Request) {
       if (paidCount >= 120) return Response.json({ error: "This plan has reached the 120-payment limit and cannot add another payment." }, { status: 409 });
       const categoryId = await categoryIdFor(user.userId, payload.categoryId, "expense");
       if (!categoryId) return Response.json({ error: "Choose an active expense category." }, { status: 400 });
+      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, plan.tag_ids) : { json: String(plan.tag_ids ?? "[]") };
+      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const total = cents(payload.total);
       const nextDueDate = text(payload.nextDueDate);
       const frequency = text(payload.frequency, "monthly") === "weekly" ? "weekly" : "monthly";
@@ -731,8 +824,8 @@ export async function POST(request: Request) {
       const base = Math.floor(remainingTotal / remainingCount);
       const statements = [
         env.DB.prepare("DELETE FROM installment_payments WHERE plan_id = ? AND user_id = ? AND status = 'upcoming'").bind(payload.planId, user.userId),
-        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, category_id = ?, total_cents = ?, paid_cents = ?, installment_count = ?, first_due_date = ?, frequency = ?, payment_account_id = ?, linked_credit_account_id = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, categoryId, total, paidCents, paidCount + remainingCount, paidCount ? plan.first_due_date : nextDueDate, frequency, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
-        env.DB.prepare("UPDATE transactions SET description = ?, category_id = ?, amount_cents = CASE WHEN type = 'installment_purchase' THEN ? ELSE amount_cents END WHERE user_id = ? AND installment_plan_id = ? AND status = 'posted'").bind(text(payload.title, "Pay-later plan"), categoryId, total, user.userId, payload.planId),
+        env.DB.prepare("UPDATE installment_plans SET title = ?, provider = ?, category_id = ?, tag_ids = ?, total_cents = ?, paid_cents = ?, installment_count = ?, first_due_date = ?, frequency = ?, payment_account_id = ?, linked_credit_account_id = ?, auto_post = ? WHERE id = ? AND user_id = ? AND status = 'active'").bind(text(payload.title, "Pay-later plan"), text(payload.provider) || null, categoryId, tagIds.json, total, paidCents, paidCount + remainingCount, paidCount ? plan.first_due_date : nextDueDate, frequency, payload.paymentAccountId, payload.linkedCreditAccountId || null, bool(payload.autoPost) ? 1 : 0, payload.planId, user.userId),
+        env.DB.prepare("UPDATE transactions SET description = ?, category_id = ?, tag_ids = ?, amount_cents = CASE WHEN type = 'installment_purchase' THEN ? ELSE amount_cents END WHERE user_id = ? AND installment_plan_id = ? AND status = 'posted'").bind(text(payload.title, "Pay-later plan"), categoryId, tagIds.json, total, user.userId, payload.planId),
       ];
       for (let index = 0; index < remainingCount; index += 1) {
         const amount = index === remainingCount - 1 ? remainingTotal - base * (remainingCount - 1) : base;

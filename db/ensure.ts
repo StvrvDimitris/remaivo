@@ -8,6 +8,7 @@ const requiredTables = [
   "installment_payments", "goals", "goal_entries", "spare_events", "v3_versions",
   "v3_periods", "v3_bucket_templates", "v3_bucket_periods",
   "v3_assignments", "v3_occurrences", "v3_events", "v3_payment_links",
+  "tag_groups", "tags",
 ] as const;
 const retiredTables = [
   "budget_rules", "expense_reserves", "expense_reserve_periods",

@@ -18,6 +18,10 @@ function translateMessage(text: string): string | null {
   if (match) return `Ο φάκελος «${match[1]}» χρησιμοποιεί ήδη μία από τις κατηγορίες αυτού του φακέλου. Αλλάξτε τις κατηγορίες του πριν από την επαναφορά.`;
   match = text.match(/^This plan ended on (\d{4}-\d{2}-\d{2})\. Create a new plan if you want it to continue\.$/);
   if (match) return `Αυτό το πλάνο έληξε στις ${match[1]}. Δημιουργήστε νέο πλάνο αν θέλετε να συνεχιστεί.`;
+  match = text.match(/^(.+) purchases with these tags already belong to the (.+) bucket\.$/);
+  if (match) return `Οι αγορές της κατηγορίας «${match[1]}» με αυτές τις ετικέτες ανήκουν ήδη στον φάκελο «${match[2]}».`;
+  match = text.match(/^Restore the tag group(?: “(.+)”)? first\.$/);
+  if (match) return `Επαναφέρετε πρώτα την ομάδα ετικετών${match[1] ? ` «${match[1]}»` : ''}.`;
   match = text.match(/^(.+) already belongs to the (.+) bucket\.$/);
   if (match) return `Η κατηγορία «${match[1]}» ανήκει ήδη στον φάκελο «${match[2]}».`;
   return null;

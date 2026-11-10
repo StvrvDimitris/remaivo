@@ -76,3 +76,14 @@ test('Contribution amounts and rates stay separate when money is saved then inve
  assert.equal(noIncome.savingsContributionRate,null);assert.equal(noIncome.investmentContributionRate,null);
  const directIncome=make([row('income',10000)]);assert.equal(directIncome.saving,0);assert.equal(directIncome.savingsContributionRate,0);
 });
+
+
+test('Tag breakdown includes untagged spending and omits unused archived groups',()=>{
+ const row=(id,amount,tag_ids)=>({id,type:'expense',amount_cents:amount,date:'2026-10-07',description:id,category_id:null,category_name:null,category_color:null,account_id:'a',destination_account_id:null,committed:0,recurring_plan_id:null,tag_ids});
+ const filters={from:'2026-10-01',to:'2026-10-31',comparison:'none',comparisonFrom:null,comparisonTo:null,mode:'spending',accountId:'',categoryId:'',transactionType:'',origin:'',description:''};
+ const result=buildStatistics({rows:[row('one',3000,'["daily"]'),row('two',1000,'[]')],comparisonRows:[],filters,currency:'EUR',tagGroups:[{id:'purpose',name:'Purpose',archived:0},{id:'old',name:'Old',archived:1}],tags:[{id:'daily',group_id:'purpose',name:'Daily',color:'#abcdef',archived:0}]});
+ assert.deepEqual(result.tagBreakdown.map(g=>g.id),['purpose']);
+ const group=result.tagBreakdown[0];assert.equal(group.total,4000);
+ assert.deepEqual(group.items.map(i=>[i.id,i.label,i.amount]),[['daily','Daily',3000],['none','No tag',1000]]);
+ assert.equal(group.items.reduce((sum,i)=>sum+i.share,0),100);
+});

@@ -1,6 +1,8 @@
 import { includedInMode, operatingCashEffect, reportingClass, type StatisticsMode } from "./transaction-classification.ts";
 
 export type ComparisonMode = "previousEquivalent" | "previousMonth" | "previousYear" | "none";
+export type StatisticsTagGroup = { id: string; name: string; archived: number };
+export type StatisticsTag = { id: string; group_id: string; name: string; color: string; archived: number };
 
 export type StatisticsRow = {
   id: string;
@@ -9,6 +11,7 @@ export type StatisticsRow = {
   category_id: string | null;
   category_name: string | null;
   category_color: string | null;
+  tag_ids?: string | null;
   type: string;
   description: string;
   amount_cents: number;
@@ -27,6 +30,7 @@ export type StatisticsFilters = {
   mode: StatisticsMode;
   accountId: string;
   categoryId: string;
+  tagId?: string;
   transactionType: string;
   origin: string;
   description: string;
@@ -177,6 +181,45 @@ function allocation(rows: StatisticsRow[], comparisonRows: StatisticsRow[], mode
   }));
 }
 
+function rowTags(row: StatisticsRow): string[] {
+  if (!row.tag_ids) return [];
+  try { const ids = JSON.parse(row.tag_ids); return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []; } catch { return []; }
+}
+
+// One breakdown per tag group. A transaction has at most one tag per group, so
+// each group's tags and its "No tag" row add up to the period total.
+function tagBreakdown(rows: StatisticsRow[], comparisonRows: StatisticsRow[], mode: StatisticsMode, groups: StatisticsTagGroup[], tags: StatisticsTag[]) {
+  const tagById = new Map(tags.map(tag => [tag.id, tag]));
+  const sums = (list: StatisticsRow[]) => {
+    const byGroup = new Map<string, Map<string, number>>();
+    for (const row of list) {
+      if (!includedInMode(row.type, mode)) continue;
+      const amount = Math.abs(modeAmount(row, mode));
+      const carried = rowTags(row).map(id => tagById.get(id)).filter((tag): tag is StatisticsTag => Boolean(tag));
+      for (const group of groups) {
+        const key = carried.find(tag => tag.group_id === group.id)?.id ?? "none";
+        const totals = byGroup.get(group.id) ?? new Map<string, number>();
+        totals.set(key, (totals.get(key) ?? 0) + amount);
+        byGroup.set(group.id, totals);
+      }
+    }
+    return byGroup;
+  };
+  const current = sums(rows), previous = sums(comparisonRows);
+  return groups.map(group => {
+    const totals = current.get(group.id) ?? new Map<string, number>();
+    const before = previous.get(group.id) ?? new Map<string, number>();
+    // Archived groups appear only when this period used them.
+    if (group.archived && ![...totals.keys()].some(key => key !== "none")) return null;
+    const total = [...totals.values()].reduce((sum, amount) => sum + amount, 0);
+    const items = [...totals.entries()].map(([id, amount]) => {
+      const tag = tagById.get(id);
+      return { id, label: tag?.name ?? "No tag", color: tag?.color ?? "#d9ddd5", amount, share: total > 0 ? amount / total * 100 : 0, comparisonAmount: before.get(id) ?? 0, change: delta(amount, before.get(id) ?? 0) };
+    }).sort((left, right) => (left.id === "none" ? 1 : 0) - (right.id === "none" ? 1 : 0) || right.amount - left.amount);
+    return { id: group.id, name: group.name, total, items };
+  }).filter((group): group is NonNullable<typeof group> => Boolean(group && group.total > 0));
+}
+
 function descriptions(rows: StatisticsRow[], mode: StatisticsMode) {
   const grouped = new Map<string, { description: string; amount: number; count: number }>();
   for (const row of rows) {
@@ -315,6 +358,8 @@ export function buildStatistics(input: {
   comparisonRows: StatisticsRow[];
   filters: StatisticsFilters;
   currency: string;
+  tagGroups?: StatisticsTagGroup[];
+  tags?: StatisticsTag[];
 }) {
   const summary = totals(input.rows);
   const comparisonSummary = totals(input.comparisonRows);
@@ -334,6 +379,7 @@ export function buildStatistics(input: {
       },
     },
     categoryBreakdown,
+    tagBreakdown: tagBreakdown(input.rows, input.comparisonRows, input.filters.mode, input.tagGroups ?? [], input.tags ?? []),
     descriptionBreakdown,
     dailyTrend: trends(input.rows, input.comparisonRows, input.filters),
     weekdayBreakdown: weekday,

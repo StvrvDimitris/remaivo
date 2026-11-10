@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { addCalendarInterval } from "../app/finance-dates";
 import { archiveKinds, type ArchiveItem, type ArchiveKind } from "../app/archive-types";
-import { parseCategoryIds } from "../app/v3-engine";
+import { bucketsOverlap, parseCategoryIds } from "../app/v3-engine";
 import { currentPeriod } from "./v3";
 
 export class ArchiveError extends Error {
@@ -19,6 +19,8 @@ const archiveQuery = `
     SELECT id, user_id, 'recurring', title, frequency || ' · next date ' || next_date, amount_cents, NULL, archived_at FROM recurring_plans WHERE active = 0
     UNION ALL SELECT id, user_id, 'installment', title, 'Unpaid balance', MAX(0, total_cents - paid_cents), NULL, archived_at FROM installment_plans WHERE status = 'archived'
     UNION ALL SELECT id, user_id, 'bucket', name, CASE WHEN kind = 'goal' THEN 'Goal allocation' ELSE 'Protected spending' END, target_cents, NULL, archived_at FROM v3_bucket_templates WHERE archived = 1
+    UNION ALL SELECT t.id, t.user_id, 'tag', t.name, COALESCE(g.name, ''), NULL, NULL, t.archived_at FROM tags t LEFT JOIN tag_groups g ON g.id = t.group_id AND g.user_id = t.user_id WHERE t.archived = 1
+    UNION ALL SELECT id, user_id, 'tagGroup', name, 'Tag group', NULL, NULL, archived_at FROM tag_groups WHERE archived = 1
   )
 `;
 
@@ -40,6 +42,7 @@ const definitions = {
   account: ["accounts", "archived = 1"], category: ["categories", "archived = 1"],
   goal: ["goals", "archived = 1"], recurring: ["recurring_plans", "active = 0"],
   installment: ["installment_plans", "status = 'archived'"], bucket: ["v3_bucket_templates", "archived = 1"],
+  tag: ["tags", "archived = 1"], tagGroup: ["tag_groups", "archived = 1"],
 } as const;
 
 export async function restoreArchive(user: string, today: string, payload: Record<string, unknown>) {
@@ -57,7 +60,11 @@ export async function restoreArchive(user: string, today: string, payload: Recor
   await requireActive("accounts", item.account_id || item.payment_account_id || item.destination_id);
   await requireActive("accounts", item.destination_account_id || item.linked_credit_account_id);
   await requireActive("categories", item.category_id);
-  if (kind === "account" || kind === "category" || kind === "goal") {
+  if (kind === "tag") {
+    const group = await env.DB.prepare("SELECT name, archived FROM tag_groups WHERE id = ? AND user_id = ?").bind(item.group_id, user).first<{name: string; archived: number}>();
+    if (!group || group.archived) throw new ArchiveError(`Restore the tag group${group ? ` “${group.name}”` : ""} first.`);
+  }
+  if (kind === "account" || kind === "category" || kind === "goal" || kind === "tag" || kind === "tagGroup") {
     await env.DB.prepare(`UPDATE ${table} SET archived = 0, archived_at = NULL WHERE id = ? AND user_id = ? AND archived = 1`).bind(id, user).run();
     return;
   }
@@ -66,17 +73,19 @@ export async function restoreArchive(user: string, today: string, payload: Recor
     const categoryIds = parseCategoryIds(item.category_ids);
     for (const categoryId of categoryIds) await requireActive("categories", categoryId);
     if (categoryIds.length) {
-      const others = await env.DB.prepare(`SELECT name, category_ids FROM v3_bucket_templates WHERE user_id = ? AND archived = 0 AND id != ?
-        UNION ALL SELECT name, category_ids FROM v3_bucket_periods WHERE user_id = ? AND period_id = ? AND bucket_id != ?`)
-        .bind(user, id, user, period.id, id).all<{name: string; category_ids: string}>();
-      const conflict = others.results.find(other => parseCategoryIds(other.category_ids).some(categoryId => categoryIds.includes(categoryId)));
+      const others = await env.DB.prepare(`SELECT name, category_ids, tag_ids FROM v3_bucket_templates WHERE user_id = ? AND archived = 0 AND id != ?
+        UNION ALL SELECT name, category_ids, tag_ids FROM v3_bucket_periods WHERE user_id = ? AND period_id = ? AND bucket_id != ?`)
+        .bind(user, id, user, period.id, id).all<{name: string; category_ids: string; tag_ids: string}>();
+      const groups = new Map((await env.DB.prepare("SELECT id, group_id FROM tags WHERE user_id = ?").bind(user).all<{id: string; group_id: string}>()).results.map(tag => [tag.id, tag.group_id]));
+      const bucket = { category_ids: categoryIds, tag_ids: item.tag_ids };
+      const conflict = others.results.find(other => bucketsOverlap(bucket, { category_ids: parseCategoryIds(other.category_ids), tag_ids: other.tag_ids }, tagId => groups.get(tagId)));
       if (conflict) throw new ArchiveError(`“${conflict.name}” already uses one of this bucket’s categories. Change its categories before restoring this bucket.`);
     }
     await env.DB.batch([
       env.DB.prepare("UPDATE v3_bucket_templates SET archived = 0, archived_at = NULL WHERE id = ? AND user_id = ? AND archived = 1").bind(id, user),
-      env.DB.prepare(`INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,target_cents,priority,rollover,rollover_cap,destination_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET released = 0`)
-        .bind(`${period.id}:${id}`, user, period.id, id, item.name, item.kind, item.category_ids, item.target_cents, item.priority, item.rollover, item.rollover_cap, item.destination_id),
+      env.DB.prepare(`INSERT INTO v3_bucket_periods(id,user_id,period_id,bucket_id,name,kind,category_ids,tag_ids,target_cents,priority,rollover,rollover_cap,destination_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(period_id,bucket_id) DO UPDATE SET released = 0`)
+        .bind(`${period.id}:${id}`, user, period.id, id, item.name, item.kind, item.category_ids, item.tag_ids ?? "[]", item.target_cents, item.priority, item.rollover, item.rollover_cap, item.destination_id),
     ]);
     return;
   }

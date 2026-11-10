@@ -48,7 +48,7 @@ test('migrations leave only the current finance tables and columns', () => {
   assert.deepEqual(tables, [
     'accounts', 'categories', 'goal_entries', 'goals', 'installment_payments',
     'installment_plans', 'investment_valuation_snapshots', 'profiles',
-    'recurring_plans', 'spare_events', 'transactions', 'v3_assignments',
+    'recurring_plans', 'spare_events', 'tag_groups', 'tags', 'transactions', 'v3_assignments',
     'v3_bucket_periods', 'v3_bucket_templates', 'v3_events',
     'v3_occurrences', 'v3_payment_links', 'v3_periods', 'v3_versions',
   ]);
@@ -87,6 +87,21 @@ test('bucket category migrations carry a single linked category into the categor
   check('drizzle', drizzle.filter(name => name < '0023'), drizzle.filter(name => name >= '0023'));
   const cloudflare = fs.readdirSync('cloudflare/migrations').filter(name => name.endsWith('.sql')).sort();
   check('cloudflare/migrations', cloudflare.filter(name => name < '0007'), cloudflare.filter(name => name >= '0007'));
+});
+
+test('Cloudflare and drizzle migrations both give records a tag list and create no tags', () => {
+  for (const directory of ['drizzle', 'cloudflare/migrations']) {
+    const db = new DatabaseSync(':memory:');
+    for (const name of fs.readdirSync(directory).filter(name => name.endsWith('.sql')).sort()) db.exec(fs.readFileSync(path.join(directory, name), 'utf8'));
+    for (const table of ['transactions', 'recurring_plans', 'installment_plans', 'v3_occurrences', 'v3_bucket_templates', 'v3_bucket_periods']) {
+      const column = db.prepare(`PRAGMA table_info(${table})`).all().find(row => row.name === 'tag_ids');
+      assert.ok(column && column.notnull === 1 && column.dflt_value === "'[]'", `${directory}: ${table}`);
+    }
+    for (const table of ['tag_groups', 'tags']) assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${directory}: ${table}`);
+    const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name).sort();
+    assert.deepEqual(columns('tags'), ['archived', 'archived_at', 'color', 'created_at', 'group_id', 'id', 'name', 'user_id'], directory);
+    assert.deepEqual(columns('tag_groups'), ['archived', 'archived_at', 'created_at', 'id', 'name', 'user_id'], directory);
+  }
 });
 
 test('a cold Worker reads an existing schema without replaying migrations', async () => {
