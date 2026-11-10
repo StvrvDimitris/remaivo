@@ -9,7 +9,7 @@ import ts from 'typescript';
 const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
   'transactions', 'recurring_plans', 'installment_plans', 'installment_payments',
-  'goals', 'goal_entries', 'spare_events', 'tag_groups', 'tags',
+  'goals', 'goal_entries', 'spare_events', 'tags',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
   'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_payment_links',
 ];
@@ -105,8 +105,7 @@ function seed(user, prefix) {
   insert('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)', account, user, `${prefix} cash`, 'checking', 98250);
   insert('INSERT INTO investment_valuation_snapshots(id,user_id,account_id,snapshot_date,value_cents) VALUES(?,?,?,?,?)', `${prefix}-valuation`, user, account, '2026-09-20', 45000);
   insert('INSERT INTO categories(id,user_id,name,kind) VALUES(?,?,?,?)', category, user, `${prefix} food`, 'expense');
-  insert('INSERT INTO tag_groups(id,user_id,name) VALUES(?,?,?)', `${prefix}-need`, user, `${prefix} need`);
-  insert('INSERT INTO tags(id,user_id,group_id,name) VALUES(?,?,?,?)', `${prefix}-daily`, user, `${prefix}-need`, `${prefix} daily`);
+  insert('INSERT INTO tags(id,user_id,name) VALUES(?,?,?)', `${prefix}-daily`, user, `${prefix} daily`);
   insert('INSERT INTO transactions(id,user_id,account_id,category_id,tag_ids,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?,?,?)', transaction, user, account, category, JSON.stringify([`${prefix}-daily`]), 'expense', `${prefix}_PRIVATE_PURCHASE`, 1750, '2026-09-20');
   insert('INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date) VALUES(?,?,?,?,?,?,?,?)', recurring, user, `${prefix} groceries`, 'expense', 1750, account, 'monthly', '2026-10-20');
   insert('INSERT INTO installment_plans(id,user_id,title,total_cents,installment_count,first_due_date,payment_account_id) VALUES(?,?,?,?,?,?,?)', installment, user, `${prefix} laptop`, 120000, 12, '2026-09-10', account);
@@ -138,7 +137,7 @@ test('A backup holds every profile and every table of user data, but no sign-in 
   const before = copy(rowsFor('alice'));
   const backup = copy(await exportBackup());
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 5);
+  assert.equal(backup.version, 6);
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(backup.profiles, [
     { userId: 'alice', name: 'Alice', color: '#123456', icon: 'A', owner: true },
@@ -280,7 +279,7 @@ test('A bad file is refused before anything changes', async () => {
     await assert.rejects(previewRestore('alice', file), BackupError);
     await assert.rejects(restoreBackup('alice', file), BackupError);
   }
-  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 6; })), /newer version/);
+  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 7; })), /newer version/);
   await assert.rejects(restoreBackup('alice', edited(file => { file.tables.accounts[0]['name" = 1; DROP TABLE accounts; --'] = 'x'; })), /no longer uses/);
   assert.deepEqual(copy(rowsFor('alice')), before);
 });
@@ -315,4 +314,16 @@ test('A large backup restores across several statements', async () => {
   const before = copy(rowsFor('alice'));
   await restoreBackup('alice', backup);
   assert.deepEqual(copy(rowsFor('alice')), before);
+});
+
+test('Version 5 grouped tags restore with unique flat names', async () => {
+ household();
+ const backup=copy(await exportBackup()); backup.version=5;
+ backup.tables.tag_groups=[{id:'old-g1',user_id:'alice',name:'One',archived:0},{id:'old-g2',user_id:'alice',name:'Two',archived:0}];
+ const tag=backup.tables.tags.find(row=>row.user_id==='alice'); tag.name='Trip'; tag.group_id='old-g1';
+ backup.tables.tags.push({...tag,id:'old-tag-2',group_id:'old-g2'});
+ for (const row of backup.tables.tags.filter(row=>row.user_id!=='alice')) row.group_id='other';
+ await restoreBackup('alice',backup);
+ const names=sqlite.prepare("SELECT name FROM tags WHERE user_id='alice'").all().map(row=>row.name);
+ assert.equal(names.length,2); assert.equal(new Set(names).size,2);
 });

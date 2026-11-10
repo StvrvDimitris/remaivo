@@ -8,12 +8,12 @@ const requiredTables = [
   "installment_payments", "goals", "goal_entries", "spare_events", "v3_versions",
   "v3_periods", "v3_bucket_templates", "v3_bucket_periods",
   "v3_assignments", "v3_occurrences", "v3_events", "v3_payment_links",
-  "tag_groups", "tags",
+  "tags",
 ] as const;
 const retiredTables = [
   "budget_rules", "expense_reserves", "expense_reserve_periods",
   "forecast_scenarios", "v3_migrations", "v3_ledger_entries",
-  "v3_opening_anchors",
+  "v3_opening_anchors", "tag_groups",
 ] as const;
 const retiredColumns: Record<string, string[]> = {
   profiles: ["spare_sweep_mode", "spare_threshold_cents"],
@@ -25,6 +25,7 @@ const retiredColumns: Record<string, string[]> = {
   spare_events: ["destination_account_id", "base_cents"],
   v3_bucket_templates: ["category_id"],
   v3_bucket_periods: ["category_id"],
+  tags: ["group_id"],
 };
 
 let schemaReady: Promise<void> | null = null;

@@ -5,14 +5,16 @@ import { env } from "cloudflare:workers";
 const TABLES = [
   "accounts", "categories", "goals", "goal_entries", "installment_payments",
   "installment_plans", "investment_valuation_snapshots", "profiles",
-  "recurring_plans", "spare_events", "tag_groups", "tags", "transactions", "v3_assignments",
+  "recurring_plans", "spare_events", "tags", "transactions", "v3_assignments",
   "v3_bucket_periods", "v3_bucket_templates", "v3_events",
   "v3_occurrences", "v3_payment_links", "v3_periods", "v3_versions",
 ] as const;
 // Tables added after a backup version; older files simply have none of them.
-const ADDED_IN: Partial<Record<(typeof TABLES)[number], number>> = { tag_groups: 5, tags: 5 };
+const ADDED_IN: Partial<Record<(typeof TABLES)[number], number>> = { tags: 5 };
+// Version 5 backups held tag groups, which became plain tags in version 6.
+const DROPPED_IN_6 = { tables: ["tag_groups"], columns: { tags: ["group_id"] } as Record<string, string[]> };
 
-const BACKUP_VERSION = 5;
+const BACKUP_VERSION = 6;
 const OLDEST_VERSION = 3;
 const MAX_PROFILES = 5;
 const OWNER_SUB = "password:owner";
@@ -105,7 +107,23 @@ async function planRestore(user: string, file: unknown): Promise<RestorePlan> {
   if (kept.length + profiles.length > MAX_PROFILES) throw new BackupError("Restoring this backup would go over the limit of five profiles. Remove a profile first.");
 
   const version = file.version;
-  const given = file.tables as Record<string, unknown>;
+  const given = { ...(file.tables as Record<string, unknown>) };
+  if (version < 6) {
+    for (const table of DROPPED_IN_6.tables) delete given[table];
+    for (const [table, names] of Object.entries(DROPPED_IN_6.columns)) {
+      if (!Array.isArray(given[table])) continue;
+      // Names were unique per group; keep them unique per profile.
+      const seen = new Set<string>();
+      given[table] = (given[table] as unknown[]).map(row => {
+        if (!isObject(row)) return row;
+        const copy = Object.fromEntries(Object.entries(row).filter(([name]) => !names.includes(name)));
+        let name = String(copy.name ?? ""), n = 2;
+        while (seen.has(`${copy.user_id}\u0000${name}`)) name = `${copy.name} (${n++})`;
+        seen.add(`${copy.user_id}\u0000${name}`);
+        return { ...copy, name };
+      });
+    }
+  }
   const source = Object.fromEntries(TABLES.map(table => [table, given[table] === undefined && version < (ADDED_IN[table] ?? 0) ? [] : given[table]]));
   if (Object.keys(given).some(table => !(TABLES as readonly string[]).includes(table)) || TABLES.some(table => !Array.isArray(source[table]))) throw new BackupError(NOT_A_BACKUP);
   const info = await env.DB.batch<{ name: string }>(TABLES.map(table => env.DB.prepare(`SELECT name FROM pragma_table_info('${table}')`)));

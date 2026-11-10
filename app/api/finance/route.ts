@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { getUser } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
-import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow, type StatisticsTag, type StatisticsTagGroup } from "../../statistics";
+import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow, type StatisticsTag } from "../../statistics";
 import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
 import { sweepSpare } from "../../../db/spare";
 import { isUITheme } from "../../ui-themes";
@@ -139,8 +139,8 @@ async function categoryIdFor(userId: string, value: unknown, kind: "expense" | "
   return category?.id ?? null;
 }
 
-// Tags arrive as an array of tag IDs. A record keeps at most one tag from each
-// group; archived tags are accepted only when the record already carries them.
+// Tags arrive as an array of tag IDs. Archived tags are accepted only when the
+// record already carries them.
 // These helpers stay in this file because the route tests load it on its own.
 type TagCheck = { json: string } | { error: string };
 function tagList(value: unknown): string[] {
@@ -153,22 +153,36 @@ async function tagIdsFor(userId: string, value: unknown, keep: unknown = "[]"): 
   if (!ids.length) return { json: "[]" };
   if (ids.length > 20) return { error: "Choose up to 20 tags." };
   const kept = tagList(keep);
-  const found = await env.DB.prepare("SELECT t.id, t.group_id, t.archived, g.archived AS group_archived FROM tags t JOIN tag_groups g ON g.id = t.group_id AND g.user_id = t.user_id WHERE t.user_id = ? AND t.id IN (SELECT value FROM json_each(?))")
-    .bind(userId, JSON.stringify(ids)).all<{ id: string; group_id: string; archived: number; group_archived: number }>();
-  if (found.results.length !== ids.length || found.results.some(tag => (tag.archived || tag.group_archived) && !kept.includes(tag.id))) return { error: "Choose active tags." };
-  if (new Set(found.results.map(tag => tag.group_id)).size !== ids.length) return { error: "Choose one tag from each tag group." };
+  const found = await env.DB.prepare("SELECT id, archived FROM tags WHERE user_id = ? AND id IN (SELECT value FROM json_each(?))")
+    .bind(userId, JSON.stringify(ids)).all<{ id: string; archived: number }>();
+  if (found.results.length !== ids.length || found.results.some(tag => tag.archived && !kept.includes(tag.id))) return { error: "Choose active tags." };
   return { json: JSON.stringify(ids) };
 }
-// `tagId` filters to one tag; `none:<groupId>` to activity without a tag from that group.
+// `tagId` filters to one tag; `none` to activity without tags.
 function tagFilter(tagId: string, where: string[], bindings: unknown[]) {
   if (!tagId) return;
-  if (tagId.startsWith("none:")) {
-    where.push("NOT EXISTS (SELECT 1 FROM json_each(t.tag_ids) j JOIN tags tg ON tg.id = j.value AND tg.user_id = t.user_id WHERE tg.group_id = ?)");
-    bindings.push(tagId.slice(5));
+  if (tagId === "none") {
+    where.push("json_array_length(t.tag_ids) = 0");
   } else {
     where.push("EXISTS (SELECT 1 FROM json_each(t.tag_ids) WHERE value = ?)");
     bindings.push(tagId);
   }
+}
+// A category filter includes the category's subcategories.
+function categoryFilter(categoryId: string, where: string[], bindings: unknown[]) {
+  if (!categoryId) return;
+  where.push("(t.category_id = ? OR t.category_id IN (SELECT id FROM categories WHERE parent_id = ? AND user_id = t.user_id))");
+  bindings.push(categoryId, categoryId);
+}
+// A subcategory's parent must be an active top-level category of the same kind.
+async function parentFor(userId: string, value: unknown, kind: string, self?: string) {
+  const parentId = text(value);
+  if (!parentId) return { id: null } as const;
+  if (parentId === self) return { error: "A category can't be inside itself." } as const;
+  const parent = await env.DB.prepare("SELECT id, kind, parent_id FROM categories WHERE id = ? AND user_id = ? AND archived = 0").bind(parentId, userId).first<{ id: string; kind: string; parent_id: string | null }>();
+  if (!parent || parent.parent_id) return { error: "Choose an active main category to put this inside." } as const;
+  if (parent.kind !== kind) return { error: "A subcategory must be the same type as its main category." } as const;
+  return { id: parent.id } as const;
 }
 function tagName(value: unknown) {
   return text(value).replace(/\s+/g, " ").slice(0, 60);
@@ -208,10 +222,7 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
 
   const where = ["t.user_id = ?", "t.status = 'posted'", "t.date >= ?", "t.date <= ?"];
   const bindings: unknown[] = [user.userId, from, to];
-  if (categoryId) {
-    where.push("t.category_id = ?");
-    bindings.push(categoryId);
-  }
+  categoryFilter(categoryId, where, bindings);
   tagFilter(tagId, where, bindings);
   if (accountId) {
     where.push("(t.account_id = ? OR t.destination_account_id = ?)");
@@ -310,10 +321,7 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
       where.push("(t.account_id = ? OR t.destination_account_id = ?)");
       bindings.push(filters.accountId, filters.accountId);
     }
-    if (filters.categoryId) {
-      where.push("t.category_id = ?");
-      bindings.push(filters.categoryId);
-    }
+    categoryFilter(filters.categoryId, where, bindings);
     tagFilter(filters.tagId ?? "", where, bindings);
     if (filters.transactionType) {
       where.push("t.type = ?");
@@ -325,15 +333,14 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
       where.push("instr(lower(t.description), ?) > 0");
       bindings.push(filters.description.toLowerCase());
     }
-    return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
+    return env.DB.prepare(`SELECT t.*, c.name AS category_name, c.color AS category_color, p.id AS parent_id, p.name AS parent_name, p.color AS parent_color FROM transactions t LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id LEFT JOIN categories p ON p.id = c.parent_id AND p.user_id = c.user_id WHERE ${where.join(" AND ")} ORDER BY t.date, t.created_at, t.id`).bind(...bindings);
   };
 
-  const [currentRows, comparisonRows, firstRows, tagGroupRows, tagRows] = await env.DB.batch([
+  const [currentRows, comparisonRows, firstRows, tagRows] = await env.DB.batch([
     prepareRows(from, to),
-    comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color FROM transactions t WHERE 0"),
+    comparisonDates ? prepareRows(comparisonDates.from, comparisonDates.to) : env.DB.prepare("SELECT t.*, NULL AS category_name, NULL AS category_color, NULL AS parent_id, NULL AS parent_name, NULL AS parent_color FROM transactions t WHERE 0"),
     env.DB.prepare("SELECT MIN(date) AS date FROM transactions WHERE user_id = ? AND status = 'posted'").bind(user.userId),
-    env.DB.prepare("SELECT id, name, archived FROM tag_groups WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
-    env.DB.prepare("SELECT id, group_id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
+    env.DB.prepare("SELECT id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
   ]);
   // A comparison period before tracking began has no records, so its changes would be meaningless.
   const trackingStart = (firstRows.results[0] as { date: string | null } | undefined)?.date ?? null;
@@ -343,7 +350,6 @@ async function statisticsResponse(user: FinanceUser, request: Request) {
     comparisonRows: comparisonRows.results as StatisticsRow[],
     filters,
     currency: String(profile.currency || "EUR"),
-    tagGroups: tagGroupRows.results as StatisticsTagGroup[],
     tags: tagRows.results as StatisticsTag[],
   }) };
 }
@@ -392,8 +398,7 @@ async function snapshot(user: FinanceUser) {
   const [mainRows, v3] = await Promise.all([env.DB.batch([
     env.DB.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY archived, created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY archived, kind, name").bind(user.userId),
-    env.DB.prepare("SELECT id, name, archived FROM tag_groups WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
-    env.DB.prepare("SELECT id, group_id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
+    env.DB.prepare("SELECT id, name, color, archived FROM tags WHERE user_id = ? ORDER BY created_at, rowid").bind(user.userId),
     env.DB.prepare(`WITH recent AS (
       SELECT id FROM transactions WHERE user_id = ? AND status = 'posted' ORDER BY date DESC, created_at DESC LIMIT 4
     ), latest_snapshots AS (
@@ -461,7 +466,7 @@ async function snapshot(user: FinanceUser) {
       FROM transactions WHERE user_id = ? AND status = 'posted' AND date >= ? AND date <= ? AND (date >= ? OR date <= ?)`)
       .bind(month.start, month.start, month.previousThrough, month.previousThrough, user.userId, month.previousStart, today, month.start, month.previousThrough),
   ]), v3Snapshot(user.userId, today)]);
-  const [accounts, categories, tagGroups, tags, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
+  const [accounts, categories, tags, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
   const totals = (monthTotals.results[0] ?? {}) as Record<string, number>;
 
   return {
@@ -470,7 +475,6 @@ async function snapshot(user: FinanceUser) {
     profile,
     accounts: accounts.results,
     categories: categories.results,
-    tagGroups: tagGroups.results,
     tags: tags.results,
     transactions: transactions.results,
     recurring: recurring.results,
@@ -612,35 +616,34 @@ export async function POST(request: Request) {
         .bind(text(payload.snapshotId), user.userId).run();
       if (!Number(result.meta.changes)) return Response.json({ error: "Valuation snapshot not found." }, { status: 404 });
     } else if (action === "addCategory") {
-      await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), text(payload.kind, "expense"), text(payload.color, "#cfe9d7")).run();
+      const kind = text(payload.kind, "expense") === "income" ? "income" : "expense";
+      const parent = await parentFor(user.userId, payload.parentId, kind);
+      if ("error" in parent) return Response.json({ error: parent.error }, { status: 400 });
+      await env.DB.prepare("INSERT INTO categories (id, user_id, name, kind, color, parent_id) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, text(payload.name), kind, text(payload.color, "#cfe9d7"), parent.id).run();
     } else if (action === "updateCategory") {
-      await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), text(payload.kind, "expense") === "income" ? "income" : "expense", text(payload.color, "#cfe9d7"), payload.categoryId, user.userId).run();
+      const categoryId = text(payload.categoryId);
+      const kind = text(payload.kind, "expense") === "income" ? "income" : "expense";
+      const children = await env.DB.prepare("SELECT COUNT(*) AS total FROM categories WHERE parent_id = ? AND user_id = ?").bind(categoryId, user.userId).first<{ total: number }>();
+      const hasChildren = Number(children?.total || 0) > 0;
+      if (hasChildren && text(payload.parentId)) return Response.json({ error: "A category with subcategories can't go inside another one." }, { status: 400 });
+      if (hasChildren) {
+        const current = await env.DB.prepare("SELECT kind FROM categories WHERE id = ? AND user_id = ?").bind(categoryId, user.userId).first<{ kind: string }>();
+        if (current && current.kind !== kind) return Response.json({ error: "A category with subcategories keeps its type. Move its subcategories first." }, { status: 400 });
+      }
+      const parent = await parentFor(user.userId, payload.parentId, kind, categoryId);
+      if ("error" in parent) return Response.json({ error: parent.error }, { status: 400 });
+      await env.DB.prepare("UPDATE categories SET name = ?, kind = ?, color = ?, parent_id = ? WHERE id = ? AND user_id = ?").bind(text(payload.name), kind, text(payload.color, "#cfe9d7"), parent.id, categoryId, user.userId).run();
     } else if (action === "archiveCategory") {
+      const children = await env.DB.prepare("SELECT COUNT(*) AS total FROM categories WHERE parent_id = ? AND user_id = ? AND archived = 0").bind(payload.categoryId, user.userId).first<{ total: number }>();
+      if (Number(children?.total || 0) > 0) return Response.json({ error: "Archive or move this category's subcategories first." }, { status: 409 });
       await env.DB.prepare("UPDATE categories SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?").bind(payload.categoryId, user.userId).run();
-    } else if (action === "addTagGroup") {
-      const name = tagName(payload.name);
-      if (!name) return Response.json({ error: "Give the tag group a name." }, { status: 400 });
-      const groups = await env.DB.prepare("SELECT COUNT(*) AS total FROM tag_groups WHERE user_id = ? AND archived = 0").bind(user.userId).first<{ total: number }>();
-      if (Number(groups?.total || 0) >= 10) return Response.json({ error: "You can have up to 10 active tag groups." }, { status: 400 });
-      await env.DB.prepare("INSERT INTO tag_groups (id, user_id, name) VALUES (?, ?, ?)").bind(crypto.randomUUID(), user.userId, name).run();
-    } else if (action === "updateTagGroup") {
-      const name = tagName(payload.name);
-      if (!name) return Response.json({ error: "Give the tag group a name." }, { status: 400 });
-      const updated = await env.DB.prepare("UPDATE tag_groups SET name = ? WHERE id = ? AND user_id = ?").bind(name, text(payload.groupId), user.userId).run();
-      if (!Number(updated.meta.changes)) return Response.json({ error: "That tag group is no longer available." }, { status: 404 });
-    } else if (action === "archiveTagGroup") {
-      // Its tags stay on past activity; the group and its tags leave pickers and filters for new entries.
-      await env.DB.prepare("UPDATE tag_groups SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.groupId), user.userId).run();
     } else if (action === "addTag") {
       const name = tagName(payload.name);
       if (!name) return Response.json({ error: "Give the tag a name." }, { status: 400 });
-      const group = await env.DB.prepare("SELECT id FROM tag_groups WHERE id = ? AND user_id = ? AND archived = 0").bind(text(payload.groupId), user.userId).first<{ id: string }>();
-      if (!group) return Response.json({ error: "Choose an active tag group." }, { status: 400 });
-      const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM tags WHERE user_id = ? AND group_id = ? AND archived = 0").bind(user.userId, group.id).first<{ total: number }>();
-      if (Number(count?.total || 0) >= 20) return Response.json({ error: "A tag group can have up to 20 active tags." }, { status: 400 });
-      await env.DB.prepare("INSERT INTO tags (id, user_id, group_id, name, color) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, group.id, name, text(payload.color, "#cfe9d7")).run();
+      const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM tags WHERE user_id = ? AND archived = 0").bind(user.userId).first<{ total: number }>();
+      if (Number(count?.total || 0) >= 50) return Response.json({ error: "You can have up to 50 active tags." }, { status: 400 });
+      await env.DB.prepare("INSERT INTO tags (id, user_id, name, color) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, name, text(payload.color, "#cfe9d7")).run();
     } else if (action === "updateTag") {
-      // A tag keeps its group: moving it could give past activity two tags from one group.
       const name = tagName(payload.name);
       if (!name) return Response.json({ error: "Give the tag a name." }, { status: 400 });
       const updated = await env.DB.prepare("UPDATE tags SET name = ?, color = ? WHERE id = ? AND user_id = ?").bind(name, text(payload.color, "#cfe9d7"), text(payload.tagId), user.userId).run();

@@ -3,7 +3,7 @@ import { addCalendarInterval } from './finance-dates';
 export type MoneyAccount = { id: string; name: string; type: string; balance_cents: number; include_spendable: number; archived: number; currency: string };
 export type MoneyTransaction = { id: string; date: string; amount_cents: number; type: string; category_id: string | null; tag_ids?: unknown; account_id: string | null; destination_account_id: string | null; counts_monthly: number; committed: number; recurring_plan_id: string | null; installment_plan_id: string | null; description: string; status?: string };
 export type BudgetConfig = { name: string; target: number; period: 'monthly'|'weekly'|'fortnightly'|'payday'|'custom'; anchor: string; end: string; payday: number; allocation: 'even'|'adaptive'|'weighted'; carry: 'none'|'positive'|'signed'|'capped'; carryCap: number; weights: number[]; weekStart: number };
-export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_ids: string[]; tag_ids?: string[]; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
+export type Bucket = { id: string; name: string; kind: 'protected'|'goal'; category_ids: string[]; covers?: string[]; tag_ids?: string[]; target_cents: number; released: number; priority: number; rollover: string; rollover_cap: number; destination_id: string | null };
 export type Occurrence = { id: string; source_kind: 'recurring'|'installment'; source_id: string; scheduled_date: string; due_date: string; title: string; type: string; amount_cents: number; counts_monthly?: number; paid_cents: number; account_id: string | null; destination_account_id: string | null; category_id: string | null; tag_ids?: unknown; committed: number; auto_post: number; status: string; transaction_id: string | null };
 export type Assignment = { transaction_id: string; bucket_id: string; amount_cents: number };
 // Buckets store their matched categories as a JSON array of category IDs.
@@ -12,24 +12,30 @@ export function parseCategoryIds(value: unknown): string[] {
   if (typeof value !== 'string' || !value) return [];
   try { return parseCategoryIds(JSON.parse(value)); } catch { return []; }
 }
-type BucketMatch = { category_ids: string[]; tag_ids?: unknown };
+type BucketMatch = { category_ids: string[]; covers?: string[]; tag_ids?: unknown };
+// A category also stands for its subcategories: a Food bucket covers Food > Delivery.
+export function withSubcategories(ids: string[], categories: { id: string; parent_id?: string | null }[]) {
+  return [...new Set([...ids, ...categories.filter(c => c.parent_id && ids.includes(c.parent_id)).map(c => c.id)])];
+}
+// `covers` is the bucket's categories with their subcategories, when the caller
+// has worked it out; otherwise the bucket's own categories are used.
+const coveredIds = (bucket: BucketMatch) => bucket.covers ?? bucket.category_ids;
 // A bucket covers activity in one of its categories. When it also names tags,
-// the activity must carry one of them: "Food, tagged Daily".
+// the activity must carry one of them: "Food, tagged Essential".
 export function bucketCovers(bucket: BucketMatch, item: { category_id: string | null; tag_ids?: unknown }) {
-  if (!item.category_id || !bucket.category_ids.includes(item.category_id)) return false;
+  if (!item.category_id || !coveredIds(bucket).includes(item.category_id)) return false;
   const required = parseCategoryIds(bucket.tag_ids);
   if (!required.length) return true;
   const carried = parseCategoryIds(item.tag_ids);
   return required.some(id => carried.includes(id));
 }
-// Buckets may share a category only when both require tags from the same
-// group with none in common, so every purchase still lands in one bucket.
-export function bucketsOverlap(a: BucketMatch, b: BucketMatch, groupOf: (tagId: string) => string | undefined) {
-  if (!a.category_ids.some(id => b.category_ids.includes(id))) return false;
+// Buckets may share a category only when both require tags and none in common,
+// such as Food tagged Essential and Food tagged Discretionary. A purchase
+// carrying tags of both goes to the bucket with the higher priority.
+export function bucketsOverlap(a: BucketMatch, b: BucketMatch) {
+  if (!coveredIds(a).some(id => coveredIds(b).includes(id))) return false;
   const left = parseCategoryIds(a.tag_ids), right = parseCategoryIds(b.tag_ids);
   if (!left.length || !right.length) return true;
-  const groups = new Set([...left, ...right].map(groupOf));
-  if (groups.size !== 1 || groups.has(undefined)) return true;
   return left.some(id => right.includes(id));
 }
 export const plusDays = (date: string, days: number) => new Date(new Date(date+'T12:00:00Z').valueOf()+days*86400000).toISOString().slice(0,10);

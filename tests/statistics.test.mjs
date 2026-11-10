@@ -78,12 +78,11 @@ test('Contribution amounts and rates stay separate when money is saved then inve
 });
 
 
-test('Tag breakdown includes untagged spending and omits unused archived groups',()=>{
- const row=(id,amount,tag_ids)=>({id,type:'expense',amount_cents:amount,date:'2026-10-07',description:id,category_id:null,category_name:null,category_color:null,account_id:'a',destination_account_id:null,committed:0,recurring_plan_id:null,tag_ids});
+test('Flat tag breakdown counts multi-tag and untagged activity',()=>{
+ const row=(id,amount,tag_ids,extra={})=>({id,type:'expense',amount_cents:amount,date:'2026-10-07',description:id,category_id:'food',category_name:'Food',category_color:'#123456',account_id:'a',destination_account_id:null,committed:0,recurring_plan_id:null,tag_ids,...extra});
  const filters={from:'2026-10-01',to:'2026-10-31',comparison:'none',comparisonFrom:null,comparisonTo:null,mode:'spending',accountId:'',categoryId:'',transactionType:'',origin:'',description:''};
- const result=buildStatistics({rows:[row('one',3000,'["daily"]'),row('two',1000,'[]')],comparisonRows:[],filters,currency:'EUR',tagGroups:[{id:'purpose',name:'Purpose',archived:0},{id:'old',name:'Old',archived:1}],tags:[{id:'daily',group_id:'purpose',name:'Daily',color:'#abcdef',archived:0}]});
- assert.deepEqual(result.tagBreakdown.map(g=>g.id),['purpose']);
- const group=result.tagBreakdown[0];assert.equal(group.total,4000);
- assert.deepEqual(group.items.map(i=>[i.id,i.label,i.amount]),[['daily','Daily',3000],['none','No tag',1000]]);
- assert.equal(group.items.reduce((sum,i)=>sum+i.share,0),100);
+ const result=buildStatistics({rows:[row('one',3000,'["daily","trip"]',{category_id:'delivery',category_name:'Delivery',parent_id:'food',parent_name:'Food',parent_color:'#123456'}),row('two',1000,'[]')],comparisonRows:[],filters,currency:'EUR',tags:[{id:'daily',name:'Daily',color:'#abcdef',archived:0},{id:'trip',name:'Trip',color:'#fedcba',archived:0}]});
+ assert.deepEqual(result.tagBreakdown.map(i=>[i.id,i.amount]),[['daily',3000],['trip',3000],['none',1000]]);
+ assert.equal(result.tagBreakdown.reduce((sum,i)=>sum+i.share,0),175);
+ assert.deepEqual(result.categoryBreakdown[0].subcategories.map(i=>[i.id,i.amount,i.share,i.general]),[['delivery',3000,75,false],['food',1000,25,true]]);
 });

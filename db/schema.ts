@@ -49,6 +49,8 @@ export const categories = sqliteTable("categories", {
   userId: text("user_id").notNull(),
   name: text("name").notNull(),
   kind: text("kind").notNull(),
+  // A subcategory names its parent; categories are at most one level deep.
+  parentId: text("parent_id"),
   color: text("color").notNull().default("#cfe9d7"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   archivedAt: text("archived_at"),
@@ -58,27 +60,17 @@ export const categories = sqliteTable("categories", {
   uniqueIndex("idx_categories_user_name_kind").on(table.userId, table.name, table.kind),
 ]);
 
-// A tag group is a second way to sort activity, such as "Need" with the tags
-// "Daily" and "Leisure". A transaction carries at most one tag from each group.
-export const tagGroups = sqliteTable("tag_groups", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  name: text("name").notNull(),
-  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
-  archivedAt: text("archived_at"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [uniqueIndex("idx_tag_groups_user_name").on(table.userId, table.name)]);
-
+// Tags are optional labels people add on top of a category, such as
+// "Essential" or "Trip". A transaction can carry any number of them.
 export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
-  groupId: text("group_id").notNull(),
   name: text("name").notNull(),
   color: text("color").notNull().default("#cfe9d7"),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [uniqueIndex("idx_tags_user_group_name").on(table.userId, table.groupId, table.name)]);
+}, (table) => [uniqueIndex("idx_tags_user_name").on(table.userId, table.name)]);
 
 export const transactions = sqliteTable("transactions", {
   id: text("id").primaryKey(),

@@ -1127,5 +1127,22 @@ export const greek: Record<string,string> = {
   "That tag is no longer available.": "Αυτή η ετικέτα δεν είναι πλέον διαθέσιμη.",
   "Choose tags from one tag group for a bucket.": "Επιλέξτε ετικέτες από μία ομάδα ετικετών για έναν φάκελο.",
   "Choose the categories this bucket covers before limiting it to tags.": "Επιλέξτε τις κατηγορίες του φακέλου πριν τον περιορίσετε σε ετικέτες.",
-  "None chosen": "Καμία επιλογή"
+  "None chosen": "Καμία επιλογή",
+  "Inside": "Μέσα σε",
+  "None (main category)": "Καμία (κύρια κατηγορία)",
+  "Tags sit next to categories.": "Οι ετικέτες συμπληρώνουν τις κατηγορίες.",
+  "No tags yet. Add labels like Essential or Trip to sort spending across categories.": "Δεν υπάρχουν ετικέτες. Προσθέστε ετικέτες όπως Απαραίτητα ή Ταξίδι για να οργανώσετε τα έξοδα.",
+  "No tags": "Χωρίς ετικέτες",
+  "not in a subcategory": "χωρίς υποκατηγορία",
+  "A transaction with several tags counts under each.": "Μια συναλλαγή με πολλές ετικέτες υπολογίζεται σε καθεμία.",
+  "Purchases in any selected category use this bucket. Checking a main category covers its subcategories. Leave all unchecked to assign spending manually.": "Οι αγορές στις επιλεγμένες κατηγορίες χρησιμοποιούν αυτόν τον φάκελο. Η κύρια κατηγορία καλύπτει και τις υποκατηγορίες της. Αφήστε τις επιλογές κενές για χειροκίνητη ανάθεση.",
+  "Leave these unchecked to cover every purchase in the chosen categories. Tick a tag, such as Essential, to cover only purchases carrying it.": "Αφήστε τα κενά για όλες τις αγορές στις επιλεγμένες κατηγορίες. Επιλέξτε μια ετικέτα για να καλύπτονται μόνο οι αντίστοιχες αγορές.",
+  "A category can't be inside itself.": "Μια κατηγορία δεν μπορεί να περιέχει τον εαυτό της.",
+  "A subcategory must be the same type as its main category.": "Η υποκατηγορία πρέπει να έχει τον ίδιο τύπο με την κύρια κατηγορία.",
+  "A category with subcategories can't go inside another one.": "Μια κατηγορία με υποκατηγορίες δεν μπορεί να τοποθετηθεί μέσα σε άλλη.",
+  "A category with subcategories keeps its type. Move its subcategories first.": "Μια κατηγορία με υποκατηγορίες διατηρεί τον τύπο της. Μετακινήστε πρώτα τις υποκατηγορίες.",
+  "Archive or move this category's subcategories first.": "Αρχειοθετήστε ή μετακινήστε πρώτα τις υποκατηγορίες.",
+  "Choose an active main category to put this inside.": "Επιλέξτε μια ενεργή κύρια κατηγορία.",
+  "You can have up to 50 active tags.": "Μπορείτε να έχετε έως 50 ενεργές ετικέτες.",
+  "Show only": "Μόνο"
 };

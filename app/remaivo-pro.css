@@ -566,9 +566,9 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .statistics-page .stat-panel-heading { padding:14px 18px; margin:0; border-bottom:1px solid var(--theme-line); align-items:center; flex-wrap:wrap; gap:10px; }
 .v3-app .statistics-page .stat-panel-heading h2 { margin:2px 0 0; font-size:14px; font-weight:600; letter-spacing:-.01em; }
 .v3-app .statistics-page .ranked-bars { padding:8px 20px 16px; gap:0; }
-.v3-app .statistics-page .ranked-bars > button { padding:10px 0; gap:6px; color:var(--theme-text); }
+.v3-app .statistics-page .ranked-bars > button, .v3-app .statistics-page .ranked-bars > div > button { padding:10px 0; gap:6px; color:var(--theme-text); }
 /* Disabled composition rows are read-only data, not pending actions. */
-.v3-app .statistics-page .ranked-bars > button:disabled { opacity:1; cursor:default; }
+.v3-app .statistics-page .ranked-bars > button:disabled, .v3-app .statistics-page .ranked-bars > div > button:disabled { opacity:1; cursor:default; }
 .v3-app .statistics-page .ranked-label b, .v3-app .statistics-page .ranked-label em { font-size:13.5px; font-weight:500; overflow-wrap:anywhere; }
 .v3-app .statistics-page .ranked-label em { font-weight:600; }
 .v3-app .statistics-page .ranked-track { height:6px; }
@@ -783,10 +783,6 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .category-cloud > span { background:var(--paper); border:1px solid var(--theme-border); border-radius:999px; padding:6px 10px 6px 6px; color:var(--theme-text); font-size:.8125rem; }
 .v3-app .category-cloud i { background:var(--category-color); color:#253345; font-size:.75rem; width:24px; height:24px; }
 .v3-app .category-cloud small { color:var(--theme-muted); font-size:.75rem; }
-.v3-app .tag-group + .tag-group { margin-top:14px; padding-top:14px; border-top:1px solid var(--theme-border); }
-.v3-app .tag-group-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.v3-app .tag-group-head strong { color:var(--theme-text); font-size:.875rem; cursor:pointer; }
-.v3-app .tag-group-head .text-link { padding:4px 0; }
 .v3-app .tag-picker { border:1px solid var(--theme-border); border-radius:10px; padding:0 12px; background:var(--paper); }
 .v3-app .tag-picker summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; cursor:pointer; list-style:none; color:var(--theme-text); font-size:.875rem; font-weight:600; }
 .v3-app .tag-picker summary::-webkit-details-marker { display:none; }
@@ -795,8 +791,6 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .tag-picker summary small { flex:1; min-width:0; text-align:right; color:var(--theme-muted); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .v3-app .tag-picker[open] summary { border-bottom:1px solid var(--theme-border); }
 .v3-app .tag-picker-group { display:grid; gap:6px; padding:10px 0; }
-.v3-app .tag-picker-group + .tag-picker-group { border-top:1px dashed var(--theme-border); }
-.v3-app .tag-picker-group > span { color:var(--theme-muted); font-size:.75rem; }
 .v3-app .tag-picker-group > div { display:flex; flex-wrap:wrap; gap:6px; }
 /* Every pill wears its tag's colour; the picked one is solid with a ring, the others faded. */
 .v3-app .tag-picker-group button { min-height:32px; padding:5px 12px; border:1px solid var(--tag-color); border-radius:999px; background:var(--tag-color); color:#253345; font-size:.8125rem; cursor:pointer; opacity:.55; }
@@ -982,3 +976,12 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
 .v3-app .v3-settle-close span { color: var(--theme-text); font-weight: 600; }
 .v3-app .v3-settle-close small { color: var(--theme-muted); font-weight: 400; }
 .v3-app .v3-plan-summary .v3-used-split { margin-top: 2px; color: var(--theme-muted); font-size: .75rem; }
+
+.v3-app .subcategory-chip { margin-left: 18px; }
+.v3-app .subcategory-choice { margin-left: 18px; }
+.v3-app .subcategory-stats > button { width:100%; border:0; background:transparent; display:grid; gap:4px; text-align:left; cursor:pointer; color:var(--theme-text); }
+.v3-app .subcategory-stats { display:grid; gap:6px; margin:4px 0 10px 22px; padding-left:12px; border-left:2px solid var(--theme-border); }
+.v3-app .statistics-page .subcategory-stats > button.subcategory-stat { padding:6px 0; font-size:.875em; }
+.v3-app .statistics-page .subcategory-stats > button.subcategory-stat-all { padding:2px 0; }
+.v3-app .category-stat-toggle { margin-left:6px; color:var(--theme-muted); font-weight:400; }
+.v3-app .subcategory-stat-all { justify-self:start; padding:2px 0; border:0; background:none; color:var(--theme-accent); font-size:.8125rem; cursor:pointer; }
