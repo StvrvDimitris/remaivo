@@ -1150,5 +1150,6 @@ export const greek: Record<string,string> = {
   "subcategories": "υποκατηγορίες",
   "Add a subcategory to": "Προσθήκη υποκατηγορίας στην κατηγορία",
   "＋ Sub": "＋ Υποκατηγορία",
-  "Double-click or hold a category to edit or archive it. Use ＋ Sub to add a subcategory inside one.": "Κάντε διπλό κλικ ή κρατήστε πατημένη μια κατηγορία για επεξεργασία ή αρχειοθέτηση. Με το ＋ Υποκατηγορία προσθέτετε υποκατηγορία μέσα της."
+  "Double-click or hold a category to edit or archive it. Use ＋ Sub to add a subcategory inside one.": "Κάντε διπλό κλικ ή κρατήστε πατημένη μια κατηγορία για επεξεργασία ή αρχειοθέτηση. Με το ＋ Υποκατηγορία προσθέτετε υποκατηγορία μέσα της.",
+  "Show other colours": "Άλλα χρώματα"
 };

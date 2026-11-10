@@ -69,12 +69,29 @@ export function FormField({ label, children }: { label: string; children: ReactN
   return <label className={`form-field${money ? " money-field" : ""}`}><span>{tr(label)}</span>{money ? <span className="money-input"><i aria-hidden="true">{symbol}</i>{children}</span> : children}</label>;
 }
 
-export function ColorPicker({ name = "color", defaultValue }: { name?: string; defaultValue: string }) {
+// A mid-light colour: readable behind dark text and on dark themes.
+export function randomColour(hue = Math.random() * 360) {
+  const saturation = 0.6 + Math.random() * 0.15, lightness = 0.58 + Math.random() * 0.14;
+  const channel = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    const value = lightness - saturation * Math.min(lightness, 1 - lightness) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(value * 255).toString(16).padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+// Eight suggestions spread around the colour wheel from a random start, so
+// they differ each time but never bunch up.
+const suggestions = () => { const start = Math.random() * 360; return Array.from({ length: 8 }, (_, index) => randomColour((start + index * 45 + Math.random() * 15) % 360)); };
+
+// The suggested swatches are new every time the picker opens, and ↻ rolls
+// another set. A new item starts on the first suggestion; an existing one keeps
+// its colour. The colour input still picks any colour.
+export function ColorPicker({ name = "color", defaultValue }: { name?: string; defaultValue?: string }) {
  const { t: tr } = useTranslation();
 
-  const [value, setValue] = useState(defaultValue);
-  const palette = ["#12a16b", "#365bd6", "#228e9d", "#8563c7", "#d68b64", "#df5e6a", "#1f5b4e", "#cfe9d7"];
-  return <span className="color-picker"><input name={name} type="hidden" value={value}/>{palette.map(color => <button type="button" key={color} style={{ background: color }} aria-label={`${tr("Use colour")} ${color}`} aria-pressed={value === color} onClick={() => setValue(color)}>{value === color ? "✓" : ""}</button>)}<input type="color" value={value} aria-label={tr("Custom colour")} onChange={event => setValue(event.target.value)}/></span>;
+  const [palette, setPalette] = useState(suggestions);
+  const [value, setValue] = useState(() => defaultValue ?? palette[0]);
+  return <span className="color-picker"><input name={name} type="hidden" value={value}/>{palette.map(color => <button type="button" key={color} style={{ background: color }} aria-label={`${tr("Use colour")} ${color}`} aria-pressed={value === color} onClick={() => setValue(color)}>{value === color ? "✓" : ""}</button>)}<input type="color" value={value} aria-label={tr("Custom colour")} onChange={event => setValue(event.target.value)}/><button type="button" className="color-shuffle" aria-label={tr("Show other colours")} title={tr("Show other colours")} onClick={() => setPalette(suggestions())}>↻</button></span>;
 }
 
 export function ChoiceField({ label, name, defaultValue, options }: { label: string; name: string; defaultValue: string | number; options: { value: string | number; label: string }[] }) {
