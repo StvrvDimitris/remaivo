@@ -783,6 +783,11 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .category-cloud > span { background:var(--paper); border:1px solid var(--theme-border); border-radius:999px; padding:6px 10px 6px 6px; color:var(--theme-text); font-size:.8125rem; }
 .v3-app .category-cloud i { background:var(--category-color); color:#253345; font-size:.75rem; width:24px; height:24px; }
 .v3-app .category-cloud small { color:var(--theme-muted); font-size:.75rem; }
+.v3-app .tag-group + .tag-group { margin-top:14px; padding-top:14px; border-top:1px solid var(--theme-border); }
+.v3-app .tag-group-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.v3-app .tag-group-head strong { color:var(--theme-text); font-size:.875rem; cursor:pointer; }
+.v3-app .tag-group-head .text-link { padding:4px 0; }
+.v3-app .tag-fields { margin-top:0; }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud > span { color:var(--theme-text); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud small { color:var(--theme-muted); }
 .v3-app .v3-data-export { position:relative; padding-right:250px; }

@@ -126,3 +126,16 @@ test('The archive lists the most recently archived items first, then undated one
   sqlite.prepare("INSERT INTO categories(id,user_id,name,kind,archived,archived_at) VALUES('middle',?,'middle','expense',1,'2026-09-20 08:00:00')").run(user);
   assert.deepEqual((await listArchive(user, new URLSearchParams())).items.map(item => item.id), ['new', 'middle', 'old', 'a-undated', 'b-undated']);
 });
+
+
+test('Restore a tag only after restoring its archived group', async () => {
+ const owner='tag-archive-owner';
+ sqlite.prepare("INSERT INTO tag_groups(id,user_id,name,archived) VALUES('archive-tag-group',?,'Purpose',1)").run(owner);
+ sqlite.prepare("INSERT INTO tags(id,user_id,group_id,name,archived) VALUES('archive-tag',?,'archive-tag-group','Daily',1)").run(owner);
+ const listed=await listArchive(owner,new URLSearchParams({kind:'tag'}));
+ assert.deepEqual(listed.items.map(item=>item.id),['archive-tag']);
+ await assert.rejects(restoreArchive(owner,today,{kind:'tag',id:'archive-tag'}),/Restore the tag group .Purpose. first/);
+ await restoreArchive(owner,today,{kind:'tagGroup',id:'archive-tag-group'});
+ await restoreArchive(owner,today,{kind:'tag',id:'archive-tag'});
+ assert.equal(row('tag_groups','archive-tag-group').archived,0);assert.equal(row('tags','archive-tag').archived,0);
+});

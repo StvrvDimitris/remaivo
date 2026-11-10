@@ -58,12 +58,35 @@ export const categories = sqliteTable("categories", {
   uniqueIndex("idx_categories_user_name_kind").on(table.userId, table.name, table.kind),
 ]);
 
+// A tag group is a second way to sort activity, such as "Need" with the tags
+// "Daily" and "Leisure". A transaction carries at most one tag from each group.
+export const tagGroups = sqliteTable("tag_groups", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  name: text("name").notNull(),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: text("archived_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_tag_groups_user_name").on(table.userId, table.name)]);
+
+export const tags = sqliteTable("tags", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  groupId: text("group_id").notNull(),
+  name: text("name").notNull(),
+  color: text("color").notNull().default("#cfe9d7"),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: text("archived_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_tags_user_group_name").on(table.userId, table.groupId, table.name)]);
+
 export const transactions = sqliteTable("transactions", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
   accountId: text("account_id"),
   destinationAccountId: text("destination_account_id"),
   categoryId: text("category_id"),
+  tagIds: text("tag_ids").notNull().default("[]"),
   type: text("type").notNull(),
   description: text("description").notNull(),
   amountCents: integer("amount_cents").notNull(),
@@ -94,6 +117,7 @@ export const recurringPlans = sqliteTable("recurring_plans", {
   accountId: text("account_id"),
   destinationAccountId: text("destination_account_id"),
   categoryId: text("category_id"),
+  tagIds: text("tag_ids").notNull().default("[]"),
   frequency: text("frequency").notNull(),
   intervalCount: integer("interval_count").notNull().default(1),
   nextDate: text("next_date").notNull(),
@@ -112,6 +136,7 @@ export const installmentPlans = sqliteTable("installment_plans", {
   title: text("title").notNull(),
   provider: text("provider"),
   categoryId: text("category_id"),
+  tagIds: text("tag_ids").notNull().default("[]"),
   totalCents: integer("total_cents").notNull(),
   paidCents: integer("paid_cents").notNull().default(0),
   installmentCount: integer("installment_count").notNull(),

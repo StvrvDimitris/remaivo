@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Tags**
+- Sort activity a second way besides categories. In **Settings → Tags**, create your own tag groups, such as *Need* with *Daily* and *Leisure*. Remaivo comes with none.
+- Each transaction can carry one tag from each group. Pick them when you add or correct a transaction, a recurring plan or a pay-later plan; scheduled payments pass their plan's tags on to what they post.
+- A bucket can cover only tagged purchases, such as *Food, tagged Daily*, so one category can feed two buckets without splitting it into duplicates.
+- Filter Activity and Insights by a tag, or by *No tag* in a group, and see how spending splits by tag in Insights.
+- Tags and tag groups can be archived and restored from the Archive manager, and backups include them. Older backups still restore.
+
 ## 1.3.0 (2026-11-04)
 
 **Backups you can restore**

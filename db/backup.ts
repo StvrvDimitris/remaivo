@@ -5,12 +5,14 @@ import { env } from "cloudflare:workers";
 const TABLES = [
   "accounts", "categories", "goals", "goal_entries", "installment_payments",
   "installment_plans", "investment_valuation_snapshots", "profiles",
-  "recurring_plans", "spare_events", "transactions", "v3_assignments",
+  "recurring_plans", "spare_events", "tag_groups", "tags", "transactions", "v3_assignments",
   "v3_bucket_periods", "v3_bucket_templates", "v3_events",
   "v3_occurrences", "v3_payment_links", "v3_periods", "v3_versions",
 ] as const;
+// Tables added after a backup version; older files simply have none of them.
+const ADDED_IN: Partial<Record<(typeof TABLES)[number], number>> = { tag_groups: 5, tags: 5 };
 
-const BACKUP_VERSION = 4;
+const BACKUP_VERSION = 5;
 const OLDEST_VERSION = 3;
 const MAX_PROFILES = 5;
 const OWNER_SUB = "password:owner";
@@ -102,8 +104,10 @@ async function planRestore(user: string, file: unknown): Promise<RestorePlan> {
   const kept = people.filter(person => !profiles.some(profile => profile.to === person.user_id));
   if (kept.length + profiles.length > MAX_PROFILES) throw new BackupError("Restoring this backup would go over the limit of five profiles. Remove a profile first.");
 
-  const source = file.tables;
-  if (Object.keys(source).some(table => !(TABLES as readonly string[]).includes(table)) || TABLES.some(table => !Array.isArray(source[table]))) throw new BackupError(NOT_A_BACKUP);
+  const version = file.version;
+  const given = file.tables as Record<string, unknown>;
+  const source = Object.fromEntries(TABLES.map(table => [table, given[table] === undefined && version < (ADDED_IN[table] ?? 0) ? [] : given[table]]));
+  if (Object.keys(given).some(table => !(TABLES as readonly string[]).includes(table)) || TABLES.some(table => !Array.isArray(source[table]))) throw new BackupError(NOT_A_BACKUP);
   const info = await env.DB.batch<{ name: string }>(TABLES.map(table => env.DB.prepare(`SELECT name FROM pragma_table_info('${table}')`)));
   const tables = {} as Record<Table, BackupRow[]>;
   const columns = {} as Record<Table, string[]>;

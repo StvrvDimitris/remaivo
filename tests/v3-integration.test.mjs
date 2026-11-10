@@ -328,3 +328,48 @@ test('Savings and investment contributions are reported apart from other commitm
  assert.deepEqual([r.commitmentSpent,r.contributionSpent,r.upcoming,r.contributionUpcoming,r.totalSpent,r.totalContributed],[7000,3000,32300,2300,7500,3000]);
  assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);
 });
+
+
+test('Tag-limited buckets cover matching spending and plans and overlap only when compatible',()=>{
+ const daily={...bucket,id:'daily',tag_ids:['t-daily']}, leisure={...bucket,id:'leisure',tag_ids:'["t-leisure"]'};
+ const r=engine.buildBudget({...base,buckets:[daily,leisure],transactions:[tx('daily-shop',3000,{category_id:'groceries',tag_ids:'["t-daily"]'}),tx('leisure-shop',4000,{category_id:'groceries',tag_ids:['t-leisure']}),tx('untagged-shop',2000,{category_id:'groceries'})],occurrences:[occurrence('daily-plan',5000,{category_id:'groceries',tag_ids:['t-daily']})]});
+ assert.equal(r.buckets.find(b=>b.id==='daily').spent,3000);assert.equal(r.buckets.find(b=>b.id==='daily').planned,5000);
+ assert.equal(r.buckets.find(b=>b.id==='leisure').spent,4000);assert.equal(r.everydaySpent,2000);
+ assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);
+ const groupOf=id=>({'t-daily':'g1','t-leisure':'g1','t-other':'g2'})[id];
+ const b=tags=>({category_ids:['food'],tag_ids:tags});
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-leisure']),groupOf),false);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-daily']),groupOf),true);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b([]),groupOf),true);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-other']),groupOf),true);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),{category_ids:['other'],tag_ids:['t-daily']},groupOf),false);
+});
+
+test('Bucket tag validation permits disjoint tags in one group',async()=>{
+ const owner='tag-bucket-owner';
+ sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('tag-version',owner,'1900-01-01',JSON.stringify(config));
+ sqlite.prepare("INSERT INTO categories(id,user_id,name,kind) VALUES('tag-food',?,'Food','expense')").run(owner);
+ const group=sqlite.prepare('INSERT INTO tag_groups(id,user_id,name) VALUES(?,?,?)');group.run('tag-g1',owner,'Purpose');group.run('tag-g2',owner,'Person');
+ const tag=sqlite.prepare('INSERT INTO tags(id,user_id,group_id,name,archived) VALUES(?,?,?,?,?)');tag.run('tag-daily',owner,'tag-g1','Daily',0);tag.run('tag-leisure',owner,'tag-g1','Leisure',0);tag.run('tag-person',owner,'tag-g2','Person',0);tag.run('tag-old',owner,'tag-g1','Old',1);
+ const add=(name,categoryIds,tagIds)=>v3.v3Action(owner,base.today,'v3Bucket',{name,target:'100',kind:'protected',categoryIds,tagIds});
+ await add('Daily',['tag-food'],['tag-daily']);await add('Leisure',['tag-food'],['tag-leisure']);
+ await assert.rejects(add('All',['tag-food'],[]),/Food purchases with these tags already belong to the Daily bucket/);
+ await assert.rejects(add('Mixed',['tag-food'],['tag-daily','tag-person']),/Choose tags from one tag group for a bucket/);
+ await assert.rejects(add('No category',[],['tag-daily']),/Choose the categories this bucket covers before limiting it to tags/);
+ await assert.rejects(add('Archived',['tag-food'],['tag-old']),/Choose active tags/);
+ const snapshot=await v3.v3Snapshot(owner,base.today);
+ assert.deepEqual(snapshot.result.buckets.map(b=>[b.name,b.tag_ids]).sort(),[['Daily',['tag-daily']],['Leisure',['tag-leisure']]]);
+});
+
+test('Recurring occurrence tags follow the plan and its settled transaction',async()=>{
+ const owner='tag-plan-owner', oid='recurring:tag-plan:2026-09-17';
+ sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('tag-cash',?,'Cash','cash',10000)").run(owner);
+ sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date,auto_post,tag_ids) VALUES('tag-plan',?,'Plan','expense',1000,'tag-cash','monthly','2026-09-17',0,?)").run(owner,JSON.stringify(['z','a']));
+ await v3.generateOccurrences(owner,base.today);
+ const tags=()=>sqlite.prepare('SELECT tag_ids FROM v3_occurrences WHERE id=?').get(oid).tag_ids;
+ assert.equal(tags(),JSON.stringify(['a','z']));
+ sqlite.prepare("UPDATE recurring_plans SET tag_ids=? WHERE id='tag-plan'").run(JSON.stringify(['new']));
+ await v3.generateOccurrences(owner,base.today);assert.equal(tags(),JSON.stringify(['new']));
+ await v3.settleOccurrence(owner,oid,base.today);
+ assert.equal(sqlite.prepare("SELECT tag_ids FROM transactions WHERE user_id=? AND recurring_plan_id='tag-plan'").get(owner).tag_ids,JSON.stringify(['new']));
+});
