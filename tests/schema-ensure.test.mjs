@@ -48,7 +48,7 @@ test('migrations leave only the current finance tables and columns', () => {
   assert.deepEqual(tables, [
     'accounts', 'categories', 'goal_entries', 'goals', 'installment_payments',
     'installment_plans', 'investment_valuation_snapshots', 'profiles',
-    'recurring_plans', 'spare_events', 'tag_groups', 'tags', 'transactions', 'v3_assignments',
+    'recurring_plans', 'spare_events', 'tags', 'transactions', 'v3_assignments',
     'v3_bucket_periods', 'v3_bucket_templates', 'v3_events',
     'v3_occurrences', 'v3_payment_links', 'v3_periods', 'v3_versions',
   ]);
@@ -97,10 +97,11 @@ test('Cloudflare and drizzle migrations both give records a tag list and create 
       const column = db.prepare(`PRAGMA table_info(${table})`).all().find(row => row.name === 'tag_ids');
       assert.ok(column && column.notnull === 1 && column.dflt_value === "'[]'", `${directory}: ${table}`);
     }
-    for (const table of ['tag_groups', 'tags']) assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${directory}: ${table}`);
+    for (const table of ['tags']) assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${directory}: ${table}`);
     const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name).sort();
-    assert.deepEqual(columns('tags'), ['archived', 'archived_at', 'color', 'created_at', 'group_id', 'id', 'name', 'user_id'], directory);
-    assert.deepEqual(columns('tag_groups'), ['archived', 'archived_at', 'created_at', 'id', 'name', 'user_id'], directory);
+    assert.deepEqual(columns('tags'), ['archived', 'archived_at', 'color', 'created_at', 'id', 'name', 'user_id'], directory);
+    assert.ok(columns('categories').includes('parent_id'));
+    assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='tag_groups'").get().n, 0);
   }
 });
 
@@ -116,4 +117,15 @@ test('a missing current table fails closed without runtime schema writes', async
   writes = 0;
   await assert.rejects((await import(`${moduleUrl}?missing`)).ensureFinanceSchema(), /temporarily unavailable/);
   assert.equal(writes, 0);
+});
+
+test('Both flat-tag migrations preserve duplicate names uniquely', () => {
+ for (const [dir, migration] of [['drizzle','0029_subcategories_flat_tags.sql'],['cloudflare/migrations','0014_subcategories_flat_tags.sql']]) {
+  const db=new DatabaseSync(':memory:');
+  for (const file of fs.readdirSync(dir).filter(n=>n.endsWith('.sql') && n < migration).sort()) db.exec(fs.readFileSync(path.join(dir,file),'utf8'));
+  db.exec("INSERT INTO tag_groups(id,user_id,name) VALUES('g1','u','One'),('g2','u','Two'); INSERT INTO tags(id,user_id,group_id,name) VALUES('t1','u','g1','Trip'),('t2','u','g2','Trip')");
+  db.exec(fs.readFileSync(path.join(dir,migration),'utf8'));
+  const names=db.prepare('SELECT name FROM tags').all().map(row=>row.name);
+  assert.equal(new Set(names).size,2);
+ }
 });

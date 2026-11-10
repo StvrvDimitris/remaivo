@@ -128,14 +128,19 @@ test('The archive lists the most recently archived items first, then undated one
 });
 
 
-test('Restore a tag only after restoring its archived group', async () => {
+test('Restore an archived tag', async () => {
  const owner='tag-archive-owner';
- sqlite.prepare("INSERT INTO tag_groups(id,user_id,name,archived) VALUES('archive-tag-group',?,'Purpose',1)").run(owner);
- sqlite.prepare("INSERT INTO tags(id,user_id,group_id,name,archived) VALUES('archive-tag',?,'archive-tag-group','Daily',1)").run(owner);
- const listed=await listArchive(owner,new URLSearchParams({kind:'tag'}));
- assert.deepEqual(listed.items.map(item=>item.id),['archive-tag']);
- await assert.rejects(restoreArchive(owner,today,{kind:'tag',id:'archive-tag'}),/Restore the tag group .Purpose. first/);
- await restoreArchive(owner,today,{kind:'tagGroup',id:'archive-tag-group'});
+ sqlite.prepare("INSERT INTO tags(id,user_id,name,archived) VALUES('archive-tag',?,'Daily',1)").run(owner);
+ assert.deepEqual((await listArchive(owner,new URLSearchParams({kind:'tag'}))).items.map(item=>item.id),['archive-tag']);
  await restoreArchive(owner,today,{kind:'tag',id:'archive-tag'});
- assert.equal(row('tag_groups','archive-tag-group').archived,0);assert.equal(row('tags','archive-tag').archived,0);
+ assert.equal(row('tags','archive-tag').archived,0);
+});
+test('Restore a subcategory only after its parent', async () => {
+ const owner='category-archive-owner';
+ sqlite.prepare("INSERT INTO categories(id,user_id,name,kind,archived) VALUES('archive-parent',?,'Parent','expense',1)").run(owner);
+ sqlite.prepare("INSERT INTO categories(id,user_id,name,kind,parent_id,archived) VALUES('archive-child',?,'Child','expense','archive-parent',1)").run(owner);
+ await assert.rejects(restoreArchive(owner,today,{kind:'category',id:'archive-child'}),/parent/i);
+ await restoreArchive(owner,today,{kind:'category',id:'archive-parent'});
+ await restoreArchive(owner,today,{kind:'category',id:'archive-child'});
+ assert.equal(row('categories','archive-child').archived,0);
 });

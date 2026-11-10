@@ -618,7 +618,7 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-source-row { background: transparent; }
 .v3-equation > div, .v3-equation .total, .v3-source-row, .v3-mini-progress,
 .v3-app :is(.statistics-controls, .allocation-strip > div, .description-list > div, .trend-chart > div, .goal-entry-history, .goal-entry-history article, .valuation-history, .valuation-history article) { border-color: var(--line); }
-.v3-equation .total, .v3-app .ranked-bars > button { color: var(--ink); }
+.v3-equation .total, .v3-app .ranked-bars > button, .v3-app .ranked-bars > div > button { color: var(--ink); }
 .v3-mini-progress, .v3-app :is(.ranked-track, .weekday-bars > div > i) { background: var(--theme-soft); }
 .v3-app :is(.allocation-strip, .week-band-grid > div, .concentration-grid > div, .insight-panel li > span, .correction-note, .locked-summary, .budget-unavailable) { background: var(--theme-soft); }
 .v3-app :is(.goal-period, .goal-kind, .goal-grid article > small, .goal-grid article > p, .goal-entry-history small, .valuation-history small, .description-list small, .ranked-bars small, .weekday-bars small, .week-band-grid span, .week-band-grid small, .concentration-grid small, .insight-panel li p, .empty-mini, .empty-state, .stat-loading, .budget-form-note small, .correction-note small, .locked-summary small) { color: var(--muted); }

@@ -336,25 +336,26 @@ test('Tag-limited buckets cover matching spending and plans and overlap only whe
  assert.equal(r.buckets.find(b=>b.id==='daily').spent,3000);assert.equal(r.buckets.find(b=>b.id==='daily').planned,5000);
  assert.equal(r.buckets.find(b=>b.id==='leisure').spent,4000);assert.equal(r.everydaySpent,2000);
  assert.equal(r.totalSpent+r.protectedRemaining+r.available,r.funding);
- const groupOf=id=>({'t-daily':'g1','t-leisure':'g1','t-other':'g2'})[id];
  const b=tags=>({category_ids:['food'],tag_ids:tags});
- assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-leisure']),groupOf),false);
- assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-daily']),groupOf),true);
- assert.equal(engine.bucketsOverlap(b(['t-daily']),b([]),groupOf),true);
- assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-other']),groupOf),true);
- assert.equal(engine.bucketsOverlap(b(['t-daily']),{category_ids:['other'],tag_ids:['t-daily']},groupOf),false);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-leisure'])),false);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-daily'])),true);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b([])),true);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),b(['t-other'])),false);
+ assert.equal(engine.bucketsOverlap(b(['t-daily']),{category_ids:['other'],tag_ids:['t-daily']}),false);
+ assert.equal(engine.bucketsOverlap({...b([]),covers:['food','child']},{category_ids:['child'],tag_ids:[]}),true);
+ const childResult=engine.buildBudget({...base,buckets:[{...bucket,covers:['groceries','child']}],transactions:[tx('child',500,{category_id:'child'})],occurrences:[]});
+ assert.equal(childResult.buckets[0].spent,500);
 });
 
-test('Bucket tag validation permits disjoint tags in one group',async()=>{
+test('Bucket tag validation permits disjoint tags',async()=>{
  const owner='tag-bucket-owner';
  sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('tag-version',owner,'1900-01-01',JSON.stringify(config));
  sqlite.prepare("INSERT INTO categories(id,user_id,name,kind) VALUES('tag-food',?,'Food','expense')").run(owner);
- const group=sqlite.prepare('INSERT INTO tag_groups(id,user_id,name) VALUES(?,?,?)');group.run('tag-g1',owner,'Purpose');group.run('tag-g2',owner,'Person');
- const tag=sqlite.prepare('INSERT INTO tags(id,user_id,group_id,name,archived) VALUES(?,?,?,?,?)');tag.run('tag-daily',owner,'tag-g1','Daily',0);tag.run('tag-leisure',owner,'tag-g1','Leisure',0);tag.run('tag-person',owner,'tag-g2','Person',0);tag.run('tag-old',owner,'tag-g1','Old',1);
+ const tag=sqlite.prepare('INSERT INTO tags(id,user_id,name,archived) VALUES(?,?,?,?)');tag.run('tag-daily',owner,'Daily',0);tag.run('tag-leisure',owner,'Leisure',0);tag.run('tag-person',owner,'Person',0);tag.run('tag-old',owner,'Old',1);
  const add=(name,categoryIds,tagIds)=>v3.v3Action(owner,base.today,'v3Bucket',{name,target:'100',kind:'protected',categoryIds,tagIds});
  await add('Daily',['tag-food'],['tag-daily']);await add('Leisure',['tag-food'],['tag-leisure']);
  await assert.rejects(add('All',['tag-food'],[]),/Food purchases with these tags already belong to the Daily bucket/);
- await assert.rejects(add('Mixed',['tag-food'],['tag-daily','tag-person']),/Choose tags from one tag group for a bucket/);
+ await assert.rejects(add('Mixed',['tag-food'],['tag-daily','tag-person']),/already belong/);
  await assert.rejects(add('No category',[],['tag-daily']),/Choose the categories this bucket covers before limiting it to tags/);
  await assert.rejects(add('Archived',['tag-food'],['tag-old']),/Choose active tags/);
  const snapshot=await v3.v3Snapshot(owner,base.today);
@@ -372,4 +373,16 @@ test('Recurring occurrence tags follow the plan and its settled transaction',asy
  await v3.generateOccurrences(owner,base.today);assert.equal(tags(),JSON.stringify(['new']));
  await v3.settleOccurrence(owner,oid,base.today);
  assert.equal(sqlite.prepare("SELECT tag_ids FROM transactions WHERE user_id=? AND recurring_plan_id='tag-plan'").get(owner).tag_ids,JSON.stringify(['new']));
+});
+
+test('A parent bucket covers child spending in the database snapshot',async()=>{
+ const owner='child-bucket-owner';
+ sqlite.prepare('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)').run('child-version',owner,'1900-01-01',JSON.stringify(config));
+ sqlite.prepare("INSERT INTO categories(id,user_id,name,kind) VALUES('parent-bucket',?,'Parent','expense')").run(owner);
+ sqlite.prepare("INSERT INTO categories(id,user_id,name,kind,parent_id) VALUES('child-bucket',?,'Child','expense','parent-bucket')").run(owner);
+ sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('child-cash',?,'Cash','cash',100000)").run(owner);
+ await v3.v3Action(owner,base.today,'v3Bucket',{name:'Parent',target:'100',kind:'protected',categoryIds:['parent-bucket'],tagIds:[]});
+ sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,category_id,type,description,amount_cents,date) VALUES('child-tx',?,'child-cash','child-bucket','expense','Purchase',500,?)").run(owner,base.today);
+ const snapshot=await v3.v3Snapshot(owner,base.today);
+ assert.equal(snapshot.result.buckets.find(b=>b.name==='Parent').spent,500);
 });
