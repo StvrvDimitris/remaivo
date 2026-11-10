@@ -1126,5 +1126,6 @@ export const greek: Record<string,string> = {
   "A tag group can have up to 20 active tags.": "Μια ομάδα ετικετών μπορεί να έχει έως 20 ενεργές ετικέτες.",
   "That tag is no longer available.": "Αυτή η ετικέτα δεν είναι πλέον διαθέσιμη.",
   "Choose tags from one tag group for a bucket.": "Επιλέξτε ετικέτες από μία ομάδα ετικετών για έναν φάκελο.",
-  "Choose the categories this bucket covers before limiting it to tags.": "Επιλέξτε τις κατηγορίες του φακέλου πριν τον περιορίσετε σε ετικέτες."
+  "Choose the categories this bucket covers before limiting it to tags.": "Επιλέξτε τις κατηγορίες του φακέλου πριν τον περιορίσετε σε ετικέτες.",
+  "None chosen": "Καμία επιλογή"
 };

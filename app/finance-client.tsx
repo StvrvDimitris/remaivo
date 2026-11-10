@@ -158,14 +158,18 @@ export type Context = { accounts: Account[]; categories: Category[]; transaction
 // " · Daily · Work" for a record's tags, or nothing.
 const tagLine = (tagIds: unknown, tagById: Record<string, Tag> = {}) => tagNames(tagIds, tagById).map(name => ` · ${name}`).join("");
 
-// One choice per tag group, named `tag_<groupId>` for tagIdsFromForm. Archived
-// tags and groups appear only when the record already carries them.
+// Tags fold into one line that shows the current picks. Each group is a row of
+// chips: tap one to choose it, tap it again to clear. A hidden `tag_<groupId>`
+// input per group feeds tagIdsFromForm. Archived tags and groups appear only
+// when the record already carries them.
 export function TagFields({ context, current }: { context: Pick<Context, "tagGroups" | "tags">; current?: unknown }) {
   const { t: tr } = useTranslation();
   const selected = parseTagIds(current);
   const shown = context.tagGroups.map(group => ({ group, options: context.tags.filter(tag => tag.group_id === group.id && ((tag.archived !== 1 && group.archived !== 1) || selected.includes(tag.id))) })).filter(entry => entry.options.length);
+  const [picked, setPicked] = useState<Record<string, string>>(() => Object.fromEntries(shown.map(({ group, options }) => [group.id, options.find(tag => selected.includes(tag.id))?.id ?? ""])));
   if (!shown.length) return null;
-  return <div className="form-grid tag-fields">{shown.map(({ group, options }) => <Field key={group.id} label={group.name}><select name={`tag_${group.id}`} defaultValue={options.find(tag => selected.includes(tag.id))?.id ?? ""}><option value="">{tr("No tag")}</option>{options.map(tag => <option key={tag.id} value={tag.id}>{tag.archived || group.archived ? `${tr("Archived")} · ` : ""}{tag.name}</option>)}</select></Field>)}</div>;
+  const names = shown.map(({ group, options }) => options.find(tag => tag.id === picked[group.id])?.name).filter(Boolean);
+  return <details className="tag-picker"><summary><span>{tr("Tags")}</span><small>{names.length ? names.join(" · ") : tr("None chosen")}</small></summary>{shown.map(({ group, options }) => <div className="tag-picker-group" role="group" aria-label={group.name} key={group.id}><span>{group.name}</span><div>{options.map(tag => { const on = picked[group.id] === tag.id; return <button type="button" key={tag.id} aria-pressed={on} className={on ? "active" : ""} style={{ "--tag-color": tag.color } as CSSProperties} onClick={() => setPicked(value => ({ ...value, [group.id]: on ? "" : tag.id }))}>{tag.archived || group.archived ? `${tr("Archived")} · ` : ""}{tag.name}</button>; })}</div><input type="hidden" name={`tag_${group.id}`} value={picked[group.id] ?? ""}/></div>)}</details>;
 }
 
 export function TransactionRow({ transaction, accountById, categoryById, tagById, currency, onEdit }: { transaction: Transaction; accountById: Record<string, Account>; categoryById: Record<string, Category>; tagById?: Record<string, Tag>; currency: string; onEdit: () => void }) {
