@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { ensureFinanceSchema } from './ensure';
 import { addCalendarInterval } from '../app/finance-dates';
-import { buildBudget, bucketsOverlap, consumesBudget, parseCategoryIds, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
+import { buildBudget, bucketsOverlap, consumesBudget, parseCategoryIds, withSubcategories, periodFor, plusDays, type BudgetConfig, type Bucket, type Occurrence, type MoneyAccount, type MoneyTransaction, type Assignment } from '../app/v3-engine';
 import { spareRoundUpCents, type SpareSettings } from '../app/spare-change';
 import { autoSweepSpare } from './spare';
 
@@ -12,6 +12,9 @@ const id=()=>crypto.randomUUID();
 const readBuckets=<T extends {category_ids:unknown;tag_ids?:unknown}>(list:T[])=>list.map(b=>({...b,category_ids:parseCategoryIds(b.category_ids),tag_ids:parseCategoryIds(b.tag_ids)}));
 // Tag IDs are stored as a sorted JSON array, so an unchanged list compares equal.
 const tagJson=(value:unknown)=>JSON.stringify(parseCategoryIds(value).sort());
+// Buckets also cover the subcategories of their categories.
+const categoryTree=(user:string)=>rows<{id:string;name:string;kind:string;archived:number;parent_id:string|null}>('SELECT id,name,kind,archived,parent_id FROM categories WHERE user_id=?',user);
+const withCovers=<T extends {category_ids:string[]}>(list:T[],tree:{id:string;parent_id:string|null}[])=>list.map(b=>({...b,covers:withSubcategories(b.category_ids,tree)}));
 const event=(user:string,kind:string,detail:string)=>env.DB.prepare('INSERT INTO v3_events (id,user_id,kind,detail) VALUES (?,?,?,?)').bind(id(),user,kind,detail);
 
 export async function currentPeriod(user:string,today:string){
@@ -32,7 +35,7 @@ export async function currentPeriod(user:string,today:string){
    const stmts=[env.DB.prepare('INSERT OR IGNORE INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)').bind(periodId,user,bounds.start,bounds.end,version.id,funding)];
    for(const b of templates){let rollover=0;const previous=await env.DB.prepare('SELECT bp.*,p.start_date,p.end_date FROM v3_bucket_periods bp JOIN v3_periods p ON p.id=bp.period_id WHERE bp.user_id=? AND bp.bucket_id=? AND p.end_date<=? ORDER BY p.end_date DESC LIMIT 1').bind(user,b.id,bounds.start).first<Bucket&{start_date:string;end_date:string;period_id:string}>();
     if(previous&&b.rollover!=='none'&&!previous.released){
-      const pastBuckets=readBuckets(await rows<Bucket>('SELECT bucket_id AS id,name,kind,category_ids,tag_ids,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=?',user,previous.period_id));
+      const pastBuckets=withCovers(readBuckets(await rows<Bucket>('SELECT bucket_id AS id,name,kind,category_ids,tag_ids,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=?',user,previous.period_id)),await categoryTree(user));
       const pastTransactions=await rows<MoneyTransaction>("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?",user,previous.start_date,previous.end_date);
       const pastAssignments=await rows<Assignment>('SELECT * FROM v3_assignments WHERE user_id=?',user);
       const past=buildBudget({today:plusDays(previous.end_date,-1),start:previous.start_date,end:previous.end_date,config:desired,funding:0,accounts:[],transactions:pastTransactions,buckets:pastBuckets,occurrences:[],assignments:pastAssignments});
@@ -118,7 +121,7 @@ export async function reconcileV3(user:string,today:string){
 
 export async function v3Snapshot(user:string,today:string){
  const {period,config}=await currentPeriod(user,today);
- const [accountRows,transactionRows,trendRows,firstRecordedRows,bucketRows,occurrenceRows,assignmentRows,eventRows]=await env.DB.batch([
+ const [accountRows,transactionRows,trendRows,firstRecordedRows,bucketRows,occurrenceRows,assignmentRows,treeRows,eventRows]=await env.DB.batch([
   env.DB.prepare('SELECT * FROM accounts WHERE user_id=?').bind(user),
   env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<?").bind(user,period.start_date,period.end_date),
   env.DB.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND date>=? AND date<? ORDER BY date,id").bind(user,plusDays(today,-28),today),
@@ -126,13 +129,14 @@ export async function v3Snapshot(user:string,today:string){
   env.DB.prepare('SELECT bucket_id AS id,name,kind,category_ids,tag_ids,target_cents,priority,rollover,rollover_cap,destination_id,released FROM v3_bucket_periods WHERE user_id=? AND period_id=? ORDER BY priority,rowid').bind(user,period.id),
   env.DB.prepare("SELECT * FROM v3_occurrences WHERE user_id=? AND (due_date>=? OR status IN ('upcoming','partial')) ORDER BY due_date,id").bind(user,period.start_date),
   env.DB.prepare('SELECT * FROM v3_assignments WHERE user_id=?').bind(user),
+  env.DB.prepare('SELECT id,parent_id FROM categories WHERE user_id=?').bind(user),
   env.DB.prepare('SELECT id,kind,detail,created_at FROM v3_events WHERE user_id=? ORDER BY rowid DESC LIMIT 20').bind(user),
  ]);
  const accounts=accountRows.results as MoneyAccount[];
  const transactions=transactionRows.results as MoneyTransaction[];
  const trendTransactions=trendRows.results as MoneyTransaction[];
  const firstRecorded=firstRecordedRows.results[0] as {date:string}|undefined;
- const buckets=readBuckets(bucketRows.results as Bucket[]);
+ const buckets=withCovers(readBuckets(bucketRows.results as Bucket[]),treeRows.results as {id:string;parent_id:string|null}[]);
  const occurrences=occurrenceRows.results as Occurrence[];
  const assignments=assignmentRows.results as Assignment[];
  const events=eventRows.results as {id:string;kind:string;detail:string;created_at:string}[];
@@ -159,16 +163,16 @@ export async function v3Action(user:string,today:string,action:string,p:Record<s
  if(cats.length>50)throw new Error('Choose up to 50 categories for one bucket.');
  if(cats.length){
   const existing=p.id?parseCategoryIds((await env.DB.prepare('SELECT category_ids FROM v3_bucket_templates WHERE id=? AND user_id=?').bind(bucketId,user).first<{category_ids:string}>())?.category_ids):[];
-  const known=new Map((await rows<{id:string;name:string;kind:string;archived:number}>('SELECT id,name,kind,archived FROM categories WHERE user_id=?',user)).map(c=>[c.id,c]));
+  const tree=await categoryTree(user);const known=new Map(tree.map(c=>[c.id,c]));
   // Archived categories may stay on a bucket that already uses them, but cannot be newly added.
   for(const c of cats){const cat=known.get(c);if(!cat||cat.kind!=='expense'||(cat.archived&&!existing.includes(c)))throw new Error('Choose active expense categories.');}
-  const tagRows=new Map((await rows<{id:string;group_id:string;archived:number;group_archived:number}>('SELECT t.id,t.group_id,t.archived,g.archived AS group_archived FROM tags t JOIN tag_groups g ON g.id=t.group_id AND g.user_id=t.user_id WHERE t.user_id=?',user)).map(t=>[t.id,t]));
+  const tagRows=new Map((await rows<{id:string;archived:number}>('SELECT id,archived FROM tags WHERE user_id=?',user)).map(t=>[t.id,t]));
   const existingTags=p.id?parseCategoryIds((await env.DB.prepare('SELECT tag_ids FROM v3_bucket_templates WHERE id=? AND user_id=?').bind(bucketId,user).first<{tag_ids:string}>())?.tag_ids):[];
   // Archived tags may stay on a bucket that already uses them, like categories.
-  for(const t of tagIds){const tag=tagRows.get(t);if(!tag||((tag.archived||tag.group_archived)&&!existingTags.includes(t)))throw new Error('Choose active tags.');}
-  if(new Set(tagIds.map(t=>tagRows.get(t)!.group_id)).size>1)throw new Error('Choose tags from one tag group for a bucket.');
-  const others=readBuckets(await rows<{name:string;category_ids:string;tag_ids:string}>('SELECT name,category_ids,tag_ids FROM v3_bucket_templates WHERE user_id=? AND archived=0 AND id!=?',user,bucketId));
-  for(const other of others){if(bucketsOverlap({category_ids:cats,tag_ids:tagIds},other,t=>tagRows.get(t)?.group_id)){const shared=cats.find(c=>other.category_ids.includes(c))!;throw new Error(tagIds.length||other.tag_ids.length?`${known.get(shared)!.name} purchases with these tags already belong to the ${other.name} bucket.`:`${known.get(shared)!.name} already belongs to the ${other.name} bucket.`);}}
+  for(const t of tagIds){const tag=tagRows.get(t);if(!tag||(tag.archived&&!existingTags.includes(t)))throw new Error('Choose active tags.');}
+  const mine={category_ids:cats,covers:withSubcategories(cats,tree),tag_ids:tagIds};
+  const others=withCovers(readBuckets(await rows<{name:string;category_ids:string;tag_ids:string}>('SELECT name,category_ids,tag_ids FROM v3_bucket_templates WHERE user_id=? AND archived=0 AND id!=?',user,bucketId)),tree);
+  for(const other of others){if(bucketsOverlap(mine,other)){const shared=mine.covers.find(c=>other.covers.includes(c))!;throw new Error(tagIds.length||other.tag_ids.length?`${known.get(shared)!.name} purchases with these tags already belong to the ${other.name} bucket.`:`${known.get(shared)!.name} already belongs to the ${other.name} bucket.`);}}
  }else if(tagIds.length)throw new Error('Choose the categories this bucket covers before limiting it to tags.');
  if(destination&&!await env.DB.prepare('SELECT id FROM accounts WHERE id=? AND user_id=? AND archived=0').bind(destination,user).first())throw new Error('Choose an active destination.');
  const priority=Number(p.priority)||0;const cap=cents(p.rolloverCap);

@@ -1,7 +1,7 @@
 export const archiveKinds = {
   account: "Accounts", category: "Categories", goal: "Goals",
   recurring: "Recurring plans", installment: "Pay-later plans", bucket: "Repeating buckets",
-  tag: "Tags", tagGroup: "Tag groups",
+  tag: "Tags",
 } as const;
 export type ArchiveKind = keyof typeof archiveKinds;
 export type ArchiveItem = {
