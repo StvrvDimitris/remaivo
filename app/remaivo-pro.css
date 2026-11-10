@@ -792,11 +792,11 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .tag-picker summary small { flex:1; min-width:0; text-align:right; color:var(--theme-muted); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .v3-app .tag-picker[open] summary { border-bottom:1px solid var(--theme-border); }
 .v3-app .tag-picker-group { display:grid; gap:6px; padding:10px 0; }
-.v3-app .tag-picker-group > div { display:flex; flex-wrap:wrap; gap:6px; }
+.v3-app .tag-picker-group > div, .v3-app .pill-row { display:flex; flex-wrap:wrap; gap:6px; }
 /* Every pill wears its tag's colour; the picked one is solid with a ring, the others faded. */
-.v3-app .tag-picker-group button { min-height:32px; padding:5px 12px; border:1px solid var(--tag-color); border-radius:999px; background:var(--tag-color); color:#253345; font-size:.8125rem; cursor:pointer; opacity:.55; }
-.v3-app .tag-picker-group button:hover { opacity:.8; }
-.v3-app .tag-picker-group button.active { opacity:1; font-weight:600; box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--tag-color); }
+.v3-app .tag-picker-group button, .v3-app .pill-row button { min-height:32px; padding:5px 12px; border:1px solid var(--tag-color); border-radius:999px; background:var(--tag-color); color:#253345; font-size:.8125rem; cursor:pointer; opacity:.55; }
+.v3-app .tag-picker-group button:hover, .v3-app .pill-row button:hover { opacity:.8; }
+.v3-app .tag-picker-group button.active, .v3-app .pill-row button.active { opacity:1; font-weight:600; box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--tag-color); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud > span { color:var(--theme-text); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud small { color:var(--theme-muted); }
 .v3-app .v3-data-export { position:relative; padding-right:250px; }
@@ -1006,3 +1006,12 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
 .v3-app .category-children > span { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 5px 9px; border:1px solid var(--theme-border); border-radius:999px; background:var(--paper); color:var(--theme-text); font-size:.8125rem; cursor:pointer; }
 .v3-app .category-children > span:hover { border-color:var(--category-color); }
 .v3-app .category-children i { width:8px; height:8px; border-radius:50%; background:var(--category-color); }
+
+/* Category pills in forms: main categories, then the chosen one's subcategories. */
+.v3-app .category-pills { position:relative; display:grid; gap:8px; }
+.v3-app .category-pills > span { display:flex; justify-content:space-between; gap:12px; }
+.v3-app .category-pills > span small { color:var(--theme-muted); font-weight:500; text-align:right; }
+.v3-app .pill-subrow { margin-left:10px; padding-left:12px; border-left:2px solid var(--theme-border); }
+.v3-app .pill-empty { color:var(--theme-muted); }
+.v3-app .pill-value { position:absolute; left:12px; bottom:0; width:1px; height:1px; padding:0; border:0; opacity:0; pointer-events:none; }
+.v3-app .form-grid > .category-pills { grid-column:1 / -1; }
