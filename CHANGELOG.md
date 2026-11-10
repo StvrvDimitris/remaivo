@@ -2,12 +2,17 @@
 
 ## Unreleased
 
+**Subcategories**
+- A category can hold subcategories, one level deep: Food › Groceries, Food › Delivery. Set it with **Inside** when you add or edit a category.
+- A bucket on a main category covers its subcategories; a bucket can also cover a single subcategory.
+- In Insights, click a main category to see how its spending splits across its subcategories. Filtering by a main category includes them.
+
 **Tags**
-- Sort activity a second way besides categories. In **Settings → Tags**, create your own tag groups, such as *Need* with *Daily* and *Leisure*. Remaivo comes with none.
-- Each transaction can carry one tag from each group. Pick them when you add or correct a transaction, a recurring plan or a pay-later plan; scheduled payments pass their plan's tags on to what they post.
-- A bucket can cover only tagged purchases, such as *Food, tagged Daily*, so one category can feed two buckets without splitting it into duplicates.
-- Filter Activity and Insights by a tag, or by *No tag* in a group, and see how spending splits by tag in Insights.
-- Tags and tag groups can be archived and restored from the Archive manager, and backups include them. Older backups still restore.
+- Optional labels that cut across categories, such as *Essential*, *Discretionary* or *Trip*. Create them in **Settings → Tags**; Remaivo comes with none.
+- A transaction can carry any number of tags. Pick them from the folded **Tags** line when you add or correct a transaction, a recurring plan or a pay-later plan; scheduled payments pass their plan's tags on.
+- A bucket can cover only tagged purchases, such as *Food, tagged Essential*.
+- Filter Activity and Insights by a tag or by *No tags*, and see spending by tag in Insights.
+- Tags archive and restore from the Archive manager, and backups include them.
 
 ## 1.3.0 (2026-11-04)
 
