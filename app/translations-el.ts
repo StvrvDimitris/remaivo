@@ -1144,5 +1144,11 @@ export const greek: Record<string,string> = {
   "Archive or move this category's subcategories first.": "Αρχειοθετήστε ή μετακινήστε πρώτα τις υποκατηγορίες.",
   "Choose an active main category to put this inside.": "Επιλέξτε μια ενεργή κύρια κατηγορία.",
   "You can have up to 50 active tags.": "Μπορείτε να έχετε έως 50 ενεργές ετικέτες.",
-  "Show only": "Μόνο"
+  "Show only": "Μόνο",
+  "Expenses": "Έξοδα",
+  "subcategory": "υποκατηγορία",
+  "subcategories": "υποκατηγορίες",
+  "Add a subcategory to": "Προσθήκη υποκατηγορίας στην κατηγορία",
+  "＋ Sub": "＋ Υποκατηγορία",
+  "Double-click or hold a category to edit or archive it. Use ＋ Sub to add a subcategory inside one.": "Κάντε διπλό κλικ ή κρατήστε πατημένη μια κατηγορία για επεξεργασία ή αρχειοθέτηση. Με το ＋ Υποκατηγορία προσθέτετε υποκατηγορία μέσα της."
 };

@@ -977,7 +977,6 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
 .v3-app .v3-settle-close small { color: var(--theme-muted); font-weight: 400; }
 .v3-app .v3-plan-summary .v3-used-split { margin-top: 2px; color: var(--theme-muted); font-size: .75rem; }
 
-.v3-app .subcategory-chip { margin-left: 18px; }
 .v3-app .subcategory-choice { margin-left: 18px; }
 .v3-app .subcategory-stats > button { width:100%; border:0; background:transparent; display:grid; gap:4px; text-align:left; cursor:pointer; color:var(--theme-text); }
 .v3-app .subcategory-stats { display:grid; gap:6px; margin:4px 0 10px 22px; padding-left:12px; border-left:2px solid var(--theme-border); }
@@ -985,3 +984,24 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
 .v3-app .statistics-page .subcategory-stats > button.subcategory-stat-all { padding:2px 0; }
 .v3-app .category-stat-toggle { margin-left:6px; color:var(--theme-muted); font-weight:400; }
 .v3-app .subcategory-stat-all { justify-self:start; padding:2px 0; border:0; background:none; color:var(--theme-accent); font-size:.8125rem; cursor:pointer; }
+
+/* Settings → Categories: rows of main categories with nested subcategories. */
+.v3-app .category-section + .category-section { margin-top:20px; }
+.v3-app .category-section h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 6px; color:var(--theme-muted); font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+.v3-app .category-section h4 small { font-weight:500; letter-spacing:0; }
+.v3-app .category-list { display:grid; gap:2px; margin:0; padding:0; list-style:none; }
+.v3-app .category-list > li { padding:2px 8px; border-radius:10px; }
+.v3-app .category-list > li:hover, .v3-app .category-list > li:focus-within { background:var(--theme-soft); }
+.v3-app .category-row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; }
+.v3-app .category-main { display:flex; align-items:center; gap:10px; min-width:0; color:var(--theme-text); font-size:.9375rem; font-weight:600; cursor:pointer; }
+.v3-app .category-main span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.v3-app .category-main i { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:var(--category-color); color:#253345; font-size:.75rem; font-style:normal; }
+.v3-app .category-main small { flex:none; color:var(--theme-muted); font-size:.75rem; font-weight:500; }
+.v3-app .category-add-sub { flex:none; padding:4px 10px; border:1px dashed var(--theme-border); border-radius:999px; background:transparent; color:var(--theme-muted); font-size:.75rem; cursor:pointer; opacity:0; transition:opacity .15s; }
+.v3-app .category-list > li:hover .category-add-sub, .v3-app .category-list > li:focus-within .category-add-sub { opacity:1; }
+.v3-app .category-add-sub:hover { color:var(--theme-text); border-color:var(--theme-text-soft); }
+@media (hover:none) { .v3-app .category-add-sub { opacity:1; } }
+.v3-app .category-children { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 8px 13px; padding:2px 0 2px 23px; border-left:2px solid var(--category-color); }
+.v3-app .category-children > span { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 5px 9px; border:1px solid var(--theme-border); border-radius:999px; background:var(--paper); color:var(--theme-text); font-size:.8125rem; cursor:pointer; }
+.v3-app .category-children > span:hover { border-color:var(--category-color); }
+.v3-app .category-children i { width:8px; height:8px; border-radius:50%; background:var(--category-color); }
