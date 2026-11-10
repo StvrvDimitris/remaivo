@@ -787,7 +787,19 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .tag-group-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .v3-app .tag-group-head strong { color:var(--theme-text); font-size:.875rem; cursor:pointer; }
 .v3-app .tag-group-head .text-link { padding:4px 0; }
-.v3-app .tag-fields { margin-top:0; }
+.v3-app .tag-picker { border:1px solid var(--theme-border); border-radius:10px; padding:0 12px; background:var(--paper); }
+.v3-app .tag-picker summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; cursor:pointer; list-style:none; color:var(--theme-text); font-size:.875rem; font-weight:600; }
+.v3-app .tag-picker summary::-webkit-details-marker { display:none; }
+.v3-app .tag-picker summary::after { content:"▾"; color:var(--theme-muted); }
+.v3-app .tag-picker[open] summary::after { content:"▴"; }
+.v3-app .tag-picker summary small { flex:1; min-width:0; text-align:right; color:var(--theme-muted); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.v3-app .tag-picker[open] summary { border-bottom:1px solid var(--theme-border); }
+.v3-app .tag-picker-group { display:grid; gap:6px; padding:10px 0; }
+.v3-app .tag-picker-group + .tag-picker-group { border-top:1px dashed var(--theme-border); }
+.v3-app .tag-picker-group > span { color:var(--theme-muted); font-size:.75rem; }
+.v3-app .tag-picker-group > div { display:flex; flex-wrap:wrap; gap:6px; }
+.v3-app .tag-picker-group button { min-height:32px; padding:5px 12px; border:1px solid var(--theme-border); border-radius:999px; background:transparent; color:var(--theme-text); font-size:.8125rem; cursor:pointer; }
+.v3-app .tag-picker-group button.active { background:var(--tag-color); border-color:var(--tag-color); color:#253345; font-weight:600; }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud > span { color:var(--theme-text); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud small { color:var(--theme-muted); }
 .v3-app .v3-data-export { position:relative; padding-right:250px; }
