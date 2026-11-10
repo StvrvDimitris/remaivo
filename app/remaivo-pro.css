@@ -798,8 +798,10 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .tag-picker-group + .tag-picker-group { border-top:1px dashed var(--theme-border); }
 .v3-app .tag-picker-group > span { color:var(--theme-muted); font-size:.75rem; }
 .v3-app .tag-picker-group > div { display:flex; flex-wrap:wrap; gap:6px; }
-.v3-app .tag-picker-group button { min-height:32px; padding:5px 12px; border:1px solid var(--theme-border); border-radius:999px; background:transparent; color:var(--theme-text); font-size:.8125rem; cursor:pointer; }
-.v3-app .tag-picker-group button.active { background:var(--tag-color); border-color:var(--tag-color); color:#253345; font-weight:600; }
+/* Every pill wears its tag's colour; the picked one is solid with a ring, the others faded. */
+.v3-app .tag-picker-group button { min-height:32px; padding:5px 12px; border:1px solid var(--tag-color); border-radius:999px; background:var(--tag-color); color:#253345; font-size:.8125rem; cursor:pointer; opacity:.55; }
+.v3-app .tag-picker-group button:hover { opacity:.8; }
+.v3-app .tag-picker-group button.active { opacity:1; font-weight:600; box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--tag-color); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud > span { color:var(--theme-text); }
 html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-cloud small { color:var(--theme-muted); }
 .v3-app .v3-data-export { position:relative; padding-right:250px; }
