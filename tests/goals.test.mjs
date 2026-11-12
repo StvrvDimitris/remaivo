@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
+import * as spareHelpers from '../app/spare-change.ts';
+globalThis.__goalsSpare = spareHelpers;
 
 const sqlite = new DatabaseSync(':memory:');
 for (const file of fs.readdirSync('drizzle').filter(name => name.endsWith('.sql')).sort()) {
@@ -45,6 +47,7 @@ const getUser = async () => ({ userId: globalThis.__goalsTestUser, displayName: 
 const ensureFinanceSchema = async () => {};
 const financialToday = () => globalThis.__goalsTestToday ?? '2027-02-01';
 const reconcileV3 = async () => {};
+const { spareRoundUpCents, spareTransferStatements } = globalThis.__goalsSpare;
 const v3Snapshot = async () => ({});
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
 class ArchiveError extends Error { status = 409; }

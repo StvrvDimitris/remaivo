@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const scratch = path.resolve("work/setup-tests");
 fs.mkdirSync(scratch, { recursive: true });
-for (const [source, target] of [["app/default-names.ts", "default-names"], ["app/finance-dates.ts", "dates"], ["app/spare-change.ts", "spare-change"], ["app/v3-engine.ts", "engine"], ["db/ensure.ts", "ensure"], ["db/spare.ts", "spare"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
+for (const [source, target] of [["app/default-names.ts", "default-names"], ["app/finance-dates.ts", "dates"], ["app/spare-change.ts", "spare-change"], ["app/v3-engine.ts", "engine"], ["db/ensure.ts", "ensure"], ["db/v3.ts", "v3"], ["db/setup.ts", "setup"]]) {
   const code = fs.readFileSync(source, "utf8")
     .replaceAll('import { env } from "cloudflare:workers";', "const env = globalThis.__setupEnv;")
     .replaceAll("import { env } from 'cloudflare:workers';", "const env = globalThis.__setupEnv;")

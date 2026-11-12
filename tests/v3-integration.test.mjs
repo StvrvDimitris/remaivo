@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
 const scratch=path.resolve('work/v3-tests');fs.mkdirSync(scratch,{recursive:true});
-for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/spare-change.ts','spare-change'],['app/v3-engine.ts','engine'],['db/ensure.ts','ensure'],['db/spare.ts','spare'],['db/v3.ts','server']]){
+for(const [src,dest] of [['app/finance-dates.ts','dates'],['app/spare-change.ts','spare-change'],['app/v3-engine.ts','engine'],['db/ensure.ts','ensure'],['db/v3.ts','server']]){
  let s=fs.readFileSync(src,'utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__testEnv;').replace('import { env } from "cloudflare:workers";','const env=globalThis.__testEnv;').replaceAll("'../app/finance-dates'","'./dates.mjs'").replaceAll("'./finance-dates'","'./dates.mjs'").replaceAll("'../app/v3-engine'","'./engine.mjs'").replaceAll("'../app/spare-change'","'./spare-change.mjs'").replaceAll('"../app/spare-change"','"./spare-change.mjs"').replaceAll("'./ensure'","'./ensure.mjs'");
  s=s.replaceAll("'./spare'","'./spare.mjs'");
  fs.writeFileSync(path.join(scratch,dest+'.mjs'),ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
@@ -215,36 +215,24 @@ test('Occurrence generation skips unchanged rows while preserving schedule state
  await v3.generateOccurrences(owner,base.today);
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM occurrence_write_audit').get().n,4);
 });
-test('Auto-posted recurring expenses accrue spare change once without moving sweep cash',async()=>{
+test('Auto-posted recurring expenses transfer each round-up once',async()=>{
  const owner='recurring-spare-owner';
  sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_multiplier) VALUES(?,1,?,?,3)').run(owner,'recurring-source','recurring-destination');
- for(const [id,type,balance] of [['recurring-source','bank',10000],['recurring-destination','savings',0]])
-  sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id,owner,id,type,balance);
+ for(const [id,type] of [['recurring-source','bank'],['recurring-destination','savings']]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,?)').run(id,owner,id,type);
  sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,interval_count,next_date,anchor_day,end_date,auto_post) VALUES('spare-recurring',?,'Coffee plan','expense',1234,'recurring-source','monthly',1,'2026-09-17',17,'2026-10-17',1)").run(owner);
  await v3.reconcileV3(owner,'2026-09-17');
- const posted=sqlite.prepare("SELECT id,amount_cents,spare_change_cents,recurring_plan_id FROM transactions WHERE user_id=? AND status='posted'").all(owner);
- assert.equal(posted.length,1);
- const {id:postedId,...postedDetail}=posted[0];
- assert.deepEqual({...postedDetail},{amount_cents:1234,spare_change_cents:198,recurring_plan_id:'spare-recurring'});
- assert.deepEqual(sqlite.prepare('SELECT multiplied_cents,status,transaction_id FROM spare_events WHERE user_id=?').all(owner).map(row=>({...row})),[{multiplied_cents:198,status:'pending',transaction_id:postedId}]);
- assert.deepEqual(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row=>({...row})),[
-  {id:'recurring-destination',balance_cents:0},{id:'recurring-source',balance_cents:8766},
- ]);
- assert.equal(sqlite.prepare("SELECT status FROM v3_occurrences WHERE id='recurring:spare-recurring:2026-09-17'").get().status,'paid');
- assert.equal(sqlite.prepare("SELECT status FROM v3_occurrences WHERE id='recurring:spare-recurring:2026-10-17'").get().status,'upcoming');
  await v3.reconcileV3(owner,'2026-09-17');
- assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n,1);
- assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM spare_events WHERE user_id=?').get(owner).n,1);
- assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-source'").get().balance_cents,8766);
- sqlite.prepare('UPDATE profiles SET spare_auto_sweep_threshold_cents=300 WHERE user_id=?').run(owner);
+ assert.deepEqual(sqlite.prepare('SELECT type,amount_cents FROM transactions WHERE user_id=? ORDER BY type').all(owner).map(row=>({...row})),[{type:'expense',amount_cents:1234},{type:'saving',amount_cents:198}]);
+ assert.deepEqual(sqlite.prepare('SELECT balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row=>row.balance_cents),[198,-1432]);
  await v3.reconcileV3(owner,'2026-10-17');
- assert.deepEqual(sqlite.prepare("SELECT amount_cents,type FROM transactions WHERE user_id=? AND description='Spare change sweep'").all(owner).map(row=>({...row})),[{amount_cents:396,type:'saving'}]);
- assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-source'").get().balance_cents,7136);
- assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='recurring-destination'").get().balance_cents,396);
- assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM spare_events WHERE user_id=? AND status='pending'").get(owner).n,0);
  await v3.reconcileV3(owner,'2026-10-17');
- assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE user_id=? AND description='Spare change sweep'").get(owner).n,1);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE user_id=? AND type='saving'").get(owner).n,2);
+ for (const account of sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=?').all(owner)) {
+  const total=sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND (account_id=? OR destination_account_id=?)").all(owner,account.id,account.id).reduce((sum,t)=>sum+(t.destination_account_id===account.id?t.amount_cents:0)-(t.account_id===account.id?t.amount_cents:0),0);
+  assert.equal(account.balance_cents,total,account.id);
+ }
 });
+
 test('Create, move, release and configure use cash limits and reject invalid dates',async()=>{
  await v3.v3Action(user,base.today,'v3Bucket',{name:'Test groceries',target:'100',kind:'protected',rollover:'positive'});
  let s=await v3.v3Snapshot(user,base.today);const b=s.result.buckets.find(b=>b.name==='Test groceries');assert.equal(b.extra,10000);
@@ -385,4 +373,21 @@ test('A parent bucket covers child spending in the database snapshot',async()=>{
  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,category_id,type,description,amount_cents,date) VALUES('child-tx',?,'child-cash','child-bucket','expense','Purchase',500,?)").run(owner,base.today);
  const snapshot=await v3.v3Snapshot(owner,base.today);
  assert.equal(snapshot.result.buckets.find(b=>b.name==='Parent').spent,500);
+});
+
+test('Recorded recurring expenses round up once; matching an existing transaction does not round up again',async()=>{
+ const owner='recorded-spare',source='recorded-source',dest='recorded-dest';
+ sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_multiplier) VALUES(?,1,?,?,2)').run(owner,source,dest);
+ for(const [id,type] of [[source,'bank'],[dest,'savings']]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,?)').run(id,owner,id,type);
+ for(const id of ['recorded-plan','matched-plan']) sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date,auto_post) VALUES(?,?,'Coffee','expense',1234,?,'monthly','2026-09-17',0)").run(id,owner,source);
+ await v3.generateOccurrences(owner,base.today);
+ await v3.settleOccurrence(owner,'recurring:recorded-plan:2026-09-17',base.today);
+ sqlite.prepare("INSERT INTO transactions(id,user_id,type,description,amount_cents,date,account_id) VALUES('existing-match',?,'expense','Already paid',1234,'2026-09-17',?)").run(owner,source);
+ sqlite.prepare('UPDATE accounts SET balance_cents=balance_cents-1234 WHERE id=?').run(source);
+ await v3.settleOccurrence(owner,'recurring:matched-plan:2026-09-17',base.today,1234,'existing-match');
+ assert.deepEqual(sqlite.prepare("SELECT type,amount_cents FROM transactions WHERE user_id=? ORDER BY type").all(owner).map(row=>({...row})),[{type:'expense',amount_cents:1234},{type:'expense',amount_cents:1234},{type:'saving',amount_cents:132}]);
+ for(const account of sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=?').all(owner)) {
+  const total=sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND (account_id=? OR destination_account_id=?)").all(owner,account.id,account.id).reduce((sum,t)=>sum+(t.destination_account_id===account.id?t.amount_cents:0)-(t.account_id===account.id?t.amount_cents:0),0);
+  assert.equal(account.balance_cents,total,account.id);
+ }
 });

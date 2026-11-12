@@ -48,18 +48,17 @@ test('migrations leave only the current finance tables and columns', () => {
   assert.deepEqual(tables, [
     'accounts', 'categories', 'goal_entries', 'goals', 'installment_payments',
     'installment_plans', 'investment_valuation_snapshots', 'profiles',
-    'recurring_plans', 'spare_events', 'tags', 'transactions', 'v3_assignments',
+    'recurring_plans', 'tags', 'transactions', 'v3_assignments',
     'v3_bucket_periods', 'v3_bucket_templates', 'v3_events',
     'v3_occurrences', 'v3_payment_links', 'v3_periods', 'v3_versions',
   ]);
   for (const [table, removed] of Object.entries({
-    profiles: ['spare_sweep_mode', 'spare_threshold_cents'],
+    profiles: ['spare_sweep_mode', 'spare_threshold_cents', 'spare_auto_sweep_threshold_cents'],
     accounts: ['opening_balance_cents', 'icon'],
     categories: ['icon'],
-    transactions: ['counts_daily', 'counts_weekly', 'counts_general'],
+    transactions: ['counts_daily', 'counts_weekly', 'counts_general', 'spare_change_cents', 'spare_excluded', 'replaces_transaction_id'],
     installment_plans: ['include_daily_weekly'],
     installment_payments: ['paid_transaction_id'],
-    spare_events: ['destination_account_id', 'base_cents'],
     v3_bucket_templates: ['category_id'],
     v3_bucket_periods: ['category_id'],
   })) {

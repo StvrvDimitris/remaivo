@@ -5,7 +5,10 @@
 **Editing transactions**
 - Editing a transaction now changes it in place, and **Delete transaction** removes it. Balances, budgets, spare change, bucket splits and linked plan payments update as if it had been entered that way, or never entered. Deleting a paid plan payment makes that payment due again.
 - Corrections no longer leave hidden copies behind; existing copies are removed when you update, which keeps backups smaller. They never counted towards balances or reports.
-- A purchase whose spare change was already swept keeps its amount, account and type, but its description, date, category and tags can still change.
+
+**Spare change**
+- Each purchase on your spending account now moves its round-up to savings straight away, as its own "Spare change" transfer. There is no waiting pot, sweep or sweep threshold any more; anything still waiting is moved to savings when you update.
+- A round-up is a normal transaction: editing or deleting the purchase leaves it alone, so change it yourself if needed.
 
 **Subcategories**
 - A category can hold subcategories, one level deep: Food › Groceries, Food › Delivery. Set it with **Inside** when you add or edit a category.

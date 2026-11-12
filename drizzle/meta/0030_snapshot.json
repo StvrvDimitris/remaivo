@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "76e6e40e-c62e-414c-927a-b1213765fdad",
+  "id": "493abfbc-7dbe-4612-a27e-0dd1f86f150c",
   "prevId": "61ca77be-96a9-428a-9902-b562b54fb48b",
   "tables": {
     "accounts": {
@@ -801,14 +801,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "spare_auto_sweep_threshold_cents": {
-          "name": "spare_auto_sweep_threshold_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -982,69 +974,6 @@
           "columns": [
             "user_id",
             "next_date"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spare_events": {
-      "name": "spare_events",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "transaction_id": {
-          "name": "transaction_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "multiplied_cents": {
-          "name": "multiplied_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "idx_spare_events_user_status": {
-          "name": "idx_spare_events_user_status",
-          "columns": [
-            "user_id",
-            "status"
           ],
           "isUnique": false
         }
@@ -1236,22 +1165,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "spare_change_cents": {
-          "name": "spare_change_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "spare_excluded": {
-          "name": "spare_excluded",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

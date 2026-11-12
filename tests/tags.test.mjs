@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
+import * as spareHelpers from '../app/spare-change.ts';
+globalThis.__tagsSpare = spareHelpers;
 import * as defaultNames from '../app/default-names.ts';
 
 // Route harness: the real POST handler with local auth, clock and database.
@@ -41,7 +43,7 @@ const getUser = async () => ({ userId: 'owner', displayName: 'Test', email: 'tes
 const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-10-08';
 const reconcileV3 = async () => {};
-const spareRoundUpCents = () => 0;
+const { spareRoundUpCents, spareTransferStatements } = globalThis.__tagsSpare;
 const v3Snapshot = async () => ({});
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
 const { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } = globalThis.__ledgerNames;

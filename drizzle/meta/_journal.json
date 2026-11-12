@@ -215,8 +215,8 @@
     {
       "idx": 30,
       "version": "6",
-      "when": 1794470232341,
-      "tag": "0030_edit_transactions_in_place",
+      "when": 1794471019151,
+      "tag": "0030_transactions_and_spare_change",
       "breakpoints": true
     }
   ]

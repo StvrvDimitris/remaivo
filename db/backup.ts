@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 const TABLES = [
   "accounts", "categories", "goals", "goal_entries", "installment_payments",
   "installment_plans", "investment_valuation_snapshots", "profiles",
-  "recurring_plans", "spare_events", "tags", "transactions", "v3_assignments",
+  "recurring_plans", "tags", "transactions", "v3_assignments",
   "v3_bucket_periods", "v3_bucket_templates", "v3_events",
   "v3_occurrences", "v3_payment_links", "v3_periods", "v3_versions",
 ] as const;
@@ -14,9 +14,11 @@ const ADDED_IN: Partial<Record<(typeof TABLES)[number], number>> = { tags: 5 };
 // Version 5 backups held tag groups, which became plain tags in version 6.
 const DROPPED_IN_6 = { tables: ["tag_groups"], columns: { tags: ["group_id"] } as Record<string, string[]> };
 
-// Version 7 edits transactions in place, so earlier files may hold hidden
-// corrected copies and the column that linked them; both are dropped.
-const DROPPED_IN_7 = { columns: { transactions: ["replaces_transaction_id"] } as Record<string, string[]> };
+// Version 7 edits transactions in place and posts each round-up as its own
+// transfer, so earlier files may hold hidden corrected copies, the spare-change
+// pot and their columns; all of these are dropped on restore. A pot that was
+// still waiting in the file is not restored.
+const DROPPED_IN_7 = { tables: ["spare_events"], columns: { transactions: ["replaces_transaction_id", "spare_change_cents", "spare_excluded"], profiles: ["spare_auto_sweep_threshold_cents"] } as Record<string, string[]> };
 
 const BACKUP_VERSION = 7;
 const OLDEST_VERSION = 3;
@@ -112,11 +114,15 @@ async function planRestore(user: string, file: unknown): Promise<RestorePlan> {
 
   const version = file.version;
   const given = { ...(file.tables as Record<string, unknown>) };
-  if (version < 7 && Array.isArray(given.transactions)) {
-    const hidden = new Set((given.transactions as unknown[]).filter(row => isObject(row) && row.status !== undefined && row.status !== "posted").map(row => (row as Record<string, unknown>).id));
-    const keep = (rows: unknown) => Array.isArray(rows) ? rows.filter(row => !isObject(row) || !hidden.has(row.transaction_id)) : rows;
-    given.transactions = (given.transactions as unknown[]).filter(row => !isObject(row) || !hidden.has(row.id)).map(row => isObject(row) ? Object.fromEntries(Object.entries(row).filter(([name]) => !DROPPED_IN_7.columns.transactions.includes(name))) : row);
-    for (const table of ["spare_events", "v3_assignments", "v3_payment_links"]) given[table] = keep(given[table]);
+  if (version < 7) {
+    for (const table of DROPPED_IN_7.tables) delete given[table];
+    const strip = (rows: unknown, names: string[]) => Array.isArray(rows) ? rows.map(row => isObject(row) ? Object.fromEntries(Object.entries(row).filter(([name]) => !names.includes(name))) : row) : rows;
+    for (const [table, names] of Object.entries(DROPPED_IN_7.columns)) given[table] = strip(given[table], names);
+    if (Array.isArray(given.transactions)) {
+      const hidden = new Set((given.transactions as unknown[]).filter(row => isObject(row) && row.status !== undefined && row.status !== "posted").map(row => (row as Record<string, unknown>).id));
+      given.transactions = (given.transactions as unknown[]).filter(row => !isObject(row) || !hidden.has(row.id));
+      for (const table of ["v3_assignments", "v3_payment_links"]) if (Array.isArray(given[table])) given[table] = (given[table] as unknown[]).filter(row => !isObject(row) || !hidden.has(row.transaction_id));
+    }
   }
   if (version < 6) {
     for (const table of DROPPED_IN_6.tables) delete given[table];

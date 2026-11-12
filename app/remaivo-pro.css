@@ -338,7 +338,6 @@ html[data-theme=midnight] .v3-app .v3-calendar-day.is-over, html[data-theme=midn
 .v3-app .spare-hero .eyebrow { margin: 0; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; color: var(--theme-hero-muted); }
 .v3-app .spare-hero h2 { margin: 8px 0 8px; font-size: 2.25rem; font-weight: 600; letter-spacing: -.035em; line-height: 1.1; color: #fff; }
 .v3-app .spare-hero > div > p:not(.eyebrow) { font-size: .875rem; line-height: 1.55; }
-.v3-app .spare-hero .spare-sweep-status { font-size: .8125rem; }
 .v3-app .spare-actions { margin-top: 18px; gap: 8px; }
 .v3-app .spare-actions .primary-button { background: #fff; border-color: #fff; color: #0b1220; }
 .v3-app .spare-actions .primary-button:hover { background: #e9ecf2; border-color: #e9ecf2; }

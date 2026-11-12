@@ -635,8 +635,6 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-app .spare-toggle-track { background: var(--theme-chart-secondary); }
 .v3-app .spare-toggle input:checked + .spare-toggle-track { background: var(--green); }
 .v3-app .spare-toggle input:focus-visible + .spare-toggle-track { outline: 3px solid var(--theme-focus); }
-.v3-app .spare-hero :is(.eyebrow, .spare-sweep-status), .v3-app .spare-hero > div > p:not(.eyebrow) { color: var(--theme-hero-muted); }
-.v3-app .spare-actions .ghost-button { background: transparent; color: #fff; border-color: #ffffff40; }
 .v3-app .spare-orbit :is(span, small) { color: #20242e; }
 .v3-app .modal-error, .v3-alert { background: var(--theme-negative-soft); border-color: var(--theme-negative); color: var(--theme-negative); }
 .v3-alert.warning { background: var(--theme-soft); border-color: var(--line); color: var(--ink); }
@@ -666,3 +664,5 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
  .v3-theme-title { align-self: end; margin-top: 0; }
  .v3-theme-option > small { align-self: start; }
 }
+
+.v3-app .spare-hero .eyebrow, .v3-app .spare-hero > div > p:not(.eyebrow) { color: var(--theme-hero-muted); }
