@@ -102,3 +102,15 @@ test('Subcategories validate parents and parent filters include children', async
  const result=await (await GET(new Request('https://example.invalid/api/finance?view=transactions&categoryId=tags-category'))).json();
  assert.ok(result.items.some(item=>item.description==='Child purchase'));
 });
+
+test('Activity totals cover every filtered transaction, not just the page', async () => {
+ sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('totals-account','owner','Totals','cash',0),('totals-savings','owner','Totals savings','savings',0)").run();
+ const insert = sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,destination_account_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,?,?,?)");
+ for (let index = 0; index < 30; index += 1) insert.run(`totals-out-${index}`, 'owner', 'totals-account', null, 'expense', 'Totals coffee', 250, '2026-10-05');
+ insert.run('totals-in', 'owner', 'totals-account', null, 'income', 'Totals pay', 100000, '2026-10-05');
+ insert.run('totals-move', 'owner', 'totals-account', 'totals-savings', 'saving', 'Totals save', 5000, '2026-10-05');
+ const result = await (await GET(new Request('https://example.invalid/api/finance?view=transactions&accountId=totals-account&from=2026-10-01&to=2026-10-08'))).json();
+ assert.equal(result.items.length, 25);
+ assert.equal(result.total, 32);
+ assert.deepEqual(result.sums, { in: 100000, out: 7500, moved: 5000 });
+});

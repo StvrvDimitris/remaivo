@@ -240,7 +240,12 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
 
   const fromClause = "FROM transactions t LEFT JOIN accounts a ON a.id = COALESCE(t.account_id, t.destination_account_id) AND a.user_id = t.user_id LEFT JOIN categories c ON c.id = t.category_id AND c.user_id = t.user_id";
   const whereClause = `WHERE ${where.join(" AND ")}`;
-  const totalRow = await env.DB.prepare(`SELECT COUNT(*) AS total ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
+  // Totals cover every transaction matching the filters, not only this page.
+  const totalRow = await env.DB.prepare(`SELECT COUNT(*) AS total,
+    COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount_cents END), 0) AS money_in,
+    COALESCE(SUM(CASE WHEN t.type IN ('expense', 'installment_payment') THEN t.amount_cents END), 0) AS money_out,
+    COALESCE(SUM(CASE WHEN t.type IN ('transfer', 'saving', 'investment') THEN t.amount_cents END), 0) AS moved
+    ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number; money_in: number; money_out: number; moved: number }>();
   const total = Number(totalRow?.total || 0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(requestedPage, totalPages);
@@ -249,7 +254,8 @@ async function pagedTransactions(user: FinanceUser, request: Request) {
     `SELECT t.* ${fromClause} ${whereClause} ORDER BY ${orderColumn} ${direction}, t.date DESC, t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`,
   ).bind(...bindings, pageSize, (page - 1) * pageSize).all<Record<string, unknown>>();
 
-  return { items: rows.results, page, pageSize, total, totalPages, from, to, today };
+  const sums = { in: Number(totalRow?.money_in || 0), out: Number(totalRow?.money_out || 0), moved: Number(totalRow?.moved || 0) };
+  return { items: rows.results, page, pageSize, total, totalPages, sums, from, to, today };
 }
 
 async function accountsReportResponse(user: FinanceUser, request: Request) {
