@@ -9,7 +9,7 @@ import ts from 'typescript';
 const tables = [
   'profiles', 'accounts', 'investment_valuation_snapshots', 'categories',
   'transactions', 'recurring_plans', 'installment_plans', 'installment_payments',
-  'goals', 'goal_entries', 'spare_events', 'tags',
+  'goals', 'goal_entries', 'tags',
   'v3_versions', 'v3_periods', 'v3_bucket_templates', 'v3_bucket_periods',
   'v3_assignments', 'v3_occurrences', 'v3_events', 'v3_payment_links',
 ];
@@ -113,7 +113,6 @@ function seed(user, prefix) {
   insert('INSERT INTO goals(id,user_id,name,kind,account_id) VALUES(?,?,?,?,?)', `${prefix}-goal`, user, `${prefix} holiday`, 'savings', account);
   insert('INSERT INTO goals(id,user_id,name,kind) VALUES(?,?,?,?)', `${prefix}-manual-goal`, user, `${prefix} manual goal`, 'savings');
   insert('INSERT INTO goal_entries(id,user_id,goal_id,date,amount_cents,note) VALUES(?,?,?,?,?,?)', `${prefix}-goal-entry`, user, `${prefix}-manual-goal`, '2026-09-20', 2500, `${prefix} contribution`);
-  insert('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)', `${prefix}-spare`, user, transaction, 50);
   insert('INSERT INTO v3_versions(id,user_id,effective_from,config_json) VALUES(?,?,?,?)', version, user, '2026-09-01', '{"target":100000,"period":"monthly"}');
   insert('INSERT INTO v3_periods(id,user_id,start_date,end_date,version_id,funding_cents) VALUES(?,?,?,?,?,?)', period, user, '2026-09-01', '2026-10-01', version, 100000);
   insert('INSERT INTO v3_bucket_templates(id,user_id,name,kind,category_ids,target_cents) VALUES(?,?,?,?,?,?)', bucket, user, `${prefix} food`, 'protected', JSON.stringify([category]), 20000);
@@ -137,7 +136,7 @@ test('A backup holds every profile and every table of user data, but no sign-in 
   const before = copy(rowsFor('alice'));
   const backup = copy(await exportBackup());
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 6);
+  assert.equal(backup.version, 7);
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(backup.profiles, [
     { userId: 'alice', name: 'Alice', color: '#123456', icon: 'A', owner: true },
@@ -164,7 +163,7 @@ test('Restoring brings back every record exactly, after loss and edits', async (
   household();
   const before = { alice: copy(rowsFor('alice')), bob: copy(rowsFor('bob')) };
   const backup = copy(await exportBackup());
-  sqlite.exec("DELETE FROM v3_payment_links; DELETE FROM spare_events; DELETE FROM v3_assignments; DELETE FROM v3_occurrences; DELETE FROM transactions WHERE user_id='alice'");
+  sqlite.exec("DELETE FROM v3_payment_links; DELETE FROM v3_assignments; DELETE FROM v3_occurrences; DELETE FROM transactions WHERE user_id='alice'");
   sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run('added-later', 'bob', 'added later', 'checking', 1);
   sqlite.prepare("UPDATE auth_identities SET display_name='Renamed' WHERE user_id='bob'").run();
   assert.deepEqual(await restoreBackup('bob', backup), { profiles: 2 });
@@ -279,7 +278,7 @@ test('A bad file is refused before anything changes', async () => {
     await assert.rejects(previewRestore('alice', file), BackupError);
     await assert.rejects(restoreBackup('alice', file), BackupError);
   }
-  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 7; })), /newer version/);
+  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 8; })), /newer version/);
   await assert.rejects(restoreBackup('alice', edited(file => { file.tables.accounts[0]['name" = 1; DROP TABLE accounts; --'] = 'x'; })), /no longer uses/);
   assert.deepEqual(copy(rowsFor('alice')), before);
 });
@@ -326,4 +325,36 @@ test('Version 5 grouped tags restore with unique flat names', async () => {
  await restoreBackup('alice',backup);
  const names=sqlite.prepare("SELECT name FROM tags WHERE user_id='alice'").all().map(row=>row.name);
  assert.equal(names.length,2); assert.equal(new Set(names).size,2);
+});
+
+test('Version 6 restore removes corrected transactions and their dependent rows', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  backup.version = 6;
+  const posted = backup.tables.transactions.find(row => row.user_id === 'alice');
+  posted.replaces_transaction_id = 'hidden';
+  backup.tables.transactions.push({ ...posted, id: 'hidden', status: 'corrected', replaces_transaction_id: null });
+  backup.tables.v3_assignments.push({ ...backup.tables.v3_assignments.find(row => row.user_id === 'alice'), id: 'hidden-assignment', transaction_id: 'hidden' });
+  backup.tables.v3_payment_links.push({ ...backup.tables.v3_payment_links.find(row => row.user_id === 'alice'), transaction_id: 'hidden' });
+  await restoreBackup('alice', backup);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE id='hidden'").get().n, 0);
+  for (const table of ['v3_assignments', 'v3_payment_links'])
+    assert.equal(sqlite.prepare(`SELECT COUNT(*) n FROM ${table} WHERE transaction_id='hidden'`).get().n, 0);
+  assert.ok(sqlite.prepare('SELECT id FROM transactions WHERE id=?').get(posted.id));
+  assert.equal(sqlite.prepare('PRAGMA table_info(transactions)').all().some(column => column.name === 'replaces_transaction_id'), false);
+});
+
+test('Version 6 restores without the waiting pot or retired columns', async () => {
+  household();
+  const backup=copy(await exportBackup()); backup.version=6;
+  const profile=backup.tables.profiles.find(row=>row.user_id==='alice'); profile.spare_auto_sweep_threshold_cents=100;
+  const tx=backup.tables.transactions.find(row=>row.user_id==='alice'); tx.spare_change_cents=100; tx.spare_excluded=0;
+  backup.tables.spare_events=[{id:'legacy-pot',user_id:'alice',transaction_id:tx.id,multiplied_cents:100,status:'pending'}];
+  await restoreBackup('alice',backup);
+  assert.equal(sqlite.prepare("SELECT name FROM sqlite_master WHERE name='spare_events'").get(),undefined);
+  for(const [table,columns] of [['profiles',['spare_auto_sweep_threshold_cents']],['transactions',['spare_change_cents','spare_excluded']]]) {
+    const names=sqlite.prepare(`PRAGMA table_info(${table})`).all().map(row=>row.name);
+    for(const column of columns) assert.ok(!names.includes(column));
+  }
+  assert.ok(sqlite.prepare('SELECT id FROM transactions WHERE id=?').get(tx.id));
 });

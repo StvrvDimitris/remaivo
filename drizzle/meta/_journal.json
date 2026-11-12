@@ -211,6 +211,13 @@
       "when": 1794312949615,
       "tag": "0029_subcategories_flat_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794471019151,
+      "tag": "0030_transactions_and_spare_change",
+      "breakpoints": true
     }
   ]
 }

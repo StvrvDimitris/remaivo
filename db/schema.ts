@@ -15,7 +15,6 @@ export const profiles = sqliteTable("profiles", {
   spareEnabled: integer("spare_enabled", { mode: "boolean" }).notNull().default(false),
   spareSourceId: text("spare_source_id"),
   spareDestinationId: text("spare_destination_id"),
-  spareAutoSweepThresholdCents: integer("spare_auto_sweep_threshold_cents").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -88,9 +87,6 @@ export const transactions = sqliteTable("transactions", {
   countsMonthly: integer("counts_monthly", { mode: "boolean" }).notNull().default(true),
   recurringPlanId: text("recurring_plan_id"),
   installmentPlanId: text("installment_plan_id"),
-  replacesTransactionId: text("replaces_transaction_id"),
-  spareChangeCents: integer("spare_change_cents").notNull().default(0),
-  spareExcluded: integer("spare_excluded", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("idx_transactions_user_date").on(table.userId, table.date),
@@ -182,14 +178,5 @@ export const goalEntries = sqliteTable("goal_entries", {
   note: text("note"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_goal_entries_user_goal_date").on(table.userId, table.goalId, table.date)]);
-
-export const spareEvents = sqliteTable("spare_events", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  transactionId: text("transaction_id").notNull(),
-  multipliedCents: integer("multiplied_cents").notNull(),
-  status: text("status").notNull().default("pending"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [index("idx_spare_events_user_status").on(table.userId, table.status)]);
 
 export * from './v3-schema';

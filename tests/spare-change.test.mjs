@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
 import * as defaultNames from '../app/default-names.ts';
+import { accountFlow } from '../app/investment-valuations.ts';
 globalThis.__spareNames = defaultNames;
 
 const scratch = path.resolve('work/spare-tests');
@@ -16,8 +17,9 @@ const compile = (source, target) => {
   }).outputText);
 };
 compile(fs.readFileSync('app/spare-change.ts', 'utf8'), 'spare-change.mjs');
-const { spareRoundUpCents } = await import(pathToFileURL(path.join(scratch, 'spare-change.mjs')));
+const { spareRoundUpCents, spareTransferStatements } = await import(pathToFileURL(path.join(scratch, 'spare-change.mjs')));
 globalThis.__spareTestRoundUp = spareRoundUpCents;
+globalThis.__spareTestTransfer = spareTransferStatements;
 
 const settings = {
   spare_enabled: 1,
@@ -83,10 +85,6 @@ globalThis.__spareTestEnv = { DB: {
   },
 } };
 
-compile(fs.readFileSync('db/spare.ts', 'utf8').replace("import { env } from 'cloudflare:workers';", 'const env = globalThis.__spareTestEnv;'), 'spare.mjs');
-const { sweepSpare, autoSweepSpare } = await import(pathToFileURL(path.join(scratch, 'spare.mjs')));
-globalThis.__spareTestSweep = sweepSpare;
-
 // Run the actual sweep action with local auth, clock, and DB bindings.
 const routeSource = fs.readFileSync('app/api/finance/route.ts', 'utf8')
   .replace(/^import[^\n]*\r?\n/gm, '');
@@ -97,7 +95,7 @@ const reconcileV3 = async () => {};
 const v3Snapshot = async () => ({});
 const financialToday = () => '2026-09-17';
 const spareRoundUpCents = globalThis.__spareTestRoundUp;
-const sweepSpare = globalThis.__spareTestSweep;
+const spareTransferStatements = globalThis.__spareTestTransfer;
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
 const { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } = globalThis.__spareNames;
 class ArchiveError extends Error { status = 409; }
@@ -108,159 +106,6 @@ const post = (action, payload = {}) => POST(new Request('https://example.invalid
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ action, payload }),
 }));
-const sweep = () => post('sweepSpare');
-
-function seedAuto(owner, { pending = 100, threshold = 100, enabled = 1, balance = 1000, type = 'savings' } = {}) {
-  const source = `${owner}-source`, destination = `${owner}-destination`;
-  sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_auto_sweep_threshold_cents) VALUES(?,?,?,?,?)').run(owner, enabled, source, destination, threshold);
-  for (const [id, kind, amount] of [[source, 'bank', balance], [destination, type, 0]])
-    sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id, owner, id, kind, amount);
-  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,?,?,?)").run(`${owner}-event`, owner, `${owner}-purchase`, pending);
-  return { source, destination };
-}
-
-test('Automatic sweep settings validate and persist a positive threshold, with off as the default', async () => {
-  const owner = 'threshold-settings-owner';
-  globalThis.__spareTestUser = owner;
-  const { source, destination } = seedAuto(owner, { threshold: 0 });
-  const payload = { enabled: true, autoSweep: true, sourceAccountId: source, destinationAccountId: destination, multiplier: 2 };
-  for (const autoSweepThreshold of ['', '0', '-1', 'bad', 'Infinity', '9007199254740991']) {
-    assert.equal((await post('updateSpare', { ...payload, autoSweepThreshold })).status, 400);
-    assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 0);
-  }
-  assert.equal((await post('updateSpare', { ...payload, autoSweepThreshold: '5.25' })).status, 200);
-  assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 525);
-  assert.equal((await post('updateSpare', { ...payload, autoSweep: false })).status, 200);
-  assert.equal(sqlite.prepare('SELECT spare_auto_sweep_threshold_cents n FROM profiles WHERE user_id=?').get(owner).n, 0);
-});
-
-test('Automatic sweeps wait below the threshold and sweep the full total at or above it', async () => {
-  for (const pending of [99, 100, 140]) {
-    const owner = `threshold-${pending}`;
-    const { source, destination } = seedAuto(owner, { pending, type: pending === 140 ? 'investment' : 'savings' });
-    assert.equal(await autoSweepSpare(owner, '2026-10-01'), pending >= 100);
-    assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 1000 - (pending >= 100 ? pending : 0));
-    assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, pending >= 100 ? pending : 0);
-    const recorded = sqlite.prepare("SELECT amount_cents,type,date,committed,counts_monthly FROM transactions WHERE user_id=?").all(owner);
-    assert.deepEqual(recorded.map(row => ({ ...row })), pending >= 100 ? [{ amount_cents: pending, type: pending === 140 ? 'investment' : 'saving', date: '2026-10-01', committed: 1, counts_monthly: 1 }] : []);
-  }
-});
-
-test('Turning collection or automatic sweeps off pauses auto while manual sweeping remains available', async () => {
-  for (const settings of [{ enabled: 0 }, { threshold: 0 }, { pending: 20, threshold: 100 }]) {
-    const owner = `paused-${JSON.stringify(settings)}`;
-    seedAuto(owner, settings);
-    assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
-    assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
-    assert.equal(await sweepSpare(owner, '2026-10-01'), true);
-  }
-});
-
-test('Insufficient funds preserve the entire pending total and a later sync retries only once', async () => {
-  const owner = 'auto-retry';
-  const { source, destination } = seedAuto(owner, { pending: 140, balance: 139 });
-  assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
-  assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
-  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, 0);
-  sqlite.prepare('UPDATE accounts SET balance_cents=500 WHERE id=?').run(source);
-  assert.equal(await autoSweepSpare(owner, '2026-10-02'), true);
-  assert.equal(await autoSweepSpare(owner, '2026-10-02'), false);
-  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 360);
-  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n, 1);
-});
-
-test('Competing automatic and manual sweeps consume the same pending change exactly once', async () => {
-  const owner = 'auto-contention';
-  const { source, destination } = seedAuto(owner, { pending: 140 });
-  const results = await Promise.all([autoSweepSpare(owner, '2026-10-01'), autoSweepSpare(owner, '2026-10-01'), sweepSpare(owner, '2026-10-01')]);
-  assert.equal(results.filter(Boolean).length, 1);
-  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(source).n, 860);
-  assert.equal(sqlite.prepare('SELECT balance_cents n FROM accounts WHERE id=?').get(destination).n, 140);
-  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n, 1);
-});
-
-test('Automatic sweeps respect account ownership, archived accounts and supported account types', async () => {
-  for (const [field, value] of [['user_id', 'someone-else'], ['archived', 1], ['type', 'bank']]) {
-    const owner = `invalid-${field}`;
-    const { destination } = seedAuto(owner);
-    sqlite.prepare(`UPDATE accounts SET ${field}=? WHERE id=?`).run(value, destination);
-    assert.equal(await autoSweepSpare(owner, '2026-10-01'), false);
-    assert.equal(sqlite.prepare('SELECT status FROM spare_events WHERE user_id=?').get(owner).status, 'pending');
-  }
-});
-
-test('Saving spare settings and sweeping use the expense account, preserve pending accrual, and cannot repeat', async () => {
-  const owner = 'sweep-owner';
-  globalThis.__spareTestUser = owner;
-  sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
-  for (const [id, type, balance] of [
-    ['sweep-source', 'bank', 100],
-    ['sweep-destination', 'savings', 0],
-  ]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id, owner, id, type, balance);
-  const saved = await post('updateSpare', {
-    enabled: true, sourceAccountId: 'sweep-source', destinationAccountId: 'sweep-destination', multiplier: 2,
-  });
-  assert.equal(saved.status, 200, JSON.stringify(await saved.json()));
-  assert.deepEqual({ ...sqlite.prepare('SELECT spare_enabled,spare_source_id,spare_destination_id,spare_multiplier FROM profiles WHERE user_id=?').get(owner) }, {
-    spare_enabled: 1, spare_source_id: 'sweep-source', spare_destination_id: 'sweep-destination', spare_multiplier: 2,
-  });
-  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date) VALUES('sweep-purchase',?,?,'expense','Purchase',1234,'2026-09-17')")
-    .run(owner, 'sweep-source');
-  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES('sweep-event',?,'sweep-purchase',132)").run(owner);
-
-  assert.equal((await sweep()).status, 409);
-  assert.equal(sqlite.prepare("SELECT status FROM spare_events WHERE id='sweep-event'").get().status, 'pending');
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM transactions WHERE description='Spare change sweep' AND user_id=?").get(owner).n, 0);
-  assert.deepEqual(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row => ({ ...row })), [
-    { id: 'sweep-destination', balance_cents: 0 },
-    { id: 'sweep-source', balance_cents: 100 },
-  ]);
-
-  sqlite.prepare("UPDATE accounts SET balance_cents=500 WHERE id='sweep-source'").run();
-  assert.equal((await sweep()).status, 200);
-  assert.deepEqual(sqlite.prepare("SELECT type,account_id,destination_account_id,amount_cents FROM transactions WHERE description='Spare change sweep' AND user_id=?").all(owner).map(row => ({ ...row })), [
-    { type: 'saving', account_id: 'sweep-source', destination_account_id: 'sweep-destination', amount_cents: 132 },
-  ]);
-  assert.deepEqual(sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row => ({ ...row })), [
-    { id: 'sweep-destination', balance_cents: 132 },
-    { id: 'sweep-source', balance_cents: 368 },
-  ]);
-  assert.equal(sqlite.prepare("SELECT status FROM spare_events WHERE id='sweep-event'").get().status, 'swept');
-  assert.equal((await sweep()).status, 409);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM transactions WHERE description='Spare change sweep' AND user_id=?").get(owner).n, 1);
-  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='sweep-source'").get().balance_cents, 368);
-});
-
-test('Correcting a pending expense while collection is off carries its earned multiplier forward', async () => {
-  const owner = 'correction-owner';
-  globalThis.__spareTestUser = owner;
-  sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_multiplier) VALUES(?,0,?,?,2)')
-    .run(owner, 'correction-source', 'correction-destination');
-  for (const [id, type, balance] of [
-    ['correction-source', 'bank', 5000],
-    ['correction-destination', 'savings', 0],
-  ]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,?)').run(id, owner, id, type, balance);
-  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date,spare_change_cents) VALUES('correction-original',?,?,'expense','Original',1234,'2026-09-17',132)")
-    .run(owner, 'correction-source');
-  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES('correction-event',?,'correction-original',132)").run(owner);
-
-  const response = await post('correctTransaction', {
-    transactionId: 'correction-original', accountId: 'correction-source', amount: '12.50',
-    date: '2026-09-17', description: 'Corrected purchase', excludeFromSpare: false,
-  });
-  assert.equal(response.status, 200, JSON.stringify(await response.json()));
-  const replacement = sqlite.prepare("SELECT id,amount_cents,spare_change_cents,status FROM transactions WHERE user_id=? AND replaces_transaction_id='correction-original'").get(owner);
-  assert.deepEqual({ amount_cents: replacement.amount_cents, spare_change_cents: replacement.spare_change_cents, status: replacement.status },
-    { amount_cents: 1250, spare_change_cents: 100, status: 'posted' });
-  assert.equal(sqlite.prepare("SELECT status FROM transactions WHERE id='correction-original'").get().status, 'corrected');
-  assert.deepEqual(sqlite.prepare('SELECT transaction_id,multiplied_cents,status FROM spare_events WHERE user_id=? ORDER BY status').all(owner).map(row => ({ ...row })), [
-    { transaction_id: 'correction-original', multiplied_cents: 132, status: 'cancelled' },
-    { transaction_id: replacement.id, multiplied_cents: 100, status: 'pending' },
-  ]);
-  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='correction-source'").get().balance_cents, 4984);
-});
-
-
 test('Transaction corrections support every manual type combination without duplicating balances', async () => {
   const types = ['expense', 'income', 'transfer', 'saving', 'investment'];
   const effect = type => type === 'income' ? [1234, 0] : ['transfer', 'saving', 'investment'].includes(type) ? [-1234, 1234] : [-1234, 0];
@@ -275,44 +120,16 @@ test('Transaction corrections support every manual type combination without dupl
       .run(original, owner, source, ['transfer','saving','investment'].includes(before) ? destination : null, before, ['expense','saving','investment'].includes(before) ? 1 : 0);
     const response = await post('correctTransaction', { transactionId: original, type: after, accountId: source, destinationAccountId: destination, amount: '12.34', date: '2026-09-17', description: 'Corrected' });
     assert.equal(response.status, 200, `${before} -> ${after}: ${JSON.stringify(await response.json())}`);
-    const replacement = sqlite.prepare('SELECT * FROM transactions WHERE replaces_transaction_id=?').get(original);
+    const replacement = sqlite.prepare('SELECT * FROM transactions WHERE id=?').get(original);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM transactions WHERE user_id=?').get(owner).n, 1);
     assert.equal(replacement.type, after);
     assert.equal(replacement.counts_monthly, ['expense','saving','investment'].includes(after) ? 1 : 0);
     assert.equal(replacement.destination_account_id, ['transfer','saving','investment'].includes(after) ? destination : null);
     assert.equal(sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(source).balance_cents, 10000 + expected[0]);
     assert.equal(sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(destination).balance_cents, 10000 + expected[1]);
-    assert.equal(sqlite.prepare('SELECT status FROM transactions WHERE id=?').get(original).status, 'corrected');
+    assert.equal(replacement.status, 'posted');
   }
 });
-
-test('Reclassifying an expense cancels pending spare change; invalid types cannot mutate it', async () => {
-  const owner = 'reclassify-spare'; globalThis.__spareTestUser = owner;
-  sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('reclassify-card',?,'Card','bank',8766)").run(owner);
-  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date) VALUES('reclassify-tx',?,'reclassify-card','expense','Mistake',1234,'2026-09-17')").run(owner);
-  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES('reclassify-event',?,'reclassify-tx',66)").run(owner);
-  const payload = { transactionId:'reclassify-tx', accountId:'reclassify-card', amount:'12.34', date:'2026-09-17' };
-  assert.equal((await post('correctTransaction', {...payload,type:'bogus'})).status,400);
-  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='reclassify-card'").get().balance_cents,8766);
-  assert.equal((await post('correctTransaction', {...payload,type:'income'})).status,200);
-  assert.equal(sqlite.prepare("SELECT status FROM spare_events WHERE id='reclassify-event'").get().status,'cancelled');
-  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='reclassify-card'").get().balance_cents,11234);
-});
-
-
-test('Type corrections keep linked payments and completed round-ups protected', async () => {
-  const owner = 'type-guards'; globalThis.__spareTestUser = owner;
-  sqlite.prepare("INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES('type-guards-card',?,'Card','bank',9000)").run(owner);
-  for (const [id, recurring] of [['type-guards-linked','some-plan'],['type-guards-swept',null]])
-    sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date,recurring_plan_id) VALUES(?,?,'type-guards-card','expense','Protected',1000,'2026-09-17',?)").run(id,owner,recurring);
-  sqlite.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents,status) VALUES('type-guards-event',?,'type-guards-swept',66,'swept')").run(owner);
-  for (const transactionId of ['type-guards-linked','type-guards-swept']) {
-    const response = await post('correctTransaction',{transactionId,type:'income',accountId:'type-guards-card',amount:'10',date:'2026-09-17'});
-    assert.equal(response.status,409);
-    assert.equal(sqlite.prepare('SELECT status FROM transactions WHERE id=?').get(transactionId).status,'posted');
-  }
-  assert.equal(sqlite.prepare("SELECT balance_cents FROM accounts WHERE id='type-guards-card'").get().balance_cents,9000);
-});
-
 
 test('Language settings persist per owner and reject unsupported values', async () => {
   sqlite.prepare("INSERT INTO profiles(user_id) VALUES('language-a'),('language-b')").run();
@@ -372,4 +189,148 @@ test('Planning can be turned off and on, and the snapshot carries this month aga
  response=await post('updatePlanning',{enabled:true});body=await response.json();
  assert.equal(sqlite.prepare('SELECT planning_enabled n FROM profiles WHERE user_id=?').get(owner).n,1);
  assert.deepEqual([body.month.income,body.month.spending,body.month.previousIncome,body.month.previousSpending],[100000,2500,50000,4000]);
+});
+
+// These accounts start at zero, so their balances must equal their posted ledger entries.
+const checkLedger = owner => {
+  for (const account of sqlite.prepare('SELECT id,balance_cents FROM accounts WHERE user_id=?').all(owner)) {
+    const total = sqlite.prepare("SELECT * FROM transactions WHERE user_id=? AND status='posted' AND (account_id=? OR destination_account_id=?)").all(owner, account.id, account.id)
+      .reduce((sum, tx) => sum + accountFlow(tx, account.id), 0);
+    assert.equal(account.balance_cents, total, account.id);
+  }
+};
+const editPayload = (id, type, account, destination, amount = '20') => ({ transactionId: id, type, accountId: account, destinationAccountId: destination, amount, date: '2026-09-17', description: 'Edited' });
+function seedEditable(owner, type = 'expense') {
+  globalThis.__spareTestUser = owner;
+  sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
+  for (const suffix of ['a', 'b', 'c']) sqlite.prepare("INSERT INTO accounts(id,user_id,name,type) VALUES(?,?,?,'bank')").run(`${owner}-${suffix}`, owner, suffix);
+  const source = `${owner}-a`, destination = `${owner}-b`, id = `${owner}-tx`;
+  const moving = type === 'transfer';
+  sqlite.prepare("INSERT INTO transactions(id,user_id,account_id,destination_account_id,type,description,amount_cents,date) VALUES(?,?,?,?,?,'Original',1000,'2026-09-17')").run(id, owner, source, moving ? destination : null, type);
+  sqlite.prepare('UPDATE accounts SET balance_cents=? WHERE id=?').run(type === 'income' ? 1000 : -1000, source);
+  if (moving) sqlite.prepare('UPDATE accounts SET balance_cents=1000 WHERE id=?').run(destination);
+  return { id, source, destination, other: `${owner}-c` };
+}
+
+test('Edits change amount, accounts and type in place while preserving the ledger', async () => {
+  for (const type of ['expense', 'income', 'transfer']) {
+    const owner = `edit-ledger-${type}`, { id, destination, other } = seedEditable(owner, type);
+    const after = type === 'expense' ? 'income' : type === 'income' ? 'transfer' : 'expense';
+    let response = await post('editTransaction', editPayload(id, type, other, destination));
+    assert.equal(response.status, 200, JSON.stringify(await response.json()));
+    checkLedger(owner);
+    assert.deepEqual(sqlite.prepare('SELECT balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row => row.balance_cents), type === 'expense' ? [0, 0, -2000] : type === 'income' ? [0, 0, 2000] : [0, 2000, -2000]);
+    response = await post('editTransaction', editPayload(id, after, other, destination, '15'));
+    assert.equal(response.status, 200, JSON.stringify(await response.json()));
+    const rows = sqlite.prepare('SELECT id,type,amount_cents,status FROM transactions WHERE user_id=?').all(owner).map(row => ({ ...row }));
+    assert.deepEqual(rows, [{ id, type: after, amount_cents: 1500, status: 'posted' }]);
+    checkLedger(owner);
+    assert.deepEqual(sqlite.prepare('SELECT balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row => row.balance_cents), after === 'expense' ? [0, 0, -1500] : after === 'income' ? [0, 0, 1500] : [0, 1500, -1500]);
+  }
+});
+
+test('Deleting reverses balances and removes assignments', async () => {
+  const owner = 'delete-ledger', { id } = seedEditable(owner, 'transfer');
+  sqlite.prepare("INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES('delete-assignment',?,?,'bucket',500)").run(owner, id);
+  assert.equal((await post('deleteTransaction', { transactionId: id })).status, 200);
+  for (const table of ['transactions', 'v3_assignments']) assert.equal(sqlite.prepare(`SELECT COUNT(*) n FROM ${table} WHERE user_id=?`).get(owner).n, 0);
+  checkLedger(owner);
+  assert.deepEqual(sqlite.prepare('SELECT balance_cents FROM accounts WHERE user_id=? ORDER BY id').all(owner).map(row => row.balance_cents), [0, 0, 0]);
+});
+
+test('Editing scales an assignment down and changing type removes it', async () => {
+  const owner = 'edit-assignment', { id, source, destination } = seedEditable(owner);
+  sqlite.prepare("INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES('edit-assignment-row',?,?,'bucket',600)").run(owner, id);
+  assert.equal((await post('editTransaction', editPayload(id, 'expense', source, destination, '5'))).status, 200);
+  assert.equal(sqlite.prepare("SELECT amount_cents FROM v3_assignments WHERE id='edit-assignment-row'").get().amount_cents, 300);
+  checkLedger(owner);
+  assert.equal((await post('editTransaction', editPayload(id, 'income', source, destination, '5'))).status, 200);
+  assert.equal(sqlite.prepare("SELECT * FROM v3_assignments WHERE id='edit-assignment-row'").get(), undefined);
+  checkLedger(owner);
+});
+
+test('Linked recurring payments update on edit and reopen on deletion', async () => {
+  for (const remaining of [0, 400]) {
+    const owner = `linked-${remaining}`, { id, source, destination } = seedEditable(owner);
+    const plan = `${owner}-plan`, occurrence = `${owner}-occurrence`;
+    sqlite.prepare("INSERT INTO recurring_plans(id,user_id,title,type,amount_cents,account_id,frequency,next_date,active) VALUES(?,?,'Plan','expense',1000,?,'monthly','2026-10-17',1)").run(plan, owner, source);
+    sqlite.prepare("INSERT INTO v3_occurrences(id,user_id,source_kind,source_id,scheduled_date,due_date,title,type,amount_cents,paid_cents,status,transaction_id) VALUES(?,?,'recurring',?,'2026-09-17','2026-09-17','Plan','expense',?,?, 'paid',?)").run(occurrence, owner, plan, 1000 + remaining, 1000 + remaining, id);
+    sqlite.prepare('INSERT INTO v3_payment_links(transaction_id,user_id,occurrence_id) VALUES(?,?,?)').run(id, owner, occurrence);
+    assert.equal((await post('editTransaction', editPayload(id, 'income', source, destination))).status, 409);
+    assert.equal((await post('editTransaction', editPayload(id, 'expense', source, destination, '15'))).status, 200);
+    let row = sqlite.prepare('SELECT paid_cents,amount_cents FROM v3_occurrences WHERE id=?').get(occurrence);
+    assert.deepEqual({ ...row }, { paid_cents: 1500 + remaining, amount_cents: 1500 + remaining });
+    checkLedger(owner);
+    assert.equal((await post('deleteTransaction', { transactionId: id })).status, 200);
+    row = sqlite.prepare('SELECT paid_cents,status,transaction_id FROM v3_occurrences WHERE id=?').get(occurrence);
+    assert.deepEqual({ ...row }, { paid_cents: remaining, status: remaining ? 'partial' : 'upcoming', transaction_id: null });
+    assert.equal(sqlite.prepare('SELECT next_date FROM recurring_plans WHERE id=?').get(plan).next_date, '2026-09-17');
+    assert.equal(sqlite.prepare('SELECT * FROM v3_payment_links WHERE transaction_id=?').get(id), undefined);
+    checkLedger(owner);
+  }
+});
+
+test('Edit and delete refuse protected and missing transactions', async () => {
+  const owner = 'edit-guards', { source, destination } = seedEditable(owner);
+  for (const [id, type, description] of [['installment-purchase', 'installment_purchase', 'Purchase'], ['installment-payment', 'installment_payment', 'Payment'], ['opening', 'opening_balance', 'Opening'], ['adjustment', 'balance_adjustment', 'Adjustment'], ['hidden', 'expense', 'Hidden']]) {
+    sqlite.prepare('INSERT INTO transactions(id,user_id,account_id,type,description,amount_cents,date,status) VALUES(?,?,?,?,?,1000,?,?)').run(id, owner, source, type, description, '2026-09-17', id === 'hidden' ? 'corrected' : 'posted');
+  }
+  for (const id of ['installment-purchase', 'installment-payment', 'opening', 'adjustment', 'hidden', 'unknown']) {
+    for (const action of ['editTransaction', 'deleteTransaction']) {
+      const response = await post(action, editPayload(id, 'expense', source, destination));
+      assert.equal(response.status, ['hidden', 'unknown'].includes(id) ? 404 : 409, `${action}: ${id}`);
+      const { error } = await response.json();
+      if (id.startsWith('installment')) assert.equal(error, 'Change installment entries from their pay-later plan.');
+      if (['opening', 'adjustment'].includes(id)) assert.equal(error, 'Use Update balance on the account to change an opening balance or adjustment.');
+      if (['hidden', 'unknown'].includes(id)) assert.equal(error, 'That transaction is no longer available.');
+    }
+  }
+});
+
+
+
+test('Eligible purchases post a separate round-up and preserve the ledger', async () => {
+  for (const [scenario, destType, enabled, excluded, other, archived, multiplier, expected] of [
+    ['savings','savings',1,false,false,0,1,66], ['investment','investment',1,false,false,0,3,198],
+    ['excluded','savings',1,true,false,0,2,0], ['other','savings',1,false,true,0,2,0],
+    ['disabled','savings',0,false,false,0,2,0], ['archived','savings',1,false,false,1,2,0],
+  ]) {
+    const owner=`round-${scenario}`, source=`${owner}-source`, dest=`${owner}-dest`, third=`${owner}-other`;
+    globalThis.__spareTestUser=owner;
+    sqlite.prepare('INSERT INTO profiles(user_id,spare_enabled,spare_source_id,spare_destination_id,spare_multiplier) VALUES(?,?,?,?,?)').run(owner,enabled,source,dest,multiplier);
+    for(const [id,type,archive] of [[source,'bank',0],[dest,destType,archived],[third,'bank',0]]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,archived) VALUES(?,?,?,?,?)').run(id,owner,id,type,archive);
+    const response=await post('addTransaction',{type:'expense',accountId:other?third:source,description:'Coffee',amount:'12.34',date:'2026-09-17',excludeFromSpare:excluded});
+    assert.equal(response.status,200,JSON.stringify(await response.json()));
+    const rows=sqlite.prepare('SELECT * FROM transactions WHERE user_id=? ORDER BY type').all(owner);
+    assert.equal(rows.length,expected?2:1,scenario);
+    if(expected) {
+      const transfer=rows.find(row=>row.type!=='expense');
+      assert.deepEqual([transfer.type,transfer.amount_cents,transfer.description,transfer.date,transfer.committed,transfer.counts_monthly,transfer.account_id,transfer.destination_account_id],[destType==='investment'?'investment':'saving',expected,'Spare change: Coffee','2026-09-17',1,1,source,dest]);
+    }
+    checkLedger(owner);
+    assert.deepEqual([source,dest,third].map(id=>sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(id).balance_cents),[other?0:-1234-expected,expected,other?-1234:0]);
+    if(expected && scenario==='savings') {
+      const purchase=rows.find(row=>row.type==='expense');
+      assert.equal((await post('editTransaction',editPayload(purchase.id,'expense',source,dest,'20'))).status,200);
+      checkLedger(owner);
+      assert.equal((await post('deleteTransaction',{transactionId:purchase.id})).status,200);
+      checkLedger(owner);
+      assert.deepEqual(sqlite.prepare('SELECT type,amount_cents FROM transactions WHERE user_id=?').all(owner).map(r=>({...r})),[{type:'saving',amount_cents:66}]);
+      assert.deepEqual([source,dest,third].map(id=>sqlite.prepare('SELECT balance_cents FROM accounts WHERE id=?').get(id).balance_cents),[-66,66,0]);
+    }
+  }
+});
+
+test('Spare settings validate active accounts and save the multiplier', async () => {
+  const owner='spare-settings'; globalThis.__spareTestUser=owner;
+  sqlite.prepare('INSERT INTO profiles(user_id) VALUES(?)').run(owner);
+  for(const [id,type,archived] of [['settings-source','bank',0],['settings-dest','savings',0],['settings-archived','bank',1],['settings-invest','investment',0]]) sqlite.prepare('INSERT INTO accounts(id,user_id,name,type,archived) VALUES(?,?,?,?,?)').run(id,owner,id,type,archived);
+  const payload={enabled:true,sourceAccountId:'settings-source',destinationAccountId:'settings-dest',multiplier:3};
+  for(const id of ['settings-archived','settings-invest','missing']) {
+    const response=await post('updateSpare',{...payload,sourceAccountId:id});
+    assert.equal(response.status,400); assert.equal((await response.json()).error,'Choose an active spending account for round-ups.');
+  }
+  assert.equal((await post('updateSpare',{...payload,destinationAccountId:'settings-source'})).status,400);
+  assert.equal((await post('updateSpare',payload)).status,200);
+  assert.deepEqual({...sqlite.prepare('SELECT spare_enabled,spare_source_id,spare_destination_id,spare_multiplier FROM profiles WHERE user_id=?').get(owner)},{spare_enabled:1,spare_source_id:'settings-source',spare_destination_id:'settings-dest',spare_multiplier:3});
 });

@@ -7,8 +7,7 @@ import { getUser } from "../../auth";
 import { ensureFinanceSchema } from "../../../db/ensure";
 import { addCalendarInterval, financialToday, validTimeZone } from "../../finance-dates";
 import { buildStatistics, comparisonRange, effectiveComparison, type ComparisonMode, type ComparisonPeriod, type StatisticsFilters, type StatisticsRow, type StatisticsTag } from "../../statistics";
-import { spareRoundUpCents, type SpareSettings } from "../../spare-change";
-import { sweepSpare } from "../../../db/spare";
+import { spareRoundUpCents, spareTransferStatements, type SpareSettings } from "../../spare-change";
 import { isUITheme } from "../../ui-themes";
 import { isLedgerType, type StatisticsMode } from "../../transaction-classification";
 import { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } from "../../default-names";
@@ -456,7 +455,6 @@ async function snapshot(user: FinanceUser) {
     env.DB.prepare(`SELECT e.* FROM goal_entries e
       JOIN goals g ON g.id = e.goal_id AND g.user_id = e.user_id AND g.archived = 0
       WHERE e.user_id = ? ORDER BY e.date DESC, e.created_at DESC, e.id DESC LIMIT 200`).bind(user.userId),
-    env.DB.prepare("SELECT * FROM spare_events WHERE user_id = ? AND status = 'pending' ORDER BY created_at").bind(user.userId),
     env.DB.prepare("SELECT * FROM investment_valuation_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC, created_at DESC").bind(user.userId),
     env.DB.prepare(`SELECT
         COALESCE(SUM(CASE WHEN date >= ? AND type = 'income' THEN amount_cents END), 0) AS income,
@@ -466,7 +464,7 @@ async function snapshot(user: FinanceUser) {
       FROM transactions WHERE user_id = ? AND status = 'posted' AND date >= ? AND date <= ? AND (date >= ? OR date <= ?)`)
       .bind(month.start, month.start, month.previousThrough, month.previousThrough, user.userId, month.previousStart, today, month.start, month.previousThrough),
   ]), v3Snapshot(user.userId, today)]);
-  const [accounts, categories, tags, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, spareEvents, investmentSnapshots, monthTotals] = mainRows;
+  const [accounts, categories, tags, transactions, recurring, installmentPlans, installmentPayments, goals, goalEntries, investmentSnapshots, monthTotals] = mainRows;
   const totals = (monthTotals.results[0] ?? {}) as Record<string, number>;
 
   return {
@@ -482,7 +480,6 @@ async function snapshot(user: FinanceUser) {
     installmentPayments: installmentPayments.results,
     goals: goals.results,
     goalEntries: goalEntries.results,
-    spareEvents: spareEvents.results,
     investmentSnapshots: investmentSnapshots.results,
     // Calendar month to date, with the same days of last month, for tracking without a plan.
     month: { ...month, income: Number(totals.income) || 0, spending: Number(totals.spending) || 0, previousIncome: Number(totals.previous_income) || 0, previousSpending: Number(totals.previous_spending) || 0 },
@@ -541,7 +538,7 @@ export async function POST(request: Request) {
     const storedClock = action === "setup" ? null : await env.DB.prepare("SELECT timezone FROM profiles WHERE user_id = ?").bind(user.userId).first<{timezone:string}>();
     const actionToday = financialToday(storedClock?.timezone || "UTC");
 
-    if (["addTransaction", "correctTransaction", "updateTransaction"].includes(action) && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
+    if (action === "addTransaction" && (!calendarDate(payload.date) || String(payload.date) > actionToday)) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
     if (["addRecurring","updateRecurring"].includes(action)) {
       if(payload.frequency==='once'){payload.frequency='monthly';payload.endDate=payload.nextDate;}
       const existing = action === "updateRecurring" ? await env.DB.prepare("SELECT type FROM recurring_plans WHERE id=? AND user_id=?").bind(payload.planId,user.userId).first<{type:string}>() : null;
@@ -665,92 +662,82 @@ export async function POST(request: Request) {
       if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
       const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
       const spare = type === "expense" ? spareRoundUpCents(amount, text(payload.accountId), spareExcluded, profile) : 0;
-      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly, spare_change_cents, spare_excluded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, tagIds.json, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, spare, spareExcluded ? 1 : 0)];
+      const statements = [env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, user.userId, payload.accountId || null, payload.destinationAccountId || null, payload.categoryId || null, tagIds.json, type, text(payload.description), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0)];
       if (type === "income") statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
       else if (isMovement) {
         statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
         statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ? AND user_id = ?").bind(amount, payload.destinationAccountId, user.userId));
       } else statements.push(env.DB.prepare("UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ? AND user_id = ?").bind(amount, payload.accountId, user.userId));
-      if (spare) {
-        statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, multiplied_cents) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), user.userId, id, spare));
+      if (spare && profile?.spare_source_id && profile.spare_destination_id) {
+        const destination = await env.DB.prepare("SELECT type FROM accounts WHERE id = ? AND user_id = ? AND archived = 0").bind(profile.spare_destination_id, user.userId).first<{ type: string }>();
+        if (destination) statements.push(...spareTransferStatements(sql => env.DB.prepare(sql), { userId: user.userId, purchaseId: id, amount: spare, date: text(payload.date, actionToday), description: text(payload.description), sourceId: profile.spare_source_id, destinationId: profile.spare_destination_id, destinationType: destination.type }));
       }
       await env.DB.batch(statements);
-    } else if (action === "updateTransaction") {
-      const current = await env.DB.prepare("SELECT tag_ids FROM transactions WHERE id = ? AND user_id = ? AND status = 'posted'").bind(payload.transactionId, user.userId).first<{ tag_ids: string }>();
-      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, current?.tag_ids) : { json: current?.tag_ids ?? "[]" };
-      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
-      await env.DB.prepare("UPDATE transactions SET description = ?, date = ?, category_id = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN NULL ELSE ? END, tag_ids = CASE WHEN type IN ('opening_balance', 'balance_adjustment') THEN '[]' ELSE ? END WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.description, "Transaction"), text(payload.date, actionToday), payload.categoryId || null, tagIds.json, payload.transactionId, user.userId).run();
-    } else if (action === "correctTransaction") {
-      const original = await env.DB.prepare(
-        `WITH RECURSIVE correction_chain AS (
-          SELECT * FROM transactions WHERE id = ? AND user_id = ?
-          UNION ALL
-          SELECT child.* FROM transactions child
-          JOIN correction_chain parent ON child.replaces_transaction_id = parent.id
-          WHERE child.user_id = ?
-        )
-        SELECT * FROM correction_chain WHERE status = 'posted' ORDER BY created_at DESC LIMIT 1`,
-      ).bind(payload.transactionId, user.userId, user.userId).first<Record<string, unknown>>();
-      if (!original) return Response.json({ error: "That transaction is no longer available to correct." }, { status: 404 });
+    } else if (action === "editTransaction" || action === "correctTransaction" || action === "deleteTransaction") {
+      // Transactions are plain records: an edit changes the row in place and a
+      // delete removes it. Balances, bucket splits and linked plan payments
+      // follow in the same batch. A round-up posted with a purchase is its own
+      // transaction and is left alone. The row's status holds a one-off
+      // marker during the batch, so a concurrent edit or delete changes nothing.
+      const removing = action === "deleteTransaction";
+      const original = await env.DB.prepare("SELECT * FROM transactions WHERE id = ? AND user_id = ? AND status = 'posted'").bind(text(payload.transactionId), user.userId).first<Record<string, unknown>>();
+      if (!original) return Response.json({ error: "That transaction is no longer available." }, { status: 404 });
       const originalType = String(original.type);
-      const type = text(payload.type, originalType);
-      if (!["expense", "income", "transfer", "saving", "investment"].includes(type)) return Response.json({ error: "Choose a valid transaction type." }, { status: 400 });
-      if (["installment_payment", "installment_purchase"].includes(originalType)) return Response.json({ error: "Correct installment entries from their pay-later plan." }, { status: 409 });
-      if (isLedgerType(originalType)) return Response.json({ error: "Use Update balance on the account to correct an opening balance or adjustment." }, { status: 409 });
-      if (["investment", "saving"].includes(originalType) && String(original.description) === "Spare change sweep") return Response.json({ error: "A completed spare-change sweep needs a separate balancing transaction." }, { status: 409 });
-      const oldSpare = await env.DB.prepare("SELECT status, multiplied_cents FROM spare_events WHERE transaction_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1").bind(original.id, user.userId).first<{status:string;multiplied_cents:number}>();
-      if (oldSpare?.status === "swept") return Response.json({ error: "This transaction’s spare change has already been swept. Add a balancing transaction instead." }, { status: 409 });
-
-      const typeChanged = type !== originalType;
-      if (typeChanged) {
-        const linked = await env.DB.prepare("SELECT 1 AS linked FROM v3_payment_links WHERE transaction_id = ? AND user_id = ? LIMIT 1").bind(original.id, user.userId).first();
-        if (original.recurring_plan_id || linked) return Response.json({ error: "This payment is linked to a plan. Its type must stay consistent with that plan." }, { status: 409 });
-      }
-      const categoryKind = type === "income" ? "income" : type === "expense" ? "expense" : null;
-      const categoryId = categoryKind ? (!typeChanged && payload.categoryId === original.category_id ? original.category_id : await categoryIdFor(user.userId, payload.categoryId, categoryKind)) : null;
-      // Without a tag choice the replacement keeps the original's tags.
-      const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, original.tag_ids) : { json: String(original.tag_ids ?? "[]") };
-      if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
-      const amount = cents(payload.amount);
-      const accountId = text(payload.accountId);
-      const destinationAccountId = text(payload.destinationAccountId);
-      const moving = ["transfer", "saving", "investment"].includes(type);
-      if (!amount || !accountId || (moving && (!destinationAccountId || destinationAccountId === accountId))) return Response.json({ error: "Enter a valid amount and account selection." }, { status: 400 });
-      const matchingAccounts = await env.DB.prepare("SELECT COUNT(*) AS total FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, accountId, moving ? destinationAccountId : accountId).first<{total:number}>();
-      if (Number(matchingAccounts?.total || 0) !== (moving ? 2 : 1)) return Response.json({ error: "One of those accounts is not available." }, { status: 400 });
-      const committed = type === "expense" && bool(payload.committed);
-      const countsBudget = ["expense", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget, !typeChanged && Number(original.counts_monthly) === 0);
-      const spareExcluded = type === "expense" && bool(payload.excludeFromSpare, Number(original.spare_excluded) === 1);
-      const profile = type === "expense" ? await env.DB.prepare("SELECT spare_enabled, spare_source_id, spare_multiplier, spare_destination_id FROM profiles WHERE user_id = ?").bind(user.userId).first<SpareSettings>() : null;
-      let spare = type === "expense" ? spareRoundUpCents(amount, accountId, spareExcluded, profile) : 0;
-      if (type === "expense" && !typeChanged && !profile?.spare_enabled && oldSpare?.status === "pending" &&
-          !spareExcluded && accountId === original.account_id) {
-        const originalBase = (100 - (Number(original.amount_cents) % 100)) % 100;
-        const correctedBase = (100 - (amount % 100)) % 100;
-        const earnedMultiplier = originalBase ? oldSpare.multiplied_cents / originalBase : 0;
-        spare = Number.isInteger(earnedMultiplier) && earnedMultiplier > 0 ? correctedBase * earnedMultiplier : 0;
-      }
-      const replacementId = crypto.randomUUID();
-      const replacement = {
-        type,
-        amount_cents: amount,
-        account_id: accountId,
-        destination_account_id: moving ? destinationAccountId : null,
-      };
-      const correctionMarker = `correcting:${replacementId}`;
+      if (["installment_payment", "installment_purchase"].includes(originalType)) return Response.json({ error: "Change installment entries from their pay-later plan." }, { status: 409 });
+      if (isLedgerType(originalType)) return Response.json({ error: "Use Update balance on the account to change an opening balance or adjustment." }, { status: 409 });
+      const marker = `${removing ? "deleting" : "editing"}:${crypto.randomUUID()}`;
+      const guard = { id: String(original.id), status: marker };
+      const whileMarked = "EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)";
       const statements = [
-        env.DB.prepare("UPDATE transactions SET status = ? WHERE id = ? AND user_id = ? AND status = 'posted' AND NOT EXISTS (SELECT 1 FROM spare_events WHERE transaction_id = ? AND user_id = ? AND status = 'swept')").bind(correctionMarker, original.id, user.userId, original.id, user.userId),
-        ...balanceStatements(user.userId, original, -1, { id: String(original.id), status: correctionMarker }),
-        env.DB.prepare("INSERT INTO transactions (id, user_id, account_id, destination_account_id, category_id, tag_ids, type, description, amount_cents, date, committed, counts_monthly, recurring_plan_id, spare_change_cents, spare_excluded, replaces_transaction_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(replacementId, user.userId, accountId, moving ? destinationAccountId : null, categoryId, tagIds.json, type, text(payload.description, "Corrected transaction"), amount, text(payload.date, actionToday), committed ? 1 : 0, countsBudget ? 1 : 0, original.recurring_plan_id || null, spare, spareExcluded ? 1 : 0, original.id, original.id, user.userId, correctionMarker),
-        ...balanceStatements(user.userId, replacement, 1, { id: replacementId, status: "posted" }),
+        env.DB.prepare("UPDATE transactions SET status = ? WHERE id = ? AND user_id = ? AND status = 'posted'").bind(marker, original.id, user.userId),
+        ...balanceStatements(user.userId, original, -1, guard),
       ];
-      if (oldSpare?.status === "pending") statements.push(env.DB.prepare("UPDATE spare_events SET status = 'cancelled' WHERE transaction_id = ? AND user_id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(original.id, user.userId, original.id, user.userId, correctionMarker));
-      if (spare) statements.push(env.DB.prepare("INSERT INTO spare_events (id, user_id, transaction_id, multiplied_cents) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ? AND user_id = ? AND status = ?)").bind(crypto.randomUUID(), user.userId, replacementId, spare, original.id, user.userId, correctionMarker));
-      if (typeChanged) statements.push(env.DB.prepare("DELETE FROM v3_assignments WHERE transaction_id=? AND user_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND user_id=? AND status='posted')").bind(original.id,user.userId,replacementId,user.userId));
-      else statements.push(env.DB.prepare('UPDATE v3_assignments SET transaction_id=?,amount_cents=CAST(amount_cents*MIN(1.0,?*1.0/?) AS INTEGER) WHERE transaction_id=? AND user_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,amount,original.amount_cents,original.id,user.userId,replacementId,'posted'));
-      statements.push(env.DB.prepare('UPDATE v3_occurrences SET paid_cents=paid_cents+?,amount_cents=amount_cents+?,transaction_id=CASE WHEN transaction_id=? THEN ? ELSE transaction_id END WHERE user_id=? AND id IN (SELECT occurrence_id FROM v3_payment_links WHERE transaction_id=? AND user_id=?) AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(amount-Number(original.amount_cents),amount-Number(original.amount_cents),original.id,replacementId,user.userId,original.id,user.userId,replacementId,'posted'));
-      statements.push(env.DB.prepare('UPDATE v3_payment_links SET transaction_id=? WHERE user_id=? AND transaction_id=? AND EXISTS(SELECT 1 FROM transactions WHERE id=? AND status=?)').bind(replacementId,user.userId,original.id,replacementId,'posted'));
-      statements.push(env.DB.prepare("UPDATE transactions SET status = 'corrected' WHERE id = ? AND user_id = ? AND status = ?").bind(original.id, user.userId, correctionMarker));
+
+      if (removing) {
+        // A paid plan payment becomes due again for the amount this transaction covered.
+        const links = await env.DB.prepare("SELECT o.id, o.source_kind, o.source_id, o.scheduled_date FROM v3_payment_links l JOIN v3_occurrences o ON o.id = l.occurrence_id AND o.user_id = l.user_id WHERE l.transaction_id = ? AND l.user_id = ?").bind(original.id, user.userId).all<{ id: string; source_kind: string; source_id: string; scheduled_date: string }>();
+        statements.push(
+          env.DB.prepare(`UPDATE v3_occurrences SET paid_cents = MAX(0, paid_cents - ?), status = CASE WHEN paid_cents - ? > 0 THEN 'partial' ELSE 'upcoming' END, transaction_id = CASE WHEN transaction_id = ? THEN NULL ELSE transaction_id END WHERE user_id = ? AND id IN (SELECT occurrence_id FROM v3_payment_links WHERE transaction_id = ? AND user_id = ?) AND ${whileMarked}`).bind(original.amount_cents, original.amount_cents, original.id, user.userId, original.id, user.userId, original.id, user.userId, marker),
+          ...links.results.filter(link => link.source_kind === "recurring").map(link => env.DB.prepare(`UPDATE recurring_plans SET next_date = MIN(next_date, ?) WHERE id = ? AND user_id = ? AND active = 1 AND ${whileMarked}`).bind(link.scheduled_date, link.source_id, user.userId, original.id, user.userId, marker)),
+          env.DB.prepare(`DELETE FROM v3_payment_links WHERE transaction_id = ? AND user_id = ? AND ${whileMarked}`).bind(original.id, user.userId, original.id, user.userId, marker),
+          env.DB.prepare(`DELETE FROM v3_assignments WHERE transaction_id = ? AND user_id = ? AND ${whileMarked}`).bind(original.id, user.userId, original.id, user.userId, marker),
+          env.DB.prepare("DELETE FROM transactions WHERE id = ? AND user_id = ? AND status = ?").bind(original.id, user.userId, marker),
+        );
+      } else {
+        if (!calendarDate(payload.date) || String(payload.date) > actionToday) return Response.json({error:"Use today or an earlier date for recorded activity. Add a plan for future payments."}, {status:400});
+        const type = text(payload.type, originalType);
+        if (!["expense", "income", "transfer", "saving", "investment"].includes(type)) return Response.json({ error: "Choose a valid transaction type." }, { status: 400 });
+        const typeChanged = type !== originalType;
+        if (typeChanged) {
+          const linked = await env.DB.prepare("SELECT 1 AS linked FROM v3_payment_links WHERE transaction_id = ? AND user_id = ? LIMIT 1").bind(original.id, user.userId).first();
+          if (original.recurring_plan_id || linked) return Response.json({ error: "This payment is linked to a plan. Its type must stay consistent with that plan." }, { status: 409 });
+        }
+        const categoryKind = type === "income" ? "income" : type === "expense" ? "expense" : null;
+        const categoryId = categoryKind ? (!typeChanged && payload.categoryId === original.category_id ? original.category_id : await categoryIdFor(user.userId, payload.categoryId, categoryKind)) : null;
+        // Without a tag choice the transaction keeps its tags.
+        const tagIds = Object.hasOwn(payload, "tagIds") ? await tagIdsFor(user.userId, payload.tagIds, original.tag_ids) : { json: String(original.tag_ids ?? "[]") };
+        if ("error" in tagIds) return Response.json({ error: tagIds.error }, { status: 400 });
+        const amount = cents(payload.amount);
+        const accountId = text(payload.accountId);
+        const destinationAccountId = text(payload.destinationAccountId);
+        const moving = ["transfer", "saving", "investment"].includes(type);
+        if (!amount || !accountId || (moving && (!destinationAccountId || destinationAccountId === accountId))) return Response.json({ error: "Enter a valid amount and account selection." }, { status: 400 });
+        const matchingAccounts = await env.DB.prepare("SELECT COUNT(*) AS total FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, accountId, moving ? destinationAccountId : accountId).first<{total:number}>();
+        if (Number(matchingAccounts?.total || 0) !== (moving ? 2 : 1)) return Response.json({ error: "One of those accounts is not available." }, { status: 400 });
+        const committed = type === "expense" && bool(payload.committed);
+        const countsBudget = ["expense", "saving", "investment"].includes(type) && !bool(payload.excludeFromBudget, !typeChanged && Number(original.counts_monthly) === 0);
+        const edited = { type, amount_cents: amount, account_id: accountId, destination_account_id: moving ? destinationAccountId : null };
+        const difference = amount - Number(original.amount_cents);
+        statements.push(
+          ...balanceStatements(user.userId, edited, 1, guard),
+          typeChanged
+            ? env.DB.prepare(`DELETE FROM v3_assignments WHERE transaction_id = ? AND user_id = ? AND ${whileMarked}`).bind(original.id, user.userId, original.id, user.userId, marker)
+            : env.DB.prepare(`UPDATE v3_assignments SET amount_cents = CAST(amount_cents * MIN(1.0, ? * 1.0 / ?) AS INTEGER) WHERE transaction_id = ? AND user_id = ? AND ${whileMarked}`).bind(amount, original.amount_cents, original.id, user.userId, original.id, user.userId, marker),
+          env.DB.prepare(`UPDATE v3_occurrences SET paid_cents = paid_cents + ?, amount_cents = amount_cents + ? WHERE user_id = ? AND id IN (SELECT occurrence_id FROM v3_payment_links WHERE transaction_id = ? AND user_id = ?) AND ${whileMarked}`).bind(difference, difference, user.userId, original.id, user.userId, original.id, user.userId, marker),
+          env.DB.prepare("UPDATE transactions SET type = ?, account_id = ?, destination_account_id = ?, category_id = ?, tag_ids = ?, description = ?, amount_cents = ?, date = ?, committed = ?, counts_monthly = ?, status = 'posted' WHERE id = ? AND user_id = ? AND status = ?")
+            .bind(type, accountId, moving ? destinationAccountId : null, categoryId, tagIds.json, text(payload.description, String(original.description)), amount, String(payload.date), committed ? 1 : 0, countsBudget ? 1 : 0, original.id, user.userId, marker),
+        );
+      }
       const results = await env.DB.batch(statements);
       if (Number(results[0].meta.changes) === 0) return Response.json({ error: "That transaction changed while you were editing it. Reopen it and try again." }, { status: 409 });
     } else if (action === "addRecurring") {
@@ -879,23 +866,18 @@ export async function POST(request: Request) {
       await env.DB.prepare("UPDATE profiles SET timezone = ? WHERE user_id = ?").bind(timezone, user.userId).run();
     } else if (action === "updateSpare") {
       const enabled = bool(payload.enabled);
-      const autoSweep = bool(payload.autoSweep);
-      const threshold = autoSweep ? Math.round(Number(payload.autoSweepThreshold) * 100) : 0;
-      if (autoSweep && (!Number.isSafeInteger(threshold) || threshold < 1)) return Response.json({ error: "Enter an automatic sweep threshold of at least 0.01." }, { status: 400 });
       const sourceId = text(payload.sourceAccountId) || null;
       const destinationId = text(payload.destinationAccountId) || null;
-      if ((enabled || autoSweep) && (!sourceId || !destinationId)) return Response.json({ error: "Choose the account whose expenses earn round-ups and a savings or investment destination." }, { status: 400 });
+      if (enabled && (!sourceId || !destinationId)) return Response.json({ error: "Choose the account whose expenses earn round-ups and a savings or investment destination." }, { status: 400 });
       if (sourceId && sourceId === destinationId) return Response.json({ error: "Choose a destination different from the spending account." }, { status: 400 });
       const selected = await env.DB.prepare("SELECT id, type, archived FROM accounts WHERE user_id = ? AND id IN (?, ?)").bind(user.userId, sourceId, destinationId).all<{id:string;type:string;archived:number}>();
       const accountsById = new Map(selected.results.map(account => [account.id, account]));
       const source = sourceId ? accountsById.get(sourceId) : null;
       const destination = destinationId ? accountsById.get(destinationId) : null;
-      if (sourceId && (!source || source.archived || ["investment", "credit"].includes(source.type))) return Response.json({ error: "Choose an active spending account that can fund the sweep." }, { status: 400 });
+      if (sourceId && (!source || source.archived || ["investment", "credit"].includes(source.type))) return Response.json({ error: "Choose an active spending account for round-ups." }, { status: 400 });
       if (destinationId && (!destination || destination.archived || !["savings", "investment"].includes(destination.type))) return Response.json({ error: "Choose an active savings or investment destination." }, { status: 400 });
-      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_multiplier = ?, spare_destination_id = ?, spare_auto_sweep_threshold_cents = ? WHERE user_id = ?")
-        .bind(enabled ? 1 : 0, sourceId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, threshold, user.userId).run();
-    } else if (action === "sweepSpare") {
-      if (!await sweepSpare(user.userId, actionToday)) return Response.json({ error: "Nothing was swept. Check the waiting amount and the spending account balance." }, { status: 409 });
+      await env.DB.prepare("UPDATE profiles SET spare_enabled = ?, spare_source_id = ?, spare_multiplier = ?, spare_destination_id = ? WHERE user_id = ?")
+        .bind(enabled ? 1 : 0, sourceId, Math.max(1, Math.min(20, Number(payload.multiplier) || 1)), destinationId, user.userId).run();
     } else if (action === "addGoal") {
       const fields = await goalFields(user.userId, payload, actionToday);
       if ("error" in fields) return Response.json({ error: fields.error }, { status: 400 });

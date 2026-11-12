@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
+import * as spareHelpers from '../app/spare-change.ts';
+globalThis.__ledgerSpare = spareHelpers;
 import { reportingClass, isLedgerType } from '../app/transaction-classification.ts';
 import { accountFlow } from '../app/investment-valuations.ts';
 import * as defaultNames from '../app/default-names.ts';
@@ -100,6 +102,7 @@ const getUser = async () => ({ userId: 'owner', displayName: 'Test', email: 'tes
 const ensureFinanceSchema = async () => {};
 const financialToday = () => '2026-10-08';
 const reconcileV3 = async () => {};
+const { spareRoundUpCents, spareTransferStatements } = globalThis.__ledgerSpare;
 const v3Snapshot = async () => ({});
 const isLedgerType = (type) => ['opening_balance', 'balance_adjustment'].includes(type);
 const { defaultAccountName, defaultCategories, defaultPlanName, nameLanguage, otherNames } = globalThis.__ledgerNames;
@@ -185,3 +188,41 @@ test('Switching language renames only the defaults the user never changed', asyn
   assert.deepEqual(names(), { 'c-groceries': 'Groceries', 'c-salary': 'Salary', 'c-pets': 'Pets', 'c-health': 'Health', 'c-health-el': 'Υγεία' });
   assert.equal(planName('v-main'), 'Main plan');
 });
+
+for (const [directory, migration] of [['drizzle', '0030'], ['cloudflare/migrations', '0015']]) {
+  test(`${directory}: in-place migration removes hidden transactions and their dependents`, () => {
+    const db = new DatabaseSync(':memory:');
+    const files = fs.readdirSync(directory).filter(name => name.endsWith('.sql')).sort();
+    for (const file of files.filter(name => name < migration)) db.exec(fs.readFileSync(path.join(directory, file), 'utf8'));
+    for (const [id, status] of [['posted', 'posted'], ['hidden', 'corrected']]) {
+      db.prepare("INSERT INTO transactions(id,user_id,type,description,amount_cents,date,status) VALUES(?,'u','expense','Test',100,'2026-09-01',?)").run(id, status);
+      db.prepare("INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES(?,'u',?,'bucket',100)").run(`${id}-assignment`, id);
+      db.prepare("INSERT INTO v3_payment_links(transaction_id,user_id,occurrence_id) VALUES(?,'u',?)").run(id, `${id}-occurrence`);
+    }
+    for (const file of files.filter(name => name >= migration)) db.exec(fs.readFileSync(path.join(directory, file), 'utf8'));
+    assert.deepEqual(db.prepare('SELECT id,status FROM transactions').all().map(row => ({ ...row })), [{ id: 'posted', status: 'posted' }]);
+    for (const table of ['v3_assignments', 'v3_payment_links'])
+      assert.deepEqual(db.prepare(`SELECT transaction_id FROM ${table}`).all().map(row => row.transaction_id), ['posted']);
+    assert.equal(db.prepare('PRAGMA table_info(transactions)').all().some(column => column.name === 'replaces_transaction_id'), false);
+    db.close();
+  });
+}
+
+for (const [directory, migration] of [['drizzle','0030'],['cloudflare/migrations','0015']]) {
+ test(`${directory}: pending spare pot is transferred once during migration`,()=>{
+  const db=new DatabaseSync(':memory:'); const files=fs.readdirSync(directory).filter(name=>name.endsWith('.sql')).sort();
+  for(const file of files.filter(name=>name<migration)) db.exec(fs.readFileSync(path.join(directory,file),'utf8'));
+  for(const [owner,dest,status] of [['pending','pending-dest','pending'],['swept','swept-dest','swept'],['no-dest',null,'pending']]) {
+   db.prepare('INSERT INTO profiles(user_id,spare_source_id,spare_destination_id) VALUES(?,?,?)').run(owner,`${owner}-source`,dest);
+   for(const [id,type] of [[`${owner}-source`,'bank'],[`${owner}-dest`,'savings']]) db.prepare('INSERT INTO accounts(id,user_id,name,type,balance_cents) VALUES(?,?,?,?,0)').run(id,owner,id,type);
+   db.prepare("INSERT INTO transactions(id,user_id,type,description,amount_cents,date) VALUES(?,?,'expense','Purchase',100,'2026-09-17')").run(`${owner}-tx`,owner);
+   db.prepare('INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents,status) VALUES(?,?,?,?,?)').run(`${owner}-event`,owner,`${owner}-tx`,100,status);
+  }
+  for(const file of files.filter(name=>name>=migration)) db.exec(fs.readFileSync(path.join(directory,file),'utf8'));
+  assert.deepEqual(db.prepare("SELECT user_id,type,amount_cents FROM transactions WHERE description='Spare change'").all().map(r=>({...r})),[{user_id:'pending',type:'saving',amount_cents:100}]);
+  assert.deepEqual(db.prepare('SELECT id,balance_cents FROM accounts ORDER BY id').all().map(r=>r.balance_cents),[0,0,100,-100,0,0]);
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='spare_events'").get(),undefined);
+  for(const [table,columns] of [['profiles',['spare_auto_sweep_threshold_cents']],['transactions',['spare_change_cents','spare_excluded','replaces_transaction_id']]]) for(const column of columns) assert.ok(!db.prepare(`PRAGMA table_info(${table})`).all().some(r=>r.name===column));
+  db.close();
+ });
+}

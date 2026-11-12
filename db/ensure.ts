@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 const requiredTables = [
   "profiles", "accounts", "categories", "transactions",
   "investment_valuation_snapshots", "recurring_plans", "installment_plans",
-  "installment_payments", "goals", "goal_entries", "spare_events", "v3_versions",
+  "installment_payments", "goals", "goal_entries", "v3_versions",
   "v3_periods", "v3_bucket_templates", "v3_bucket_periods",
   "v3_assignments", "v3_occurrences", "v3_events", "v3_payment_links",
   "tags",
@@ -13,16 +13,15 @@ const requiredTables = [
 const retiredTables = [
   "budget_rules", "expense_reserves", "expense_reserve_periods",
   "forecast_scenarios", "v3_migrations", "v3_ledger_entries",
-  "v3_opening_anchors", "tag_groups",
+  "v3_opening_anchors", "tag_groups", "spare_events",
 ] as const;
 const retiredColumns: Record<string, string[]> = {
-  profiles: ["spare_sweep_mode", "spare_threshold_cents"],
+  profiles: ["spare_sweep_mode", "spare_threshold_cents", "spare_auto_sweep_threshold_cents"],
   accounts: ["opening_balance_cents", "icon"],
   categories: ["icon"],
-  transactions: ["counts_daily", "counts_weekly", "counts_general"],
+  transactions: ["counts_daily", "counts_weekly", "counts_general", "replaces_transaction_id", "spare_change_cents", "spare_excluded"],
   installment_plans: ["include_daily_weekly"],
   installment_payments: ["paid_transaction_id"],
-  spare_events: ["destination_account_id", "base_cents"],
   v3_bucket_templates: ["category_id"],
   v3_bucket_periods: ["category_id"],
   tags: ["group_id"],

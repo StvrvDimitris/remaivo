@@ -620,8 +620,8 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-app :is(.statistics-controls, .allocation-strip > div, .description-list > div, .trend-chart > div, .goal-entry-history, .goal-entry-history article, .valuation-history, .valuation-history article) { border-color: var(--line); }
 .v3-equation .total, .v3-app .ranked-bars > button, .v3-app .ranked-bars > div > button { color: var(--ink); }
 .v3-mini-progress, .v3-app :is(.ranked-track, .weekday-bars > div > i) { background: var(--theme-soft); }
-.v3-app :is(.allocation-strip, .week-band-grid > div, .concentration-grid > div, .insight-panel li > span, .correction-note, .locked-summary, .budget-unavailable) { background: var(--theme-soft); }
-.v3-app :is(.goal-period, .goal-kind, .goal-grid article > small, .goal-grid article > p, .goal-entry-history small, .valuation-history small, .description-list small, .ranked-bars small, .weekday-bars small, .week-band-grid span, .week-band-grid small, .concentration-grid small, .insight-panel li p, .empty-mini, .empty-state, .stat-loading, .budget-form-note small, .correction-note small, .locked-summary small) { color: var(--muted); }
+.v3-app :is(.allocation-strip, .week-band-grid > div, .concentration-grid > div, .insight-panel li > span, .locked-summary, .budget-unavailable) { background: var(--theme-soft); }
+.v3-app :is(.goal-period, .goal-kind, .goal-grid article > small, .goal-grid article > p, .goal-entry-history small, .valuation-history small, .description-list small, .ranked-bars small, .weekday-bars small, .week-band-grid span, .week-band-grid small, .concentration-grid small, .insight-panel li p, .empty-mini, .empty-state, .stat-loading, .budget-form-note small, .locked-summary small) { color: var(--muted); }
 .v3-app .goal-record-button { background: var(--theme-soft); border-color: var(--line); color: var(--green); }
 .v3-app .goal-record-button:hover, .v3-app .editable-record:hover { background: var(--theme-hover); border-color: var(--line); }
 .v3-app .trend-bar.comparison { background: var(--theme-chart-muted); }
@@ -635,8 +635,6 @@ body { font-family: var(--font-geist-sans, "Segoe UI"), "Segoe UI", Arial, sans-
 .v3-app .spare-toggle-track { background: var(--theme-chart-secondary); }
 .v3-app .spare-toggle input:checked + .spare-toggle-track { background: var(--green); }
 .v3-app .spare-toggle input:focus-visible + .spare-toggle-track { outline: 3px solid var(--theme-focus); }
-.v3-app .spare-hero :is(.eyebrow, .spare-sweep-status), .v3-app .spare-hero > div > p:not(.eyebrow) { color: var(--theme-hero-muted); }
-.v3-app .spare-actions .ghost-button { background: transparent; color: #fff; border-color: #ffffff40; }
 .v3-app .spare-orbit :is(span, small) { color: #20242e; }
 .v3-app .modal-error, .v3-alert { background: var(--theme-negative-soft); border-color: var(--theme-negative); color: var(--theme-negative); }
 .v3-alert.warning { background: var(--theme-soft); border-color: var(--line); color: var(--ink); }
@@ -666,3 +664,5 @@ html:is([data-theme="midnight"], [data-theme="obsidian"]) .v3-app .category-clou
  .v3-theme-title { align-self: end; margin-top: 0; }
  .v3-theme-option > small { align-self: start; }
 }
+
+.v3-app .spare-hero .eyebrow, .v3-app .spare-hero > div > p:not(.eyebrow) { color: var(--theme-hero-muted); }
