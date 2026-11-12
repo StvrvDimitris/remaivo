@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+**Editing transactions**
+- Editing a transaction now changes it in place, and **Delete transaction** removes it. Balances, budgets, spare change, bucket splits and linked plan payments update as if it had been entered that way, or never entered. Deleting a paid plan payment makes that payment due again.
+- Corrections no longer leave hidden copies behind; existing copies are removed when you update, which keeps backups smaller. They never counted towards balances or reports.
+- A purchase whose spare change was already swept keeps its amount, account and type, but its description, date, category and tags can still change.
+
 **Subcategories**
 - A category can hold subcategories, one level deep: Food › Groceries, Food › Delivery. Set it with **Inside** when you add or edit a category.
 - A bucket on a main category covers its subcategories; a bucket can also cover a single subcategory.

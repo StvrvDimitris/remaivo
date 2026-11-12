@@ -1155,5 +1155,16 @@ export const greek: Record<string,string> = {
   "Choose a category": "Επιλέξτε κατηγορία",
   "No categories of this type yet. Add one in Settings.": "Δεν υπάρχουν ακόμη κατηγορίες αυτού του τύπου. Προσθέστε μία στις Ρυθμίσεις.",
   "Tap again to choose another category": "Πατήστε ξανά για άλλη κατηγορία",
-  "Tap again to choose only the main category": "Πατήστε ξανά για μόνο την κύρια κατηγορία"
+  "Tap again to choose only the main category": "Πατήστε ξανά για μόνο την κύρια κατηγορία",
+  "EDIT TRANSACTION": "ΕΠΕΞΕΡΓΑΣΙΑ ΣΥΝΑΛΛΑΓΗΣ",
+  "Changes update account balances, budgets and plans as if it had been entered this way.": "Οι αλλαγές ενημερώνουν υπόλοιπα, προϋπολογισμούς και πλάνα σαν να είχε καταχωριστεί έτσι.",
+  "Balances follow the new type and its bucket assignments are cleared. Linked plan payments and completed spare-change sweeps cannot change type.": "Τα υπόλοιπα ακολουθούν τον νέο τύπο και οι αναθέσεις σε φακέλους καθαρίζονται. Οι συνδεδεμένες πληρωμές πλάνων και οι ολοκληρωμένες μεταφορές ρέστων δεν αλλάζουν τύπο.",
+  "Delete this transaction": "Διαγραφή αυτής της συναλλαγής",
+  "Balances, budgets and plans update as if it never happened.": "Υπόλοιπα, προϋπολογισμοί και πλάνα ενημερώνονται σαν να μην έγινε ποτέ.",
+  "Delete transaction": "Διαγραφή συναλλαγής",
+  "This can’t be undone.": "Δεν αναιρείται.",
+  "That transaction is no longer available.": "Αυτή η συναλλαγή δεν είναι πλέον διαθέσιμη.",
+  "Change installment entries from their pay-later plan.": "Αλλάξτε τις καταχωρίσεις δόσεων από το πλάνο πληρωμής τους.",
+  "Use Update balance on the account to change an opening balance or adjustment.": "Χρησιμοποιήστε την Ενημέρωση υπολοίπου στον λογαριασμό για να αλλάξετε αρχικό υπόλοιπο ή προσαρμογή.",
+  "This transaction’s spare change has already been swept, so its amount, account and type stay as they are. Its description, date, category and tags can still change.": "Τα ρέστα αυτής της συναλλαγής έχουν ήδη μεταφερθεί, οπότε το ποσό, ο λογαριασμός και ο τύπος της μένουν ίδια. Η περιγραφή, η ημερομηνία, η κατηγορία και οι ετικέτες μπορούν να αλλάξουν."
 };

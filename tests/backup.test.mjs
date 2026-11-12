@@ -137,7 +137,7 @@ test('A backup holds every profile and every table of user data, but no sign-in 
   const before = copy(rowsFor('alice'));
   const backup = copy(await exportBackup());
   assert.equal(backup.format, 'remaivo-backup');
-  assert.equal(backup.version, 6);
+  assert.equal(backup.version, 7);
   assert.ok(!Number.isNaN(Date.parse(backup.exportedAt)));
   assert.deepEqual(backup.profiles, [
     { userId: 'alice', name: 'Alice', color: '#123456', icon: 'A', owner: true },
@@ -279,7 +279,7 @@ test('A bad file is refused before anything changes', async () => {
     await assert.rejects(previewRestore('alice', file), BackupError);
     await assert.rejects(restoreBackup('alice', file), BackupError);
   }
-  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 7; })), /newer version/);
+  await assert.rejects(restoreBackup('alice', edited(file => { file.version = 8; })), /newer version/);
   await assert.rejects(restoreBackup('alice', edited(file => { file.tables.accounts[0]['name" = 1; DROP TABLE accounts; --'] = 'x'; })), /no longer uses/);
   assert.deepEqual(copy(rowsFor('alice')), before);
 });
@@ -326,4 +326,22 @@ test('Version 5 grouped tags restore with unique flat names', async () => {
  await restoreBackup('alice',backup);
  const names=sqlite.prepare("SELECT name FROM tags WHERE user_id='alice'").all().map(row=>row.name);
  assert.equal(names.length,2); assert.equal(new Set(names).size,2);
+});
+
+test('Version 6 restore removes corrected transactions and their dependent rows', async () => {
+  household();
+  const backup = copy(await exportBackup());
+  backup.version = 6;
+  const posted = backup.tables.transactions.find(row => row.user_id === 'alice');
+  posted.replaces_transaction_id = 'hidden';
+  backup.tables.transactions.push({ ...posted, id: 'hidden', status: 'corrected', replaces_transaction_id: null });
+  backup.tables.spare_events.push({ ...backup.tables.spare_events.find(row => row.user_id === 'alice'), id: 'hidden-spare', transaction_id: 'hidden' });
+  backup.tables.v3_assignments.push({ ...backup.tables.v3_assignments.find(row => row.user_id === 'alice'), id: 'hidden-assignment', transaction_id: 'hidden' });
+  backup.tables.v3_payment_links.push({ ...backup.tables.v3_payment_links.find(row => row.user_id === 'alice'), transaction_id: 'hidden' });
+  await restoreBackup('alice', backup);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE id='hidden'").get().n, 0);
+  for (const table of ['spare_events', 'v3_assignments', 'v3_payment_links'])
+    assert.equal(sqlite.prepare(`SELECT COUNT(*) n FROM ${table} WHERE transaction_id='hidden'`).get().n, 0);
+  assert.ok(sqlite.prepare('SELECT id FROM transactions WHERE id=?').get(posted.id));
+  assert.equal(sqlite.prepare('PRAGMA table_info(transactions)').all().some(column => column.name === 'replaces_transaction_id'), false);
 });

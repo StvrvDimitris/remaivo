@@ -19,7 +19,7 @@ const retiredColumns: Record<string, string[]> = {
   profiles: ["spare_sweep_mode", "spare_threshold_cents"],
   accounts: ["opening_balance_cents", "icon"],
   categories: ["icon"],
-  transactions: ["counts_daily", "counts_weekly", "counts_general"],
+  transactions: ["counts_daily", "counts_weekly", "counts_general", "replaces_transaction_id"],
   installment_plans: ["include_daily_weekly"],
   installment_payments: ["paid_transaction_id"],
   spare_events: ["destination_account_id", "base_cents"],

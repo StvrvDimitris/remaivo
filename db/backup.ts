@@ -14,7 +14,11 @@ const ADDED_IN: Partial<Record<(typeof TABLES)[number], number>> = { tags: 5 };
 // Version 5 backups held tag groups, which became plain tags in version 6.
 const DROPPED_IN_6 = { tables: ["tag_groups"], columns: { tags: ["group_id"] } as Record<string, string[]> };
 
-const BACKUP_VERSION = 6;
+// Version 7 edits transactions in place, so earlier files may hold hidden
+// corrected copies and the column that linked them; both are dropped.
+const DROPPED_IN_7 = { columns: { transactions: ["replaces_transaction_id"] } as Record<string, string[]> };
+
+const BACKUP_VERSION = 7;
 const OLDEST_VERSION = 3;
 const MAX_PROFILES = 5;
 const OWNER_SUB = "password:owner";
@@ -108,6 +112,12 @@ async function planRestore(user: string, file: unknown): Promise<RestorePlan> {
 
   const version = file.version;
   const given = { ...(file.tables as Record<string, unknown>) };
+  if (version < 7 && Array.isArray(given.transactions)) {
+    const hidden = new Set((given.transactions as unknown[]).filter(row => isObject(row) && row.status !== undefined && row.status !== "posted").map(row => (row as Record<string, unknown>).id));
+    const keep = (rows: unknown) => Array.isArray(rows) ? rows.filter(row => !isObject(row) || !hidden.has(row.transaction_id)) : rows;
+    given.transactions = (given.transactions as unknown[]).filter(row => !isObject(row) || !hidden.has(row.id)).map(row => isObject(row) ? Object.fromEntries(Object.entries(row).filter(([name]) => !DROPPED_IN_7.columns.transactions.includes(name))) : row);
+    for (const table of ["spare_events", "v3_assignments", "v3_payment_links"]) given[table] = keep(given[table]);
+  }
   if (version < 6) {
     for (const table of DROPPED_IN_6.tables) delete given[table];
     for (const [table, names] of Object.entries(DROPPED_IN_6.columns)) {

@@ -88,7 +88,6 @@ export const transactions = sqliteTable("transactions", {
   countsMonthly: integer("counts_monthly", { mode: "boolean" }).notNull().default(true),
   recurringPlanId: text("recurring_plan_id"),
   installmentPlanId: text("installment_plan_id"),
-  replacesTransactionId: text("replaces_transaction_id"),
   spareChangeCents: integer("spare_change_cents").notNull().default(0),
   spareExcluded: integer("spare_excluded", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

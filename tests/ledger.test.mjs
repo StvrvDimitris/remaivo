@@ -185,3 +185,23 @@ test('Switching language renames only the defaults the user never changed', asyn
   assert.deepEqual(names(), { 'c-groceries': 'Groceries', 'c-salary': 'Salary', 'c-pets': 'Pets', 'c-health': 'Health', 'c-health-el': 'Υγεία' });
   assert.equal(planName('v-main'), 'Main plan');
 });
+
+for (const [directory, migration] of [['drizzle', '0030'], ['cloudflare/migrations', '0015']]) {
+  test(`${directory}: in-place migration removes hidden transactions and their dependents`, () => {
+    const db = new DatabaseSync(':memory:');
+    const files = fs.readdirSync(directory).filter(name => name.endsWith('.sql')).sort();
+    for (const file of files.filter(name => name < migration)) db.exec(fs.readFileSync(path.join(directory, file), 'utf8'));
+    for (const [id, status] of [['posted', 'posted'], ['hidden', 'corrected']]) {
+      db.prepare("INSERT INTO transactions(id,user_id,type,description,amount_cents,date,status) VALUES(?,'u','expense','Test',100,'2026-09-01',?)").run(id, status);
+      db.prepare("INSERT INTO spare_events(id,user_id,transaction_id,multiplied_cents) VALUES(?,'u',?,10)").run(`${id}-spare`, id);
+      db.prepare("INSERT INTO v3_assignments(id,user_id,transaction_id,bucket_id,amount_cents) VALUES(?,'u',?,'bucket',100)").run(`${id}-assignment`, id);
+      db.prepare("INSERT INTO v3_payment_links(transaction_id,user_id,occurrence_id) VALUES(?,'u',?)").run(id, `${id}-occurrence`);
+    }
+    for (const file of files.filter(name => name >= migration)) db.exec(fs.readFileSync(path.join(directory, file), 'utf8'));
+    assert.deepEqual(db.prepare('SELECT id,status FROM transactions').all().map(row => ({ ...row })), [{ id: 'posted', status: 'posted' }]);
+    for (const table of ['spare_events', 'v3_assignments', 'v3_payment_links'])
+      assert.deepEqual(db.prepare(`SELECT transaction_id FROM ${table}`).all().map(row => row.transaction_id), ['posted']);
+    assert.equal(db.prepare('PRAGMA table_info(transactions)').all().some(column => column.name === 'replaces_transaction_id'), false);
+    db.close();
+  });
+}
