@@ -203,6 +203,16 @@ html[data-theme="midnight"] {
 .v3-spend-chart-legend i.spent { background: var(--theme-accent); }
 .v3-spend-chart-legend i.pace { background: var(--theme-muted); }
 .v3-spend-chart-legend i.target { background: var(--theme-negative); }
+.v3-spend-chart-legend i:is(.gap-over, .gap-under) { height: 8px; border-radius: 2px; }
+.v3-spend-chart-legend i.gap-over { background: color-mix(in srgb, var(--theme-negative) 40%, transparent); }
+.v3-spend-chart-legend i.gap-under { background: color-mix(in srgb, var(--pro-chart-positive) 45%, transparent); }
+/* Green where spending is below even pace, red where it is above. */
+.v3-spend-chart .gap-over { fill: var(--theme-negative); fill-opacity: .22; }
+.v3-spend-chart .gap-under { fill: var(--pro-chart-positive); fill-opacity: .28; }
+.v3-spend-chart .zone-label.over { fill: var(--theme-negative); }
+.v3-spend-chart .zone-label.under { fill: var(--theme-positive); }
+.v3-spend-chart-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.v3-spend-chart-actions .mini-toggle button { min-height: 26px; padding: 0 10px; font-size: .75rem; }
 
 .v3-app .v3-two-columns { gap: 20px; }
 .v3-app .v3-two-columns > .v3-card { display: flex; flex-direction: column; }

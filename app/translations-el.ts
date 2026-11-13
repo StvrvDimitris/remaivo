@@ -1176,5 +1176,12 @@ export const greek: Record<string,string> = {
   "Change installment entries from their pay-later plan.": "Αλλάξτε τις καταχωρίσεις δόσεων από το πλάνο πληρωμής τους.",
   "Use Update balance on the account to change an opening balance or adjustment.": "Χρησιμοποιήστε την Ενημέρωση υπολοίπου στον λογαριασμό για να αλλάξετε αρχικό υπόλοιπο ή προσαρμογή.",
   "This transaction’s spare change has already been swept, so its amount, account and type stay as they are. Its description, date, category and tags can still change.": "Τα ρέστα αυτής της συναλλαγής έχουν ήδη μεταφερθεί, οπότε το ποσό, ο λογαριασμός και ο τύπος της μένουν ίδια. Η περιγραφή, η ημερομηνία, η κατηγορία και οι ετικέτες μπορούν να αλλάξουν.",
-  "Moved": "Μεταφορές"
+  "Moved": "Μεταφορές",
+  "Vs pace": "Έναντι ρυθμού",
+  "Chart view": "Προβολή γραφήματος",
+  "Gap from even pace": "Απόκλιση από τον σταθερό ρυθμό",
+  "Spending faster": "Ταχύτερα έξοδα",
+  "Spending slower": "Πιο αργά έξοδα",
+  "Faster than even pace": "Ταχύτερα από τον σταθερό ρυθμό",
+  "Slower than even pace": "Πιο αργά από τον σταθερό ρυθμό"
 };
