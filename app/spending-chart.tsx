@@ -38,8 +38,9 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
   const clip = useId().replace(/:/g, "");
   // The chart renders only in the browser, after the plan loads, so the saved
   // choice can be read when it starts.
+  // Vs pace opens by default; Total sticks once chosen in this browser.
   const [view, setView] = useState<"total" | "pace">(() => {
-    try { return typeof window !== "undefined" && localStorage.getItem(VIEW_KEY) === "pace" ? "pace" : "total"; } catch { return "total"; }
+    try { return typeof window !== "undefined" && localStorage.getItem(VIEW_KEY) === "total" ? "total" : "pace"; } catch { return "pace"; }
   });
   const choose = (next: "total" | "pace") => {
     setView(next);
@@ -151,7 +152,7 @@ export function SpendingChart({ start, end, today, target, spent, transactions, 
       </div>
       <div className="v3-spend-chart-actions">
         {pace && status && <span className={`v3-pace-pill ${status}`}><i />{status === "on" ? tr("On even pace") : `${money(Math.abs(pace.paceDifference), currency, locale)} ${tr(status === "above" ? "above even pace" : "below even pace")}`}</span>}
-        {showPace && <div className="mini-toggle" role="group" aria-label={tr("Chart view")}>{([["total", "Total"], ["pace", "Vs pace"]] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} className={view === value ? "active" : ""} onClick={() => choose(value)}>{tr(label)}</button>)}</div>}
+        {showPace && <div className="mini-toggle" role="group" aria-label={tr("Chart view")}>{([["pace", "Vs pace"], ["total", "Total"]] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} className={view === value ? "active" : ""} onClick={() => choose(value)}>{tr(label)}</button>)}</div>}
       </div>
     </div>
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary}>{chart}</svg>
